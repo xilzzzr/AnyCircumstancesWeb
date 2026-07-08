@@ -126,11 +126,15 @@ export function SignupPage() {
 }
 
 sessionStorage.setItem('pending_verify_email', email);
+sessionStorage.setItem('pending_verify_password', password);
 
 toast({
   title: 'Account created',
   description: 'Please check your email to verify your account.',
 });
+
+navigate('/verify-email');
+
 
 navigate('/verify-email');
     } catch {
@@ -153,7 +157,7 @@ navigate('/verify-email');
               <div className="h-10 w-10 rounded-xl bg-gradient-security flex items-center justify-center shadow-glow">
                 <Shield className="h-5 w-5 text-primary-foreground" />
               </div>
-              <span className="font-semibold text-xl text-foreground">UnderAnyCircumstance</span>
+              <span className="font-semibold text-xl text-foreground">anycircumstances</span>
             </Link>
             <h1 className="text-2xl font-bold text-foreground mb-2">Create your vault</h1>
             <p className="text-muted-foreground">Start protecting your important files today</p>

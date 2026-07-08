@@ -1,11 +1,19 @@
 const express = require("express");
 const mysql = require("mysql2/promise");
+const fs = require("fs");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const nodemailer = require("nodemailer");
-
+const Stripe = require("stripe");
+const { escapeHtml, renderAnyCircumstancesEmail } = require("./emails");
 const router = express.Router();
+
+function asyncHandler(fn) {
+  return function (req, res, next) {
+    Promise.resolve(fn(req, res, next)).catch(next);
+  };
+}
 
 const {
   DB_HOST,
@@ -13,6 +21,7 @@ const {
   DB_USER,
   DB_PASSWORD,
   DB_NAME,
+  DB_SSL_CA,
   JWT_ACCESS_SECRET,
   ACCESS_TOKEN_TTL_SECONDS,
   REFRESH_TOKEN_TTL_DAYS,
@@ -25,14 +34,16 @@ const {
   SMTP_USER,
   SMTP_PASS,
   SMTP_SECURE,
-  EMAIL_FROM
+  EMAIL_FROM,
+  STRIPE_SECRET_KEY,
 } = process.env;
 
 if (!DB_HOST || !DB_USER || !DB_NAME || !JWT_ACCESS_SECRET) {
   throw new Error("Missing required env vars: DB_HOST, DB_USER, DB_NAME, JWT_ACCESS_SECRET");
 }
 
-const pool = mysql.createPool({
+const dbPoolConfig = {
+  connectTimeout: 10000,
   host: DB_HOST,
   port: DB_PORT ? Number(DB_PORT) : 3306,
   user: DB_USER,
@@ -40,14 +51,27 @@ const pool = mysql.createPool({
   database: DB_NAME,
   waitForConnections: true,
   connectionLimit: 10,
-  queueLimit: 0
-});
+  queueLimit: 0,
+};
+
+const sslCaPath = String(DB_SSL_CA || "").trim();
+if (sslCaPath) {
+  dbPoolConfig.ssl = { ca: fs.readFileSync(sslCaPath) };
+} else if (String(DB_HOST || "").includes("rds.amazonaws.com")) {
+  dbPoolConfig.ssl = { ca: fs.readFileSync("/etc/ssl/certs/rds-global-bundle.pem") };
+}
+
+const pool = mysql.createPool(dbPoolConfig);
 
 const accessTtlSeconds = ACCESS_TOKEN_TTL_SECONDS ? Number(ACCESS_TOKEN_TTL_SECONDS) : 900;
 const refreshTtlDays = REFRESH_TOKEN_TTL_DAYS ? Number(REFRESH_TOKEN_TTL_DAYS) : 30;
-const cookieSecure = (COOKIE_SECURE || "").toLowerCase() === "true";
+const cookieSecure = String(COOKIE_SECURE || "").toLowerCase() === "true";
 const cookieDomain = COOKIE_DOMAIN || undefined;
-const publicApiBaseUrl = PUBLIC_API_BASE_URL || "http://localhost:3001";
+
+const publicApiBaseUrl = (PUBLIC_API_BASE_URL || "http://localhost:3002").replace(/\/+$/, "");
+const publicWebBaseUrl = (PUBLIC_WEB_BASE_URL || "https://anycircumstances.com").replace(/\/+$/, "");
+
+const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
 
 function logError(context, err) {
   const meta = {
@@ -56,10 +80,71 @@ function logError(context, err) {
     message: err?.message,
     code: err?.code,
     errno: err?.errno,
-    sqlState: err?.sqlState
+    sqlState: err?.sqlState,
   };
   console.error("[AUTH ERROR]", meta);
   if (err?.stack) console.error(err.stack);
+}
+
+function nowUtc() {
+  return new Date();
+}
+
+function addDays(d, days) {
+  const x = new Date(d.getTime());
+  x.setUTCDate(x.getUTCDate() + days);
+  return x;
+}
+
+function addHours(d, hours) {
+  const x = new Date(d.getTime());
+  x.setUTCHours(x.getUTCHours() + hours);
+  return x;
+}
+
+function sha256Hex(input) {
+  return crypto.createHash("sha256").update(String(input), "utf8").digest("hex");
+}
+function normalizeEmail(email) {
+  return String(email || "").trim().toLowerCase();
+}
+
+function validateEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function isSixDigitCode(code) {
+  return /^\d{6}$/.test(String(code || ""));
+}
+
+function genSixDigitCode() {
+  const n = crypto.randomInt(0, 1000000);
+  return String(n).padStart(6, "0");
+}
+
+function signAccessToken(payload) {
+  return jwt.sign(payload, JWT_ACCESS_SECRET, { expiresIn: accessTtlSeconds });
+}
+
+function cookieOptions(maxAgeMs) {
+  return {
+    httpOnly: true,
+    secure: cookieSecure,
+    sameSite: "lax",
+    domain: cookieDomain,
+    path: "/",
+    maxAge: maxAgeMs,
+  };
+}
+
+function setAuthCookies(res, accessToken, refreshToken) {
+  res.cookie("access_token", accessToken, cookieOptions(accessTtlSeconds * 1000));
+  res.cookie("refresh_token", refreshToken, cookieOptions(refreshTtlDays * 24 * 60 * 60 * 1000));
+}
+
+function clearAuthCookies(res) {
+  res.clearCookie("access_token", { domain: cookieDomain, path: "/" });
+  res.clearCookie("refresh_token", { domain: cookieDomain, path: "/" });
 }
 
 let _mailer = null;
@@ -78,7 +163,7 @@ function getMailer() {
     host,
     port,
     secure,
-    auth: { user, pass }
+    auth: { user, pass },
   });
 
   return _mailer;
@@ -86,91 +171,55 @@ function getMailer() {
 
 async function sendVerificationEmail(toEmail, code, verifyUrl) {
   const transporter = getMailer();
-  const from = EMAIL_FROM || `UnderAnyCircumstance <${SMTP_USER || "no-reply@localhost"}>`;
+  const from = EMAIL_FROM || `anycircumstances <${SMTP_USER || "no-reply@localhost"}>`;
 
   if (!transporter) {
     console.error("[MAILER] Missing SMTP env vars; skipping email send. Use verify_code_dev_only instead.");
     return { ok: false, skipped: true };
   }
 
-  const subject = "Your UnderAnyCircumstance verification code";
-  const text =
-    `Your verification code is: ${code}\n\n` +
-    `You can also verify by opening this link:\n${verifyUrl}\n\n` +
-    `If you did not request this, you can ignore this email.\n`;
+  const subject = "Your anycircumstances verification code";
+const rendered = renderAnyCircumstancesEmail({
+  title: "Verify your email",
+  bodyHtml:
+    `<p style="margin:0 0 12px;">Your verification code:</p>` +
+    `<div style="font-family:Arial,Helvetica,sans-serif;font-size:28px;font-weight:800;letter-spacing:2px;background:#f1f5f9;color:#0b1220;padding:12px 14px;border-radius:14px;display:inline-block;">${escapeHtml(code)}</div>` +
+    `<p style="margin:14px 0 0;">Or verify instantly using the button below.</p>`,
+  ctaText: "Verify email",
+  ctaUrl: verifyUrl,
+  footerNote: "If you didn’t request this, you can ignore this email."
+});
 
-  const html =
-    `<p>Your verification code is:</p>` +
-    `<p style="font-size:22px;font-weight:700;letter-spacing:2px">${code}</p>` +
-    `<p>You can also verify by opening this link:</p>` +
-    `<p><a href="${verifyUrl}">${verifyUrl}</a></p>` +
-    `<p>If you did not request this, you can ignore this email.</p>`;
-
-  await transporter.sendMail({
-    from,
-    to: toEmail,
-    subject,
-    text,
-    html
-  });
-
+const text = rendered.text;
+const html = rendered.html;
+  await transporter.sendMail({ from, to: toEmail, subject, text, html });
   return { ok: true };
 }
 
-function nowUtc() {
-  return new Date();
-}
+async function sendPasswordResetEmail(toEmail, resetUrl) {
+  const transporter = getMailer();
+  const from = EMAIL_FROM || `anycircumstances <${SMTP_USER || "no-reply@localhost"}>`;
 
-function addDays(d, days) {
-  const x = new Date(d.getTime());
-  x.setUTCDate(x.getUTCDate() + days);
-  return x;
-}
+  if (!transporter) {
+    console.error("[MAILER] Missing SMTP env vars; skipping password reset email.");
+    return { ok: false, skipped: true };
+  }
 
-function sha256Hex(input) {
-  return crypto.createHash("sha256").update(input).digest("hex");
-}
+  const subject = "Reset your anycircumstances password";
+const rendered = renderAnyCircumstancesEmail({
+  title: "Reset your password",
+  bodyHtml:
+    `<p style="margin:0 0 12px;">We received a request to reset your password.</p>` +
+    `<p style="margin:0;">Use the button below to choose a new password.</p>`,
+  ctaText: "Reset password",
+  ctaUrl: resetUrl,
+  footerNote: "If you didn’t request this, you can ignore this email."
+});
 
-function normalizeEmail(email) {
-  return String(email || "").trim().toLowerCase();
-}
-
-function validateEmail(email) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-}
-
-function signAccessToken(payload) {
-  return jwt.sign(payload, JWT_ACCESS_SECRET, { expiresIn: accessTtlSeconds });
-}
-
-function cookieOptions(maxAgeMs) {
-  return {
-    httpOnly: true,
-    secure: cookieSecure,
-    sameSite: "lax",
-    domain: cookieDomain,
-    path: "/",
-    maxAge: maxAgeMs
-  };
-}
-
-function setAuthCookies(res, accessToken, refreshToken) {
-  res.cookie("access_token", accessToken, cookieOptions(accessTtlSeconds * 1000));
-  res.cookie("refresh_token", refreshToken, cookieOptions(refreshTtlDays * 24 * 60 * 60 * 1000));
-}
-
-function clearAuthCookies(res) {
-  res.clearCookie("access_token", { domain: cookieDomain, path: "/" });
-  res.clearCookie("refresh_token", { domain: cookieDomain, path: "/" });
-}
-
-function isSixDigitCode(code) {
-  return /^\d{6}$/.test(String(code || ""));
-}
-
-function genSixDigitCode() {
-  const n = crypto.randomInt(0, 1000000);
-  return String(n).padStart(6, "0");
+const text = rendered.text;
+const html = rendered.html;
+  await transporter.sendMail({ from, to: toEmail, subject, text, html });
+  return { ok: true };
 }
 
 async function getUserByEmail(email) {
@@ -182,19 +231,79 @@ async function getUserByEmail(email) {
 }
 
 async function getUserById(userId) {
-  const [rows] = await pool.query(
-    "SELECT id, email, email_verified_at, status FROM users WHERE id = ? LIMIT 1",
-    [userId]
-  );
+  const [rows] = await pool.query("SELECT id, email, email_verified_at, status FROM users WHERE id = ? LIMIT 1", [userId]);
   return rows[0] || null;
 }
 
-async function createEmailVerificationCode(conn, userId) {
-  // Keep only one active code per user
-  await conn.query(
-    "DELETE FROM email_verification_tokens WHERE user_id = ? AND used_at IS NULL",
-    [userId]
+function getUserIdFromAccessCookie(req) {
+  const access = req.cookies?.access_token ? String(req.cookies.access_token) : "";
+  if (!access) return null;
+
+  try {
+    const payload = jwt.verify(access, JWT_ACCESS_SECRET);
+    const userId = payload?.sub ? String(payload.sub) : null;
+    return userId || null;
+  } catch {
+    return null;
+  }
+}
+
+function requireUserId(req, res) {
+  const userId = getUserIdFromAccessCookie(req);
+  if (!userId) {
+    res.status(401).json({ ok: false, error: "not_authenticated" });
+    return null;
+  }
+  return userId;
+}
+
+async function requireActiveSubscription(req, res) {
+  const userId = requireUserId(req, res);
+  if (!userId) return null;
+
+  const [rows] = await pool.query("SELECT status FROM billing_profiles WHERE user_id = ? LIMIT 1", [String(userId)]);
+  const status = rows?.[0]?.status ? String(rows[0].status) : "none";
+
+  if (status !== "active") {
+    res.status(402).json({ ok: false, error: "payment_required" });
+    return null;
+  }
+
+  return userId;
+}
+
+async function ensureBillingProfile(userId) {
+  const uid = String(userId);
+
+  const [rows] = await pool.execute("SELECT user_id FROM billing_profiles WHERE user_id = ? LIMIT 1", [uid]);
+  if (rows.length > 0) return;
+
+  await pool.execute(
+    `INSERT INTO billing_profiles
+      (user_id, status, billing_interval, amount_cents, currency, storage_limit_gb, checkin_frequency, addons_json)
+     VALUES
+      (?, 'pending_setup', 'monthly', 0, 'usd', 5, 'monthly', JSON_ARRAY())`,
+    [uid]
   );
+}
+
+async function ensureBillingProfileConn(conn, userId) {
+  const uid = String(userId);
+
+  const [rows] = await conn.execute("SELECT user_id FROM billing_profiles WHERE user_id = ? LIMIT 1", [uid]);
+  if (rows.length > 0) return;
+
+  await conn.execute(
+    `INSERT INTO billing_profiles
+      (user_id, status, billing_interval, amount_cents, currency, storage_limit_gb, checkin_frequency, addons_json)
+     VALUES
+      (?, 'pending_setup', 'monthly', 0, 'usd', 5, 'monthly', JSON_ARRAY())`,
+    [uid]
+  );
+}
+
+async function createEmailVerificationCode(conn, userId) {
+  await conn.query("DELETE FROM email_verification_tokens WHERE user_id = ? AND used_at IS NULL", [userId]);
 
   const expiresAt = addDays(nowUtc(), 2);
 
@@ -203,10 +312,11 @@ async function createEmailVerificationCode(conn, userId) {
     const tokenHash = sha256Hex(code);
 
     try {
-      await conn.query(
-        "INSERT INTO email_verification_tokens (user_id, token_hash, expires_at) VALUES (?, ?, ?)",
-        [userId, tokenHash, expiresAt]
-      );
+      await conn.query("INSERT INTO email_verification_tokens (user_id, token_hash, expires_at) VALUES (?, ?, ?)", [
+        userId,
+        tokenHash,
+        expiresAt,
+      ]);
       return code;
     } catch (e) {
       if (e && (e.code === "ER_DUP_ENTRY" || e.errno === 1062)) continue;
@@ -231,10 +341,7 @@ async function consumeEmailVerificationForUser(conn, userId, code) {
   if (new Date(row.expires_at).getTime() < nowUtc().getTime()) return { ok: false, reason: "expired" };
 
   await conn.query("UPDATE email_verification_tokens SET used_at = NOW() WHERE id = ?", [row.id]);
-  await conn.query(
-    "UPDATE users SET email_verified_at = NOW() WHERE id = ? AND email_verified_at IS NULL",
-    [userId]
-  );
+  await conn.query("UPDATE users SET email_verified_at = NOW() WHERE id = ? AND email_verified_at IS NULL", [userId]);
 
   return { ok: true };
 }
@@ -253,10 +360,7 @@ async function consumeEmailVerificationByTokenOnly(conn, rawToken) {
   if (new Date(row.expires_at).getTime() < nowUtc().getTime()) return { ok: false, reason: "expired" };
 
   await conn.query("UPDATE email_verification_tokens SET used_at = NOW() WHERE id = ?", [row.id]);
-  await conn.query(
-    "UPDATE users SET email_verified_at = NOW() WHERE id = ? AND email_verified_at IS NULL",
-    [row.user_id]
-  );
+  await conn.query("UPDATE users SET email_verified_at = NOW() WHERE id = ? AND email_verified_at IS NULL", [row.user_id]);
 
   return { ok: true };
 }
@@ -265,19 +369,19 @@ async function issueRefreshToken(conn, userId) {
   const raw = crypto.randomBytes(48).toString("base64url");
   const tokenHash = sha256Hex(raw);
   const expiresAt = addDays(nowUtc(), refreshTtlDays);
-  await conn.query(
-    "INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES (?, ?, ?)",
-    [userId, tokenHash, expiresAt]
-  );
+
+  await conn.query("INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES (?, ?, ?)", [
+    userId,
+    tokenHash,
+    expiresAt,
+  ]);
+
   return raw;
 }
 
 async function revokeRefreshToken(conn, raw) {
   const tokenHash = sha256Hex(raw);
-  await conn.query(
-    "UPDATE refresh_tokens SET revoked_at = NOW() WHERE token_hash = ? AND revoked_at IS NULL",
-    [tokenHash]
-  );
+  await conn.query("UPDATE refresh_tokens SET revoked_at = NOW() WHERE token_hash = ? AND revoked_at IS NULL", [tokenHash]);
 }
 
 async function rotateRefreshToken(conn, raw) {
@@ -287,6 +391,7 @@ async function rotateRefreshToken(conn, raw) {
     [tokenHash]
   );
   const row = rows[0];
+
   if (!row) return { ok: false, reason: "invalid_refresh" };
   if (row.revoked_at) return { ok: false, reason: "revoked_refresh" };
   if (new Date(row.expires_at).getTime() < nowUtc().getTime()) return { ok: false, reason: "expired_refresh" };
@@ -296,8 +401,60 @@ async function rotateRefreshToken(conn, raw) {
   return { ok: true, userId: row.user_id, newRefresh: newRaw };
 }
 
-router.post("/register", async (req, res) => {
-  try {
+function genResetToken() {
+  return crypto.randomBytes(48).toString("base64url");
+}
+
+async function createPasswordResetToken(conn, userId) {
+  await conn.query("DELETE FROM password_reset_tokens WHERE user_id = ? AND used_at IS NULL", [userId]);
+
+  const expiresAt = addHours(nowUtc(), 2);
+
+  for (let i = 0; i < 10; i++) {
+    const raw = genResetToken();
+    const tokenHash = sha256Hex(raw);
+
+    try {
+      await conn.query("INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES (?, ?, ?)", [
+        userId,
+        tokenHash,
+        expiresAt,
+      ]);
+      return raw;
+    } catch (e) {
+      if (e && (e.code === "ER_DUP_ENTRY" || e.errno === 1062)) continue;
+      throw e;
+    }
+  }
+
+  throw new Error("Failed to generate unique password reset token");
+}
+
+async function consumePasswordResetToken(conn, rawToken, newPassword) {
+  const tokenHash = sha256Hex(rawToken);
+
+  const [rows] = await conn.query(
+    "SELECT id, user_id, expires_at, used_at FROM password_reset_tokens WHERE token_hash = ? LIMIT 1",
+    [tokenHash]
+  );
+
+  const row = rows[0];
+  if (!row) return { ok: false, reason: "invalid_token" };
+  if (row.used_at) return { ok: false, reason: "already_used" };
+  if (new Date(row.expires_at).getTime() < nowUtc().getTime()) return { ok: false, reason: "expired" };
+
+  const passwordHash = await bcrypt.hash(newPassword, 12);
+
+  await conn.query("UPDATE password_reset_tokens SET used_at = NOW() WHERE id = ?", [row.id]);
+  await conn.query("UPDATE users SET password_hash = ? WHERE id = ? LIMIT 1", [passwordHash, row.user_id]);
+  await conn.query("UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = ? AND revoked_at IS NULL", [row.user_id]);
+
+  return { ok: true, userId: row.user_id };
+}
+
+router.post(
+  "/register",
+  asyncHandler(async (req, res) => {
     const email = normalizeEmail(req.body?.email);
     const password = String(req.body?.password || "");
 
@@ -312,6 +469,7 @@ router.post("/register", async (req, res) => {
     const conn = await pool.getConnection();
     let verifyCode = "";
     let verifyUrl = "";
+
     try {
       await conn.beginTransaction();
 
@@ -321,6 +479,9 @@ router.post("/register", async (req, res) => {
       );
 
       const userId = result.insertId;
+
+      await ensureBillingProfileConn(conn, userId);
+
       verifyCode = await createEmailVerificationCode(conn, userId);
       verifyUrl = `${publicApiBaseUrl}/auth/verify-email?token=${encodeURIComponent(verifyCode)}`;
 
@@ -329,7 +490,8 @@ router.post("/register", async (req, res) => {
       try {
         await conn.rollback();
       } catch {}
-      throw e;
+      logError("register", e);
+      return res.status(500).json({ ok: false, error: "server_error" });
     } finally {
       conn.release();
     }
@@ -348,17 +510,14 @@ router.post("/register", async (req, res) => {
       needs_email_verification: true,
       email_sent: emailSent,
       verify_code_dev_only: verifyCode,
-      verify_url_dev_only: verifyUrl
+      verify_url_dev_only: verifyUrl,
     });
-  } catch (e) {
-    logError("register", e);
-    return res.status(500).json({ ok: false, error: "server_error" });
-  }
-});
+  })
+);
 
-// Verify via link (token is now the 6-digit code)
-router.get("/verify-email", async (req, res) => {
-  try {
+router.get(
+  "/verify-email",
+  asyncHandler(async (req, res) => {
     const token = String(req.query?.token || "");
     if (!token || !isSixDigitCode(token)) return res.status(400).json({ ok: false, error: "invalid_code" });
 
@@ -378,19 +537,17 @@ router.get("/verify-email", async (req, res) => {
       try {
         await conn.rollback();
       } catch {}
-      throw e;
+      logError("verify-email", e);
+      return res.status(500).json({ ok: false, error: "server_error" });
     } finally {
       conn.release();
     }
-  } catch (e) {
-    logError("verify-email", e);
-    return res.status(500).json({ ok: false, error: "server_error" });
-  }
-});
+  })
+);
 
-// Verify via code entry (frontend will call this)
-router.post("/verify-email-code", async (req, res) => {
-  try {
+router.post(
+  "/verify-email-code",
+  asyncHandler(async (req, res) => {
     const email = normalizeEmail(req.body?.email);
     const code = String(req.body?.code || "");
 
@@ -399,36 +556,42 @@ router.post("/verify-email-code", async (req, res) => {
 
     const user = await getUserByEmail(email);
     if (!user) return res.status(400).json({ ok: false, error: "invalid_code" });
-    if (user.email_verified_at) return res.json({ ok: true });
+    if (user.status !== "active") return res.status(403).json({ ok: false, error: "account_disabled" });
 
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
 
-      const out = await consumeEmailVerificationForUser(conn, user.id, code);
-      if (!out.ok) {
-        await conn.rollback();
-        return res.status(400).json({ ok: false, error: out.reason });
+      if (!user.email_verified_at) {
+        const out = await consumeEmailVerificationForUser(conn, user.id, code);
+        if (!out.ok) {
+          await conn.rollback();
+          return res.status(400).json({ ok: false, error: out.reason });
+        }
       }
 
+      const refresh = await issueRefreshToken(conn, user.id);
+      const access = signAccessToken({ sub: String(user.id), email: user.email });
+
       await conn.commit();
+
+      setAuthCookies(res, access, refresh);
       return res.json({ ok: true });
     } catch (e) {
       try {
         await conn.rollback();
       } catch {}
-      throw e;
+      logError("verify-email-code", e);
+      return res.status(500).json({ ok: false, error: "server_error" });
     } finally {
       conn.release();
     }
-  } catch (e) {
-    logError("verify-email-code", e);
-    return res.status(500).json({ ok: false, error: "server_error" });
-  }
-});
+  })
+);
 
-router.post("/login", async (req, res) => {
-  try {
+router.post(
+  "/login",
+  asyncHandler(async (req, res) => {
     const email = normalizeEmail(req.body?.email);
     const password = String(req.body?.password || "");
 
@@ -458,47 +621,17 @@ router.post("/login", async (req, res) => {
       try {
         await conn.rollback();
       } catch {}
-      throw e;
+      logError("login", e);
+      return res.status(500).json({ ok: false, error: "server_error" });
     } finally {
       conn.release();
     }
-  } catch (e) {
-    logError("login", e);
-    return res.status(500).json({ ok: false, error: "server_error" });
-  }
-});
+  })
+);
 
-router.post("/set-pin", async (req, res) => {
-  try {
-    const access = req.cookies?.access_token ? String(req.cookies.access_token) : "";
-    if (!access) return res.status(401).json({ ok: false, error: "not_authenticated" });
-
-    let payload;
-    try {
-      payload = jwt.verify(access, JWT_ACCESS_SECRET);
-    } catch {
-      return res.status(401).json({ ok: false, error: "invalid_session" });
-    }
-
-    const userId = payload?.sub ? String(payload.sub) : "";
-    if (!userId) return res.status(401).json({ ok: false, error: "invalid_session" });
-
-    const pin = String(req.body?.pin || "");
-    if (!/^\d{4,6}$/.test(pin)) return res.status(400).json({ ok: false, error: "invalid_pin" });
-
-    const pinHash = await bcrypt.hash(pin, 12);
-
-    await pool.query("UPDATE users SET pin_hash = ? WHERE id = ? LIMIT 1", [pinHash, userId]);
-
-    return res.json({ ok: true });
-  } catch (e) {
-    logError("set-pin", e);
-    return res.status(500).json({ ok: false, error: "server_error" });
-  }
-});
-
-router.post("/refresh", async (req, res) => {
-  try {
+router.post(
+  "/refresh",
+  asyncHandler(async (req, res) => {
     const raw = req.cookies?.refresh_token ? String(req.cookies.refresh_token) : "";
     if (!raw) return res.status(401).json({ ok: false, error: "missing_refresh" });
 
@@ -530,20 +663,20 @@ router.post("/refresh", async (req, res) => {
       try {
         await conn.rollback();
       } catch {}
-      throw e;
+      logError("refresh", e);
+      return res.status(500).json({ ok: false, error: "server_error" });
     } finally {
       conn.release();
     }
-  } catch (e) {
-    logError("refresh", e);
-    return res.status(500).json({ ok: false, error: "server_error" });
-  }
-});
+  })
+);
 
-router.post("/logout", async (req, res) => {
-  try {
+router.post(
+  "/logout",
+  asyncHandler(async (req, res) => {
     const raw = req.cookies?.refresh_token ? String(req.cookies.refresh_token) : "";
     const conn = await pool.getConnection();
+
     try {
       await conn.beginTransaction();
       if (raw) await revokeRefreshToken(conn, raw);
@@ -556,17 +689,15 @@ router.post("/logout", async (req, res) => {
     } finally {
       conn.release();
     }
-    clearAuthCookies(res);
-    return res.json({ ok: true });
-  } catch (e) {
-    logError("logout", e);
-    clearAuthCookies(res);
-    return res.json({ ok: true });
-  }
-});
 
-router.post("/resend-verification", async (req, res) => {
-  try {
+    clearAuthCookies(res);
+    return res.json({ ok: true });
+  })
+);
+
+router.post(
+  "/resend-verification",
+  asyncHandler(async (req, res) => {
     const email = normalizeEmail(req.body?.email);
     if (!validateEmail(email)) return res.status(400).json({ ok: false, error: "invalid_email" });
 
@@ -578,6 +709,7 @@ router.post("/resend-verification", async (req, res) => {
     const conn = await pool.getConnection();
     let verifyCode = "";
     let verifyUrl = "";
+
     try {
       await conn.beginTransaction();
 
@@ -589,7 +721,8 @@ router.post("/resend-verification", async (req, res) => {
       try {
         await conn.rollback();
       } catch {}
-      throw e;
+      logError("resend-verification", e);
+      return res.status(500).json({ ok: false, error: "server_error" });
     } finally {
       conn.release();
     }
@@ -603,31 +736,1208 @@ router.post("/resend-verification", async (req, res) => {
       emailSent = false;
     }
 
-    return res.json({ ok: true, email_sent: emailSent, verify_code_dev_only: verifyCode, verify_url_dev_only: verifyUrl });
-  } catch (e) {
-    logError("resend-verification", e);
-    return res.status(500).json({ ok: false, error: "server_error" });
-  }
-});
+    return res.json({
+      ok: true,
+      email_sent: emailSent,
+      verify_code_dev_only: verifyCode,
+      verify_url_dev_only: verifyUrl,
+    });
+  })
+);
 
-function getUserIdFromAccessCookie(req) {
-  const access = req.cookies?.access_token ? String(req.cookies.access_token) : "";
-  if (!access) return null;
+router.post(
+  "/set-pin",
+  asyncHandler(async (req, res) => {
+    const userId = requireUserId(req, res);
+    if (!userId) return;
 
-  try {
-    const payload = jwt.verify(access, JWT_ACCESS_SECRET);
-    const userId = payload?.sub ? String(payload.sub) : null;
-    return userId || null;
-  } catch {
-    return null;
-  }
+    const pin = String(req.body?.pin || "");
+    if (!/^\d{4,6}$/.test(pin)) return res.status(400).json({ ok: false, error: "invalid_pin" });
+
+    const pinHash = await bcrypt.hash(pin, 12);
+    await pool.query("UPDATE users SET pin_hash = ? WHERE id = ? LIMIT 1", [pinHash, String(userId)]);
+
+    return res.json({ ok: true });
+  })
+);
+
+router.post(
+  "/set-panic-pin",
+  asyncHandler(async (req, res) => {
+    const userId = requireUserId(req, res);
+    if (!userId) return;
+
+    const pin = String(req.body?.pin || "");
+    if (!/^\d{4,6}$/.test(pin)) return res.status(400).json({ ok: false, error: "invalid_pin" });
+
+    const pinHash = await bcrypt.hash(pin, 12);
+    await pool.query("UPDATE users SET panic_pin_hash = ? WHERE id = ? LIMIT 1", [pinHash, String(userId)]);
+
+    return res.json({ ok: true });
+  })
+);
+
+router.post(
+  "/password-reset/request",
+  asyncHandler(async (req, res) => {
+    const email = normalizeEmail(req.body?.email);
+    if (!validateEmail(email)) return res.status(400).json({ ok: false, error: "invalid_email" });
+
+    const user = await getUserByEmail(email);
+
+    if (!user || user.status !== "active" || !user.email_verified_at) {
+      return res.json({ ok: true, email_sent: true });
+    }
+
+    const conn = await pool.getConnection();
+    let rawToken = "";
+    let resetUrl = "";
+
+    try {
+      await conn.beginTransaction();
+
+      rawToken = await createPasswordResetToken(conn, user.id);
+      resetUrl = `${publicWebBaseUrl}/reset-password?token=${encodeURIComponent(rawToken)}`;
+
+      await conn.commit();
+    } catch (e) {
+      try {
+        await conn.rollback();
+      } catch {}
+      logError("password-reset:request", e);
+      return res.status(500).json({ ok: false, error: "server_error" });
+    } finally {
+      conn.release();
+    }
+
+    let emailSent = false;
+    try {
+      const out = await sendPasswordResetEmail(email, resetUrl);
+      emailSent = !!out?.ok;
+    } catch (e) {
+      logError("sendPasswordResetEmail(request)", e);
+      emailSent = false;
+    }
+
+    return res.json({
+      ok: true,
+      email_sent: emailSent,
+      reset_token_dev_only: rawToken,
+      reset_url_dev_only: resetUrl,
+    });
+  })
+);
+
+router.post(
+  "/password-reset/confirm",
+  asyncHandler(async (req, res) => {
+    const token = String(req.body?.token || "");
+    const newPassword = String(req.body?.password || "");
+
+    if (!/^[A-Za-z0-9_-]{20,200}$/.test(token)) {
+      return res.status(400).json({ ok: false, error: "invalid_token" });
+    }
+
+    if (newPassword.length < 10) {
+      return res.status(400).json({ ok: false, error: "weak_password" });
+    }
+
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+
+      const out = await consumePasswordResetToken(conn, token, newPassword);
+      if (!out.ok) {
+        await conn.rollback();
+        return res.status(400).json({ ok: false, error: out.reason });
+      }
+
+      await conn.commit();
+    } catch (e) {
+      try {
+        await conn.rollback();
+      } catch {}
+      logError("password-reset:confirm", e);
+      return res.status(500).json({ ok: false, error: "server_error" });
+    } finally {
+      conn.release();
+    }
+
+    clearAuthCookies(res);
+    return res.json({ ok: true });
+  })
+);
+
+function daysForFrequency(freq) {
+  if (freq === "daily") return 1;
+  if (freq === "weekly") return 7;
+  return 30;
 }
 
-async function createEmergencyContactVerificationCode(conn, contactId) {
-  await conn.query(
-    "DELETE FROM emergency_contact_verification_tokens WHERE contact_id = ? AND used_at IS NULL",
-    [contactId]
+function isValidFrequency(freq) {
+  return freq === "daily" || freq === "weekly" || freq === "monthly";
+}
+
+function isValidGraceHours(n) {
+  return Number.isInteger(n) && n >= 6 && n <= 72 && n % 6 === 0;
+}
+
+function isValidReminders(n) {
+  return Number.isInteger(n) && n >= 1 && n <= 5;
+}
+
+async function getVerificationSettingsRow(userId) {
+  const [rows] = await pool.query(
+    "SELECT user_id, frequency, grace_period_hours, reminders, last_checkin_at, next_due_at FROM verification_settings WHERE user_id = ? LIMIT 1",
+    [String(userId)]
   );
+  return rows[0] || null;
+}
+
+function normalizeBillingFrequency(freq) {
+  const f = String(freq || "").toLowerCase();
+  if (f === "daily") return "daily";
+  if (f === "weekly") return "weekly";
+  if (f === "monthly") return "monthly";
+  return null;
+}
+
+async function getPaidCheckinFrequency(userId) {
+  const [rows] = await pool.query(
+    "SELECT checkin_frequency, status FROM billing_profiles WHERE user_id = ? LIMIT 1",
+    [String(userId)]
+  );
+  if (!rows[0]) return null;
+  if (String(rows[0].status || "") !== "active") return null;
+  return normalizeBillingFrequency(rows[0].checkin_frequency) || null;
+}
+
+async function syncVerificationFromBilling(userId) {
+  const paid = await getPaidCheckinFrequency(userId);
+  if (!paid) return;
+
+  const existing = await getVerificationSettingsRow(userId);
+  const now = nowUtc();
+
+  const freqChanged = existing && String(existing.frequency || "") !== paid;
+
+  let nextDue = null;
+
+  if (existing?.last_checkin_at) {
+    nextDue = addDays(new Date(existing.last_checkin_at), daysForFrequency(paid));
+  } else if (!freqChanged && existing?.next_due_at && new Date(existing.next_due_at).getTime() > now.getTime()) {
+    nextDue = new Date(existing.next_due_at);
+  } else {
+    nextDue = addDays(now, daysForFrequency(paid));
+  }
+
+  const grace = existing ? Number(existing.grace_period_hours) : 24;
+  const reminders = existing ? Number(existing.reminders) : 3;
+  const last = existing?.last_checkin_at ? new Date(existing.last_checkin_at) : null;
+
+  await pool.query(
+    "INSERT INTO verification_settings (user_id, frequency, grace_period_hours, reminders, last_checkin_at, next_due_at) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE frequency = VALUES(frequency), grace_period_hours = VALUES(grace_period_hours), reminders = VALUES(reminders), last_checkin_at = verification_settings.last_checkin_at, next_due_at = VALUES(next_due_at)",
+    [String(userId), paid, grace, reminders, last, nextDue]
+  );
+}
+
+
+function settingsDto(row) {
+  return {
+    frequency: row.frequency,
+    gracePeriodHours: Number(row.grace_period_hours),
+    reminders: Number(row.reminders),
+    lastCheckinAt: row.last_checkin_at ? new Date(row.last_checkin_at).toISOString() : null,
+    nextDueAt: row.next_due_at ? new Date(row.next_due_at).toISOString() : null,
+  };
+}
+
+router.get(
+  "/verification-settings",
+  asyncHandler(async (req, res) => {
+    const userId = requireUserId(req, res);
+    if (!userId) return;
+
+    await syncVerificationFromBilling(userId);
+const row = await getVerificationSettingsRow(userId);
+
+    if (!row) {
+      return res.json({
+        ok: true,
+        settings: { frequency: "weekly", gracePeriodHours: 24, reminders: 3, lastCheckinAt: null, nextDueAt: null },
+      });
+    }
+
+    return res.json({ ok: true, settings: settingsDto(row) });
+  })
+);
+
+router.put(
+  "/verification-settings",
+  asyncHandler(async (req, res) => {
+    const userId = requireUserId(req, res);
+    if (!userId) return;
+
+const requestedFrequency = String(req.body?.frequency || "");
+const paidFrequency = await getPaidCheckinFrequency(userId);
+if (requestedFrequency && paidFrequency && requestedFrequency !== paidFrequency) {
+  return res.status(409).json({ ok: false, error: "frequency_locked", frequency: paidFrequency });
+}
+const frequency = paidFrequency || requestedFrequency;
+    const gracePeriodHours = Number(req.body?.gracePeriodHours);
+    const reminders = Number(req.body?.reminders);
+
+if (!isValidFrequency(frequency || "")) return res.status(400).json({ ok: false, error: "invalid_frequency" });
+    if (!isValidGraceHours(gracePeriodHours)) return res.status(400).json({ ok: false, error: "invalid_grace_period" });
+    if (!isValidReminders(reminders)) return res.status(400).json({ ok: false, error: "invalid_reminders" });
+
+const days = daysForFrequency(frequency);
+const existing = await getVerificationSettingsRow(userId);
+const now = nowUtc();
+
+const freqChanged = existing && String(existing.frequency || "") !== String(frequency || "");
+
+let nextDue = null;
+let last = null;
+
+if (existing?.last_checkin_at) {
+  last = new Date(existing.last_checkin_at);
+  nextDue = addDays(last, days);
+} else if (!freqChanged && existing?.next_due_at && new Date(existing.next_due_at).getTime() > now.getTime()) {
+  nextDue = new Date(existing.next_due_at);
+} else {
+  nextDue = addDays(now, days);
+}
+
+    await pool.query(
+      "INSERT INTO verification_settings (user_id, frequency, grace_period_hours, reminders, last_checkin_at, next_due_at) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE frequency = VALUES(frequency), grace_period_hours = VALUES(grace_period_hours), reminders = VALUES(reminders), last_checkin_at = COALESCE(verification_settings.last_checkin_at, VALUES(last_checkin_at)), next_due_at = VALUES(next_due_at)",
+      [String(userId), frequency, gracePeriodHours, reminders, last, nextDue]
+    );
+
+    const saved = await getVerificationSettingsRow(userId);
+    return res.json({ ok: true, settings: saved ? settingsDto(saved) : null });
+  })
+);
+
+router.post(
+  "/verification-check-in",
+  asyncHandler(async (req, res) => {
+    const userId = requireUserId(req, res);
+    if (!userId) return;
+
+    const pin = String(req.body?.pin || "");
+    if (!/^\d{4,6}$/.test(pin)) return res.status(400).json({ ok: false, error: "invalid_pin" });
+
+    const [urows] = await pool.query("SELECT pin_hash, panic_pin_hash FROM users WHERE id = ? LIMIT 1", [String(userId)]);
+    const pinHash = urows?.[0]?.pin_hash ? String(urows[0].pin_hash) : "";
+    const panicHash = urows?.[0]?.panic_pin_hash ? String(urows[0].panic_pin_hash) : "";
+
+    if (!pinHash && !panicHash) return res.status(400).json({ ok: false, error: "pin_not_set" });
+
+    let isPanic = false;
+    let ok = false;
+
+    if (panicHash) {
+      isPanic = await bcrypt.compare(pin, panicHash);
+      if (isPanic) ok = true;
+    }
+
+    if (!ok && pinHash) {
+      ok = await bcrypt.compare(pin, pinHash);
+    }
+
+    if (!ok) return res.status(401).json({ ok: false, error: "invalid_pin" });
+
+    const row = await getVerificationSettingsRow(userId);
+
+    const paidFrequency = await getPaidCheckinFrequency(userId);
+    const frequency = paidFrequency || row?.frequency || "weekly";
+    const gracePeriodHours = row ? Number(row.grace_period_hours) : 24;
+    const reminders = row ? Number(row.reminders) : 3;
+
+    const now = nowUtc();
+    const nextDue = addDays(now, daysForFrequency(frequency));
+
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+
+      await conn.query("INSERT INTO verification_checkins (user_id, method) VALUES (?, 'manual')", [String(userId)]);
+
+      await conn.query(
+        "INSERT INTO verification_settings (user_id, frequency, grace_period_hours, reminders, last_checkin_at, next_due_at) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE frequency = VALUES(frequency), last_checkin_at = VALUES(last_checkin_at), next_due_at = VALUES(next_due_at)",
+        [String(userId), frequency, gracePeriodHours, reminders, now, nextDue]
+      );
+
+      if (isPanic) {
+        const out = await dispatchEmergencyForUser(conn, userId, req);
+        if (!out?.ok) {
+          await conn.rollback();
+          return res.status(500).json({ ok: false, error: out?.error || "server_error" });
+        }
+      }
+
+      await conn.commit();
+    } catch (e) {
+      try {
+        await conn.rollback();
+      } catch {}
+      logError("verification-check-in", e);
+      return res.status(500).json({ ok: false, error: "server_error" });
+    } finally {
+      conn.release();
+    }
+
+    const saved = await getVerificationSettingsRow(userId);
+    return res.json({ ok: true, settings: saved ? settingsDto(saved) : null });
+  })
+);
+
+
+router.get(
+  "/verification-checkins",
+  asyncHandler(async (req, res) => {
+    const userId = requireUserId(req, res);
+    if (!userId) return;
+
+    let limit = Number(req.query?.limit);
+    if (!Number.isFinite(limit)) limit = 50;
+    limit = Math.max(1, Math.min(200, Math.floor(limit)));
+
+    const [rows] = await pool.query(
+      "SELECT id, checked_in_at, method FROM verification_checkins WHERE user_id = ? ORDER BY checked_in_at DESC LIMIT ?",
+      [String(userId), limit]
+    );
+
+    return res.json({
+      ok: true,
+      checkins: rows.map((r) => ({
+        id: String(r.id),
+        checkedInAt: new Date(r.checked_in_at).toISOString(),
+        method: r.method === "email_link" ? "email_link" : "manual",
+      })),
+    });
+  })
+);
+
+router.get(
+  "/verification-status",
+  asyncHandler(async (req, res) => {
+    const userId = requireUserId(req, res);
+    if (!userId) return;
+	await syncVerificationFromBilling(userId);
+
+    const row = await getVerificationSettingsRow(userId);
+    if (!row || !row.next_due_at) {
+      return res.json({
+        ok: true,
+        status: { state: "not_configured", nextDueAt: null, graceEndsAt: null },
+      });
+    }
+
+    const nextDueAt = new Date(row.next_due_at);
+    const graceEndsAt = new Date(nextDueAt.getTime() + Number(row.grace_period_hours) * 60 * 60 * 1000);
+    const now = nowUtc();
+
+    let state = "ok";
+    if (now.getTime() > graceEndsAt.getTime()) state = "expired";
+    else if (now.getTime() > nextDueAt.getTime()) state = "overdue";
+
+    return res.json({
+      ok: true,
+      status: { state, nextDueAt: nextDueAt.toISOString(), graceEndsAt: graceEndsAt.toISOString() },
+    });
+  })
+);
+
+async function listInvoices(userId, limit) {
+  const lim = Number.isFinite(limit) ? Math.max(1, Math.min(200, Number(limit))) : 50;
+
+  const [rows] = await pool.query(
+    "SELECT id, created_at, invoice_url, status, amount_cents, description FROM billing_invoices WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+    [String(userId), lim]
+  );
+
+  return rows.map((r) => ({
+    id: String(r.id),
+    date: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
+    description: r.description ? String(r.description) : "Subscription",
+    amount: Number(r.amount_cents || 0) / 100,
+    status: String(r.status || ""),
+    invoiceUrl: r.invoice_url ? String(r.invoice_url) : null,
+  }));
+}
+
+router.get(
+  "/billing/summary",
+  asyncHandler(async (req, res) => {
+    const userId = requireUserId(req, res);
+    if (!userId) return;
+
+    await ensureBillingProfile(userId);
+
+    const invoices = await listInvoices(userId, Number(req.query?.limit));
+
+    const [rows] = await pool.execute(
+      `SELECT
+        user_id,
+        status,
+        billing_interval,
+        amount_cents,
+        currency,
+        storage_limit_gb,
+        checkin_frequency,
+        addons_json,
+        updated_at
+      FROM billing_profiles
+      WHERE user_id = ?
+      LIMIT 1`,
+      [String(userId)]
+    );
+
+    const r = rows[0] || null;
+
+    const billing = r
+      ? {
+          userId: String(r.user_id),
+          status: String(r.status),
+          billingInterval: String(r.billing_interval),
+          amountCents: Number(r.amount_cents),
+          currency: String(r.currency),
+          storageLimitGb: Number(r.storage_limit_gb),
+          checkInFrequency: String(r.checkin_frequency),
+          addons: Array.isArray(r.addons_json) ? r.addons_json : [],
+          updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : undefined,
+        }
+      : {
+          userId: String(userId),
+          status: "pending_setup",
+          billingInterval: "monthly",
+          amountCents: 0,
+          currency: "usd",
+          storageLimitGb: 5,
+          checkInFrequency: "monthly",
+          addons: [],
+        };
+
+    return res.json({ ok: true, billing, invoices });
+  })
+);
+
+async function createBillingPortalUrl(userId, returnUrl) {
+  if (!stripe) throw new Error("stripe_not_configured");
+
+  const [rows] = await pool.query(
+    "SELECT stripe_customer_id FROM billing_profiles WHERE user_id = ? LIMIT 1",
+    [String(userId)]
+  );
+
+  const customerId = (rows && rows[0] && rows[0].stripe_customer_id) ? String(rows[0].stripe_customer_id) : "";
+  if (!customerId) throw new Error("missing_customer");
+
+  const session = await stripe.billingPortal.sessions.create({
+    customer: customerId,
+    return_url: String(returnUrl || ""),
+  });
+
+  const url = session && session.url ? String(session.url) : "";
+  if (!url) throw new Error("missing_portal_url");
+  return url;
+}
+
+router.post(
+  "/billing/portal",
+  asyncHandler(async (req, res) => {
+    const userId = requireUserId(req, res);
+    if (!userId) return;
+
+    await ensureBillingProfile(userId);
+
+    const returnUrl = `${publicWebBaseUrl}/app/billing`;
+
+    try {
+      const url = await createBillingPortalUrl(userId, returnUrl);
+      return res.json({ ok: true, url });
+    } catch (e) {
+      const code = String(e && e.message ? e.message : "server_error");
+      return res.status(500).json({ ok: false, error: code });
+    }
+  })
+);
+
+
+// --- Update existing plan (DB + Stripe subscription update) ---
+router.post(
+  "/billing/update-plan",
+  asyncHandler(async (req, res) => {
+    const userId = requireUserId(req, res);
+    if (!userId) return;
+
+    await ensureBillingProfile(userId);
+
+    const storageGb = Number(req.body?.storageGb || 5);
+    const checkInFrequency = normalizeFrequency(String(req.body?.checkInFrequency || "monthly"));
+    const billingInterval = normalizeInterval(String(req.body?.billingInterval || "monthly"));
+    const addons = Array.isArray(req.body?.addons) ? req.body.addons.map(String) : [];
+
+    if (!isValidFrequency(checkInFrequency)) {
+      return res.status(400).json({ ok: false, error: "invalid_frequency" });
+    }
+
+    const safeStorageGb = Math.max(5, Math.min(200, Math.round(storageGb / 5) * 5));
+    const storagePrice = computeStoragePrice(safeStorageGb);
+    const frequencyPrice = computeFrequencyPrice(checkInFrequency);
+
+    const monthlyTotal = storagePrice + frequencyPrice;
+    const amountCents = Math.round((billingInterval === "annual" ? monthlyTotal * 10 : monthlyTotal) * 100);
+
+    await pool.query(
+      `UPDATE billing_profiles
+       SET billing_interval = ?, amount_cents = ?, currency = 'usd',
+           storage_limit_gb = ?, checkin_frequency = ?, addons_json = ?,
+           updated_at = UTC_TIMESTAMP()
+       WHERE user_id = ?`,
+      [
+        String(billingInterval),
+        Number(amountCents),
+        Number(safeStorageGb),
+        String(checkInFrequency),
+        JSON.stringify(addons),
+        String(userId),
+      ]
+    );
+
+    await syncVerificationFromBilling(userId);
+
+    const [rows] = await pool.query(
+      "SELECT stripe_subscription_id FROM billing_profiles WHERE user_id = ? LIMIT 1",
+      [String(userId)]
+    );
+    const subId = rows?.[0]?.stripe_subscription_id ? String(rows[0].stripe_subscription_id) : null;
+
+    if (subId && typeof stripe !== "undefined" && stripe) {
+      const sub = await stripe.subscriptions.retrieve(subId, { expand: ["items.data.price"] });
+      const item = sub?.items?.data?.[0];
+      const currentPrice = item?.price;
+
+      if (item?.id && currentPrice?.product) {
+        const interval = billingInterval === "annual" ? "year" : "month";
+        const currency = String(currentPrice.currency || "usd");
+        const dynamicProductId = String(process.env.STRIPE_DYNAMIC_PRODUCT_ID || "");
+
+        // Stripe blocks creating new Prices on inactive Products.
+        // If the product was archived/inactivated, reactivate it so we can create the new Price.
+        const productId =
+          typeof currentPrice.product === "string"
+            ? currentPrice.product
+            : String(currentPrice.product?.id || "");
+
+        if (!productId) {
+          return res.status(500).json({ ok: false, error: "stripe_missing_product" });
+        }
+
+        try {
+          const prod = await stripe.products.retrieve(productId);
+          if (prod && prod.active === false) {
+            await stripe.products.update(productId, { active: true });
+          }
+        } catch (e) {
+          // fall through; Stripe will throw a clearer error if this is still invalid
+        }
+
+        const newPrice = await stripe.prices.create({
+          currency,
+          unit_amount: Number(amountCents),
+          recurring: { interval },
+          product: dynamicProductId || productId,
+        });
+
+        await stripe.subscriptions.update(subId, {
+          items: [{ id: item.id, price: newPrice.id }],
+          proration_behavior: "create_prorations",
+        });
+      }
+    }
+
+    return res.json({ ok: true });
+  })
+);
+
+router.post(
+  "/billing/choose-plan",
+  asyncHandler(async (req, res) => {
+    const userId = requireUserId(req, res);
+    if (!userId) return;
+
+    await ensureBillingProfile(userId);
+
+    const invoices = await listInvoices(userId, Number(req.query?.limit));
+    const [rows] = await pool.execute(
+      `SELECT
+        user_id,
+        status,
+        billing_interval,
+        amount_cents,
+        currency,
+        storage_limit_gb,
+        checkin_frequency,
+        addons_json,
+        updated_at
+      FROM billing_profiles
+      WHERE user_id = ?
+      LIMIT 1`,
+      [String(userId)]
+    );
+
+    const r = rows[0] || null;
+    const billing = r
+      ? {
+          userId: String(r.user_id),
+          status: String(r.status),
+          billingInterval: String(r.billing_interval),
+          amountCents: Number(r.amount_cents),
+          currency: String(r.currency),
+          storageLimitGb: Number(r.storage_limit_gb),
+          checkInFrequency: String(r.checkin_frequency),
+          addons: Array.isArray(r.addons_json) ? r.addons_json : [],
+          updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : undefined,
+        }
+      : {
+          userId: String(userId),
+          status: "pending_setup",
+          billingInterval: "monthly",
+          amountCents: 0,
+          currency: "usd",
+          storageLimitGb: 5,
+          checkInFrequency: "monthly",
+          addons: [],
+        };
+
+    return res.status(400).json({ ok: false, error: "billing_changes_manual_for_now", billing, invoices });
+  })
+);
+
+router.get(
+  "/billing/invoices",
+  asyncHandler(async (req, res) => {
+    const userId = requireUserId(req, res);
+    if (!userId) return;
+
+    const invoices = await listInvoices(userId, Number(req.query?.limit));
+    return res.json({ ok: true, invoices });
+  })
+);
+
+function cents(n) {
+  return Math.round(Number(n) * 100);
+}
+
+function computeStoragePrice(gb) {
+  const tiers = [
+    { gb: 5, price: 4.99 },
+    { gb: 10, price: 7.99 },
+    { gb: 25, price: 12.99 },
+    { gb: 50, price: 17.99 },
+    { gb: 100, price: 22.99 },
+    { gb: 200, price: 29.99 },
+  ];
+
+  const x = Number(gb);
+  if (!Number.isFinite(x)) return tiers[0].price;
+  if (x <= tiers[0].gb) return tiers[0].price;
+  if (x >= tiers[tiers.length - 1].gb) return tiers[tiers.length - 1].price;
+
+  for (let i = tiers.length - 2; i >= 0; i--) {
+    if (x >= tiers[i].gb) {
+      const a = tiers[i];
+      const b = tiers[i + 1];
+      const ratio = (x - a.gb) / (b.gb - a.gb);
+      return a.price + ratio * (b.price - a.price);
+    }
+  }
+
+  return tiers[0].price;
+}
+
+function computeFrequencyPrice(freq) {
+  if (freq === "daily") return 2.99;
+  if (freq === "weekly") return 1.99;
+  return 0.0;
+}
+
+function normalizeFrequency(freq) {
+  if (freq === "daily" || freq === "weekly" || freq === "monthly") return freq;
+  return "monthly";
+}
+
+function normalizeInterval(interval) {
+  if (interval === "annual" || interval === "monthly") return interval;
+  return "monthly";
+}
+
+router.post(
+  "/billing/quote",
+  asyncHandler(async (req, res) => {
+    const userId = requireUserId(req, res);
+    if (!userId) return;
+
+    const storageGb = Number(req.body?.storageGb);
+    const checkInFrequency = normalizeFrequency(String(req.body?.checkInFrequency || "monthly"));
+    const billingInterval = normalizeInterval(String(req.body?.billingInterval || "monthly"));
+
+    const safeStorageGb = Math.max(5, Math.min(200, Math.round(storageGb / 5) * 5));
+    const storagePrice = computeStoragePrice(safeStorageGb);
+    const frequencyPrice = computeFrequencyPrice(checkInFrequency);
+
+    const monthlyTotal = storagePrice + frequencyPrice;
+    const amount = billingInterval === "annual" ? monthlyTotal * 10 : monthlyTotal;
+
+    return res.json({
+      ok: true,
+      storageGb: safeStorageGb,
+      checkInFrequency,
+      billingInterval,
+      monthlyTotal,
+      amount,
+      amountCents: cents(amount),
+    });
+  })
+);
+
+router.post(
+  "/billing/create-checkout-session",
+  asyncHandler(async (req, res) => {
+    const userId = requireUserId(req, res);
+    if (!userId) return;
+
+    if (!stripe) return res.status(500).json({ ok: false, error: "stripe_not_configured" });
+
+    await ensureBillingProfile(userId);
+
+    const storageGb = Number(req.body?.storageGb);
+    const checkInFrequency = normalizeFrequency(String(req.body?.checkInFrequency || "monthly"));
+    const billingInterval = normalizeInterval(String(req.body?.billingInterval || "monthly"));
+    const addons = Array.isArray(req.body?.addons) ? req.body.addons.map(String) : [];
+
+    const safeStorageGb = Math.max(5, Math.min(200, Math.round(storageGb / 5) * 5));
+    const storagePrice = computeStoragePrice(safeStorageGb);
+    const frequencyPrice = computeFrequencyPrice(checkInFrequency);
+
+    const monthlyTotal = storagePrice + frequencyPrice;
+    const amount = billingInterval === "annual" ? monthlyTotal * 10 : monthlyTotal;
+    const unitAmount = Math.max(50, cents(amount));
+
+    const [urows] = await pool.query("SELECT email FROM users WHERE id = ? LIMIT 1", [String(userId)]);
+    const email = urows?.[0]?.email ? String(urows[0].email) : null;
+
+    const [brows] = await pool.query("SELECT stripe_customer_id FROM billing_profiles WHERE user_id = ? LIMIT 1", [
+      String(userId),
+    ]);
+    let customerId = brows?.[0]?.stripe_customer_id ? String(brows[0].stripe_customer_id) : "";
+
+    if (!customerId) {
+      const customer = await stripe.customers.create({
+        email: email || undefined,
+        metadata: { user_id: String(userId) },
+      });
+      customerId = customer.id;
+
+      await pool.query("UPDATE billing_profiles SET stripe_customer_id = ? WHERE user_id = ?", [
+        customerId,
+        String(userId),
+      ]);
+    }
+
+    const successUrl = `${publicWebBaseUrl}/app/billing?checkout=success`;
+    const cancelUrl = `${publicWebBaseUrl}/app/billing?checkout=cancel`;
+
+    const session = await stripe.checkout.sessions.create({
+      mode: "subscription",
+      customer: customerId,
+      client_reference_id: String(userId),
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+      allow_promotion_codes: true,
+      line_items: [
+        {
+          price_data: {
+            currency: "usd",
+            product_data: { name: `anycircumstances Plan (${safeStorageGb} GB)` },
+            unit_amount: unitAmount,
+            recurring: { interval: billingInterval === "annual" ? "year" : "month" },
+          },
+          quantity: 1,
+        },
+      ],
+      subscription_data: {
+        metadata: {
+          user_id: String(userId),
+          storage_gb: String(safeStorageGb),
+          checkin_frequency: checkInFrequency,
+          billing_interval: billingInterval,
+          addons_json: JSON.stringify(addons),
+        },
+      },
+      metadata: { user_id: String(userId) },
+    });
+
+    await pool.query(
+      `UPDATE billing_profiles
+       SET status = CASE WHEN status = 'active' THEN 'active' ELSE 'pending_setup' END,
+           billing_interval = ?,
+           amount_cents = ?,
+           storage_limit_gb = ?,
+           checkin_frequency = ?,
+           addons_json = ?,
+           stripe_price_snapshot_json = ?
+       WHERE user_id = ?`,
+      [
+        billingInterval,
+        unitAmount,
+        safeStorageGb,
+        checkInFrequency,
+        JSON.stringify(addons),
+        JSON.stringify({ unitAmount, billingInterval }),
+        String(userId),
+      ]
+    );
+
+    return res.json({ ok: true, url: session.url });
+  })
+);
+
+router.post(
+  "/billing/create-portal-session",
+  asyncHandler(async (req, res) => {
+    const userId = requireUserId(req, res);
+    if (!userId) return;
+
+    if (!stripe) return res.status(500).json({ ok: false, error: "stripe_not_configured" });
+
+    const [rows] = await pool.query("SELECT stripe_customer_id FROM billing_profiles WHERE user_id = ? LIMIT 1", [
+      String(userId),
+    ]);
+    const customerId = rows?.[0]?.stripe_customer_id ? String(rows[0].stripe_customer_id) : "";
+    if (!customerId) return res.status(400).json({ ok: false, error: "no_customer" });
+
+    const returnUrl = `${publicWebBaseUrl}/app/billing`;
+
+    const portal = await stripe.billingPortal.sessions.create({
+      customer: customerId,
+      return_url: returnUrl,
+    });
+
+    return res.json({ ok: true, url: portal.url });
+  })
+);
+
+router.get(
+  "/billing/status",
+  asyncHandler(async (req, res) => {
+    const userId = requireUserId(req, res);
+    if (!userId) return;
+
+    const [rows] = await pool.query(
+      "SELECT status, current_period_end, stripe_subscription_id FROM billing_profiles WHERE user_id = ? LIMIT 1",
+      [String(userId)]
+    );
+
+    const row = rows?.[0] || null;
+    return res.json({
+      ok: true,
+      status: row?.status || "none",
+      currentPeriodEnd: row?.current_period_end || null,
+      stripeSubscriptionId: row?.stripe_subscription_id || null,
+    });
+  })
+);
+
+router.post(
+  "/unlock-vault",
+  asyncHandler(async (req, res) => {
+    const userId = await requireActiveSubscription(req, res);
+    if (!userId) return;
+
+    const pin = String(req.body?.pin || "").trim();
+    if (!/^\d{4,6}$/.test(pin)) return res.status(400).json({ ok: false, error: "invalid_pin" });
+
+    const [urows] = await pool.query("SELECT pin_hash FROM users WHERE id = ? LIMIT 1", [String(userId)]);
+    const pinHash = urows?.[0]?.pin_hash ? String(urows[0].pin_hash) : "";
+    if (!pinHash) return res.status(400).json({ ok: false, error: "no_pin_set" });
+
+    const ok = await bcrypt.compare(pin, pinHash);
+    if (!ok) return res.status(401).json({ ok: false, error: "invalid_pin" });
+
+    return res.json({ ok: true });
+  })
+);
+
+async function dispatchEmergencyForUser(conn, userId, req) {
+  const transporter = getMailer();
+  const from = EMAIL_FROM || `anycircumstances <${SMTP_USER || "no-reply@localhost"}>`;
+  if (!transporter) {
+    return { ok: false, error: "mailer_not_configured", emailedContacts: 0, linksCreated: 0 };
+  }
+
+  const publicBase = String(process.env.PUBLIC_APP_BASE_URL || "https://anycircumstances.com").replace(/\/+$/, "");
+
+  let emailedContacts = 0;
+  let linksCreated = 0;
+
+  await conn.query("INSERT INTO verification_panic_dispatches (user_id, ip, user_agent) VALUES (?, ?, ?)", [
+    String(userId),
+    String(req.ip || "").slice(0, 64),
+    String(req.headers["user-agent"] || "").slice(0, 255),
+  ]);
+
+  const [urows] = await conn.query("SELECT email FROM users WHERE id = ? LIMIT 1", [String(userId)]);
+  const ownerEmail = urows?.[0]?.email ? String(urows[0].email) : "";
+
+  const [contacts] = await conn.query(
+    "SELECT id, email, name, verified_at, public_key FROM emergency_contacts WHERE user_id = ?",
+    [String(userId)]
+  );
+
+  if (!contacts.length) {
+    return { ok: true, emailedContacts: 0, linksCreated: 0, note: "no_contacts" };
+  }
+
+  const [assignments] = await conn.query(
+    `
+      SELECT a.contact_id, a.file_id
+      FROM emergency_contact_file_assignments a
+      JOIN emergency_contacts c ON c.id = a.contact_id
+      WHERE c.user_id = ?
+    `,
+    [String(userId)]
+  );
+
+  const filesByContact = new Map();
+  for (const a of assignments) {
+    const cid = Number(a.contact_id);
+    const arr = filesByContact.get(cid) || [];
+    arr.push(String(a.file_id));
+    filesByContact.set(cid, arr);
+  }
+
+  for (const c of contacts) {
+    const contactId = Number(c.id);
+    const email = String(c.email);
+    const name = String(c.name || "");
+    const list = filesByContact.get(contactId) || [];
+    if (!list.length) continue;
+
+    const missingSetup = !c.public_key;
+
+    const links = [];
+    for (const fileId of list) {
+      const token = crypto.randomBytes(32).toString("hex");
+      const tokenHash = sha256Hex(token);
+
+      await conn.query(
+        "INSERT INTO contact_file_share_tokens (contact_id, file_id, token_hash, expires_at) VALUES (?, ?, ?, ?)",
+        [contactId, fileId, tokenHash, new Date(Date.now() + 1000*60*60*24*365*10)]
+      );
+links.push(publicBase + "/share/" + token);
+      linksCreated += 1;
+    }
+
+    const subject = "Emergency access link (manual trigger)";
+    const intro = name ? `Hi ${name},` : "Hi,";
+    const bodyLines = [
+      intro,
+      "",
+      "This is an automated message because the account owner triggered emergency access.",
+      ownerEmail ? `Account: ${ownerEmail}` : "",
+      "",
+      "Links:",
+    ].concat(links.map((l) => "- " + l));
+
+    if (missingSetup) {
+      bodyLines.push(
+        "",
+        "Note: Your emergency contact setup is incomplete (no public key on file).",
+        "You can still open the link to complete setup, but files may not decrypt unless the owner pre-shared access."
+      );
+    }
+
+const rendered = renderAnyCircumstancesEmail({
+  title: "Emergency access link",
+  bodyHtml:
+    `<p style="margin:0 0 12px 0;">This is an automated message because the account owner triggered emergency access.</p>` +
+    (ownerEmail ? `<p style="margin:0 0 12px 0;"><b>Account:</b> ${escapeHtml(ownerEmail)}</p>` : ``) +
+    `<p style="margin:0 0 8px 0;"><b>Links</b></p>` +
+    `<ul style="margin:0 0 12px 18px;padding:0;">` +
+    links.map((l) => `<li><a href="${l}">${escapeHtml(l)}</a></li>`).join("") +
+    `</ul>` +
+    (missingSetup ? `<p style="margin:12px 0 0 0;"><b>Note:</b> Setup is incomplete (no public key on file).</p>` : ``),
+  ctaText: "Open first link",
+  ctaUrl: links[0] || publicBase,
+  footerNote: "If you weren’t expecting this, you can ignore this email."
+});
+
+await transporter.sendMail({
+  from,
+  to: email,
+  subject,
+  text: rendered.text,
+  html: rendered.html,
+});
+    emailedContacts += 1;
+  }
+
+  return { ok: true, emailedContacts, linksCreated };
+}
+
+
+router.post(
+  "/trigger-emergency",
+  asyncHandler(async (req, res) => {
+    const userId = await requireActiveSubscription(req, res);
+    if (!userId) return;
+
+    const pin = String(req.body?.pin || "");
+    if (!/^\d{4,6}$/.test(pin)) return res.status(400).json({ ok: false, error: "invalid_pin" });
+
+    const [urows] = await pool.query("SELECT email, panic_pin_hash FROM users WHERE id = ? LIMIT 1", [String(userId)]);
+    const panicHash = urows?.[0]?.panic_pin_hash ? String(urows[0].panic_pin_hash) : "";
+    const ownerEmail = urows?.[0]?.email ? String(urows[0].email) : "";
+
+    if (!panicHash) return res.status(400).json({ ok: false, error: "panic_pin_not_set" });
+
+    const ok = await bcrypt.compare(pin, panicHash);
+    if (!ok) return res.status(401).json({ ok: false, error: "invalid_pin" });
+
+    const transporter = getMailer();
+    const from = EMAIL_FROM || `anycircumstances <${SMTP_USER || "no-reply@localhost"}>`;
+    if (!transporter) return res.status(500).json({ ok: false, error: "mailer_not_configured" });
+
+    const publicBase = String(process.env.PUBLIC_APP_BASE_URL || "https://anycircumstances.com").replace(/\/+$/, "");
+
+    const conn = await pool.getConnection();
+    let emailedContacts = 0;
+    let linksCreated = 0;
+
+    try {
+      await conn.beginTransaction();
+
+      await conn.query("INSERT INTO verification_panic_dispatches (user_id, ip, user_agent) VALUES (?, ?, ?)", [
+        String(userId),
+        String(req.ip || "").slice(0, 64),
+        String(req.headers["user-agent"] || "").slice(0, 255),
+      ]);
+
+      const [contacts] = await conn.query(
+        "SELECT id, email, name, verified_at, public_key FROM emergency_contacts WHERE user_id = ? ",
+        [String(userId)]
+      );
+
+      if (!contacts.length) {
+        await conn.commit();
+        return res.json({ ok: true, emailedContacts: 0, linksCreated: 0, note: "no_contacts" });
+      }
+
+      const [assignments] = await conn.query(
+        `
+        SELECT a.contact_id, a.file_id
+        FROM emergency_contact_file_assignments a
+        JOIN emergency_contacts c ON c.id = a.contact_id
+        WHERE c.user_id = ?
+        `,
+        [String(userId)]
+      );
+
+      const filesByContact = new Map();
+      for (const a of assignments) {
+        const cid = Number(a.contact_id);
+        const arr = filesByContact.get(cid) || [];
+        arr.push(String(a.file_id));
+        filesByContact.set(cid, arr);
+      }
+
+      for (const c of contacts) {
+        const contactId = Number(c.id);
+        const email = String(c.email);
+        const name = String(c.name || "");
+        const list = filesByContact.get(contactId) || [];
+        if (!list.length) continue;
+
+        const missingSetup = !c.public_key;
+
+        const links = [];
+        for (const fileId of list) {
+          const token = crypto.randomBytes(32).toString("hex");
+          const tokenHash = sha256Hex(token);
+
+          await conn.query(
+        "INSERT INTO contact_file_share_tokens (contact_id, file_id, token_hash, expires_at) VALUES (?, ?, ?, ?)",
+        [contactId, fileId, tokenHash, new Date(Date.now() + 1000*60*60*24*365*10)]
+      );
+links.push(publicBase + "/share/" + token);
+          linksCreated += 1;
+        }
+
+        const subject = "Emergency access link (manual trigger)";
+        const intro = name ? `Hi ${name},` : "Hi,";
+        const bodyLines = [
+          intro,
+          "",
+          "This is an automated message because the account owner triggered emergency access.",
+          ownerEmail ? `Account: ${ownerEmail}` : "",
+          "",
+          "Links:",
+        ].concat(links.map((l) => "- " + l));
+
+        if (missingSetup) {
+          bodyLines.push(
+            "",
+            "Note: Your emergency contact setup is incomplete (no public key on file).",
+            "You can still open the link to complete setup, but files may not decrypt unless the owner pre-shared access."
+          );
+        }
+
+const rendered = renderAnyCircumstancesEmail({
+  title: "Emergency access link",
+  bodyHtml:
+    `<p style="margin:0 0 12px 0;">This is an automated message because the account owner triggered emergency access.</p>` +
+    (ownerEmail ? `<p style="margin:0 0 12px 0;"><b>Account:</b> ${escapeHtml(ownerEmail)}</p>` : ``) +
+    `<p style="margin:0 0 8px 0;"><b>Links</b></p>` +
+    `<ul style="margin:0 0 12px 18px;padding:0;">` +
+    links.map((l) => `<li><a href="${l}">${escapeHtml(l)}</a></li>`).join("") +
+    `</ul>` +
+    (missingSetup ? `<p style="margin:12px 0 0 0;"><b>Note:</b> Setup is incomplete (no public key on file).</p>` : ``),
+  ctaText: "Open first link",
+  ctaUrl: links[0] || publicBase,
+  footerNote: "If you weren’t expecting this, you can ignore this email."
+});
+
+await transporter.sendMail({
+  from,
+  to: email,
+  subject,
+  text: rendered.text,
+  html: rendered.html,
+});
+        emailedContacts += 1;
+      }
+
+      await conn.commit();
+    } catch (e) {
+      try {
+        await conn.rollback();
+      } catch {}
+      logError("trigger-emergency", e);
+      return res.status(500).json({ ok: false, error: "server_error" });
+    } finally {
+      conn.release();
+    }
+
+    return res.json({ ok: true, emailedContacts, linksCreated });
+  })
+);
+
+async function createEmergencyContactVerificationCode(conn, contactId) {
+  await conn.query("DELETE FROM emergency_contact_verification_tokens WHERE contact_id = ? AND used_at IS NULL", [contactId]);
 
   const expiresAt = addDays(nowUtc(), 2);
 
@@ -647,15 +1957,6 @@ async function createEmergencyContactVerificationCode(conn, contactId) {
   }
 
   throw new Error("Failed to generate unique emergency contact verification code");
-}
-
-function escapeHtml(s) {
-  return String(s || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
 }
 
 async function getEmergencyContactContext(contactId) {
@@ -696,7 +1997,7 @@ function renderEmergencyContactVerifyHtml(opts) {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>UnderAnyCircumstance</title>
+  <title>anycircumstances</title>
   <style>
     body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;background:#0b0b0f;color:#fff}
     .wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
@@ -717,7 +2018,7 @@ function renderEmergencyContactVerifyHtml(opts) {
 <body>
   <div class="wrap">
     <div class="card">
-      <div class="brand"><span class="dot"></span><span>UnderAnyCircumstance</span></div>
+      <div class="brand"><span class="dot"></span><span>anycircumstances</span></div>
       <p class="title" id="t">${escapeHtml(title)}</p>
       <p class="sub" id="s">${safeContact ? `For ${safeContact}` : `Please wait…`}</p>
       <div class="row" id="loadingRow">
@@ -726,7 +2027,11 @@ function renderEmergencyContactVerifyHtml(opts) {
       </div>
       <div id="final" style="display:none">
         <div class="row">
-          ${ok ? `<div class="check"><svg viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="#22c55e" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>` : `<div class="check" style="background:rgba(239,68,68,.18)"><svg viewBox="0 0 24 24" fill="none"><path d="M18 6L6 18M6 6l12 12" stroke="#ef4444" stroke-width="2.5" stroke-linecap="round"/></svg></div>`}
+          ${
+            ok
+              ? `<div class="check"><svg viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="#22c55e" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>`
+              : `<div class="check" style="background:rgba(239,68,68,.18)"><svg viewBox="0 0 24 24" fill="none"><path d="M18 6L6 18M6 6l12 12" stroke="#ef4444" stroke-width="2.5" stroke-linecap="round"/></svg></div>`
+          }
           <div>
             <div style="font-weight:700">${safeFinalTitle}</div>
             <div style="color:rgba(255,255,255,.72);font-size:13px">${safeFinalSub}</div>
@@ -766,17 +2071,14 @@ async function consumeEmergencyContactVerificationByToken(conn, code) {
   if (new Date(row.expires_at).getTime() < nowUtc().getTime()) return { ok: false, reason: "expired", contactId };
 
   await conn.query("UPDATE emergency_contact_verification_tokens SET used_at = NOW() WHERE id = ?", [row.id]);
-  await conn.query(
-    "UPDATE emergency_contacts SET verified_at = NOW() WHERE id = ? AND verified_at IS NULL",
-    [contactId]
-  );
+  await conn.query("UPDATE emergency_contacts SET verified_at = NOW() WHERE id = ? AND verified_at IS NULL", [contactId]);
 
   return { ok: true, contactId };
 }
 
 async function sendEmergencyContactInviteEmail(toEmail, contactName, ownerEmail, verifyUrl) {
   const transporter = getMailer();
-  const from = EMAIL_FROM || `UnderAnyCircumstance <${SMTP_USER || "no-reply@localhost"}>`;
+  const from = EMAIL_FROM || `anycircumstances <${SMTP_USER || "no-reply@localhost"}>`;
 
   if (!transporter) {
     console.error("[MAILER] Missing SMTP env vars; skipping emergency contact invite email.");
@@ -789,42 +2091,25 @@ async function sendEmergencyContactInviteEmail(toEmail, contactName, ownerEmail,
   const subject = `Confirm you’re an emergency contact for ${safeOwner}`;
 
   const introLine = safeName ? `Hi ${safeName},` : "Hi,";
-  const text =
-    `${introLine}\n\n` +
-    `${safeOwner} added you as an emergency contact in UnderAnyCircumstance.\n\n` +
-    `What this means:\n` +
-    `- You are not taking on any responsibility for them.\n` +
-    `- If they miss scheduled check-ins and the grace period expires, you may receive a secure email with links to files they assigned to you.\n` +
-    `- You do not need an account.\n\n` +
-    `To confirm you agree to be listed as their emergency contact, click:\n` +
-    `${verifyUrl}\n\n` +
-    `If you weren’t expecting this, you can ignore this email.\n`;
-
-  const html =
-    `<div style="font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;line-height:1.5;color:#111">` +
-      `<p style="margin:0 0 12px 0">${escapeHtml(introLine)}</p>` +
-      `<p style="margin:0 0 12px 0"><b>${escapeHtml(safeOwner)}</b> added you as an emergency contact in <b>UnderAnyCircumstance</b>.</p>` +
-      `<p style="margin:16px 0 8px 0"><b>What this means</b></p>` +
-      `<ul style="margin:0 0 16px 18px;padding:0">` +
-        `<li>You are not taking on any responsibility for them.</li>` +
-        `<li>If they miss scheduled check-ins and the grace period expires, you may receive a secure email with links to files they assigned to you.</li>` +
-        `<li>You do not need an account.</li>` +
-      `</ul>` +
-      `<p style="margin:0 0 14px 0">To confirm you agree to be listed as their emergency contact, click:</p>` +
-      `<p style="margin:0 0 18px 0">` +
-        `<a href="${verifyUrl}" style="display:inline-block;background:#111;color:#fff;text-decoration:none;padding:10px 14px;border-radius:10px">Confirm emergency contact</a>` +
-      `</p>` +
-      `<p style="margin:0;color:#555;font-size:13px">If you weren’t expecting this, you can ignore this email.</p>` +
-    `</div>`;
-
-  await transporter.sendMail({
-    from,
-    to: toEmail,
-    subject,
-    text,
-    html
-  });
-
+const rendered = renderAnyCircumstancesEmail({
+  title: "Confirm emergency contact",
+  bodyHtml:
+    `<p style="margin:0 0 12px 0">${escapeHtml(introLine)}</p>` +
+    `<p style="margin:0 0 12px 0"><b>${escapeHtml(safeOwner)}</b> added you as an emergency contact in <b>anycircumstances</b>.</p>` +
+    `<p style="margin:16px 0 8px 0"><b>What this means</b></p>` +
+    `<ul style="margin:0 0 16px 18px;padding:0">` +
+    `<li>You are not taking on any responsibility for them.</li>` +
+    `<li>If they miss scheduled check-ins and the grace period expires, you may receive a secure email with links to files they assigned to you.</li>` +
+    `<li>You do not need an account.</li>` +
+    `</ul>` +
+    `<p style="margin:0">Confirm using the button below.</p>`,
+  ctaText: "Confirm emergency contact",
+  ctaUrl: verifyUrl,
+  footerNote: "If you weren’t expecting this, you can ignore this email."
+});
+const text = rendered.text;
+const html = rendered.html;
+  await transporter.sendMail({ from, to: toEmail, subject, text, html });
   return { ok: true };
 }
 
@@ -836,30 +2121,31 @@ function toContactDto(row, assignedFiles) {
     relationship: row.relationship || "",
     verified: !!row.verified_at,
     assignedFiles: assignedFiles || [],
-    addedAt: new Date(row.created_at).toISOString()
+    addedAt: new Date(row.created_at).toISOString(),
   };
 }
 
-router.get("/emergency-contacts", async (req, res) => {
-  try {
-    const userId = getUserIdFromAccessCookie(req);
-    if (!userId) return res.status(401).json({ ok: false, error: "not_authenticated" });
+router.get(
+  "/emergency-contacts",
+  asyncHandler(async (req, res) => {
+    const userId = await requireActiveSubscription(req, res);
+    if (!userId) return;
 
     const [contacts] = await pool.query(
       "SELECT id, name, email, relationship, verified_at, created_at FROM emergency_contacts WHERE user_id = ? ORDER BY created_at DESC",
-      [userId]
+      [String(userId)]
     );
 
-    const ids = contacts.map((c) => c.id);
+	const ids = contacts.map((c) => Number(c.id)).filter((n) => Number.isFinite(n) && n > 0);	
     const map = new Map();
     for (const c of contacts) map.set(String(c.id), []);
 
-    if (ids.length > 0) {
-      const [assignments] = await pool.query(
-        `SELECT contact_id, file_id FROM emergency_contact_file_assignments WHERE contact_id IN (${ids.map(() => "?").join(",")})`,
-        ids
-      );
-      for (const a of assignments) {
+if (ids.length > 0) {
+  const placeholders = ids.map(() => "?").join(",");
+  const [assignments] = await pool.query(
+    `SELECT contact_id, file_id FROM emergency_contact_file_assignments WHERE contact_id IN (${placeholders})`,
+    ids
+  );      for (const a of assignments) {
         const key = String(a.contact_id);
         const arr = map.get(key) || [];
         arr.push(String(a.file_id));
@@ -867,25 +2153,22 @@ router.get("/emergency-contacts", async (req, res) => {
       }
     }
 
-    return res.json({
-      ok: true,
-      contacts: contacts.map((c) => toContactDto(c, map.get(String(c.id)) || []))
-    });
-  } catch (e) {
-    logError("emergency-contacts:list", e);
-    return res.status(500).json({ ok: false, error: "server_error" });
-  }
-});
+    return res.json({ ok: true, contacts: contacts.map((c) => toContactDto(c, map.get(String(c.id)) || [])) });
+  })
+);
 
-router.post("/emergency-contacts", async (req, res) => {
-  try {
-    const userId = getUserIdFromAccessCookie(req);
-    if (!userId) return res.status(401).json({ ok: false, error: "not_authenticated" });
+router.post(
+  "/emergency-contacts",
+  asyncHandler(async (req, res) => {
+    const userId = await requireActiveSubscription(req, res);
+    if (!userId) return;
 
     const name = String(req.body?.name || "").trim();
     const email = normalizeEmail(req.body?.email);
     const relationship = String(req.body?.relationship || "").trim();
     const fileIds = Array.isArray(req.body?.assignedFiles) ? req.body.assignedFiles : [];
+
+    const notifyContact = req.body?.notifyContact !== false;
 
     if (!name) return res.status(400).json({ ok: false, error: "missing_name" });
     if (!validateEmail(email)) return res.status(400).json({ ok: false, error: "invalid_email" });
@@ -904,23 +2187,22 @@ router.post("/emergency-contacts", async (req, res) => {
     try {
       await conn.beginTransaction();
 
-      const [urows] = await conn.query("SELECT email FROM users WHERE id = ? LIMIT 1", [userId]);
+      const [urows] = await conn.query("SELECT email FROM users WHERE id = ? LIMIT 1", [String(userId)]);
       ownerEmail = urows?.[0]?.email ? String(urows[0].email) : "your account";
 
-      const [result] = await conn.query(
-        "INSERT INTO emergency_contacts (user_id, name, email, relationship) VALUES (?, ?, ?, ?)",
-        [userId, name, email, relationship || null]
-      );
+      const [result] = await conn.query("INSERT INTO emergency_contacts (user_id, name, email, relationship) VALUES (?, ?, ?, ?)", [
+        String(userId),
+        name,
+        email,
+        relationship || null,
+      ]);
 
       contactId = result.insertId;
 
       await conn.query("DELETE FROM emergency_contact_file_assignments WHERE contact_id = ?", [contactId]);
       if (fileIds.length > 0) {
         const values = fileIds.map((fid) => [contactId, String(fid)]);
-        await conn.query(
-          "INSERT INTO emergency_contact_file_assignments (contact_id, file_id) VALUES ?",
-          [values]
-        );
+        await conn.query("INSERT INTO emergency_contact_file_assignments (contact_id, file_id) VALUES ?", [values]);
       }
 
       verifyCode = await createEmergencyContactVerificationCode(conn, contactId);
@@ -934,18 +2216,21 @@ router.post("/emergency-contacts", async (req, res) => {
       if (e && (e.code === "ER_DUP_ENTRY" || e.errno === 1062)) {
         return res.status(409).json({ ok: false, error: "contact_exists" });
       }
-      throw e;
+      logError("emergency-contacts:create", e);
+      return res.status(500).json({ ok: false, error: "server_error" });
     } finally {
       conn.release();
     }
 
     let emailSent = false;
-    try {
-      const out = await sendEmergencyContactInviteEmail(email, name, ownerEmail, verifyUrl);
-      emailSent = !!out?.ok;
-    } catch (e) {
-      logError("emergency-contacts:send-invite", e);
-      emailSent = false;
+    if (notifyContact) {
+      try {
+        const out = await sendEmergencyContactInviteEmail(email, name, ownerEmail, verifyUrl);
+        emailSent = !!out?.ok;
+      } catch (e) {
+        logError("emergency-contacts:send-invite", e);
+        emailSent = false;
+      }
     }
 
     return res.status(201).json({
@@ -957,22 +2242,20 @@ router.post("/emergency-contacts", async (req, res) => {
         relationship: relationship || "",
         verified: false,
         assignedFiles: fileIds.map((x) => String(x)),
-        addedAt: new Date().toISOString()
+        addedAt: new Date().toISOString(),
       },
       email_sent: emailSent,
       verify_code_dev_only: verifyCode,
-      verify_url_dev_only: verifyUrl
+      verify_url_dev_only: verifyUrl,
     });
-  } catch (e) {
-    logError("emergency-contacts:create", e);
-    return res.status(500).json({ ok: false, error: "server_error" });
-  }
-});
+  })
+);
 
-router.patch("/emergency-contacts/:id", async (req, res) => {
-  try {
-    const userId = getUserIdFromAccessCookie(req);
-    if (!userId) return res.status(401).json({ ok: false, error: "not_authenticated" });
+router.patch(
+  "/emergency-contacts/:id",
+  asyncHandler(async (req, res) => {
+    const userId = await requireActiveSubscription(req, res);
+    if (!userId) return;
 
     const contactId = String(req.params.id || "").trim();
     if (!/^\d+$/.test(contactId)) return res.status(400).json({ ok: false, error: "invalid_contact_id" });
@@ -988,28 +2271,26 @@ router.patch("/emergency-contacts/:id", async (req, res) => {
     try {
       const [result] = await pool.query(
         "UPDATE emergency_contacts SET name = ?, email = COALESCE(?, email), relationship = ? WHERE id = ? AND user_id = ? LIMIT 1",
-        [name, email, relationship || null, contactId, userId]
+        [name, email, relationship || null, contactId, String(userId)]
       );
 
       if (!result.affectedRows) return res.status(404).json({ ok: false, error: "not_found" });
-
       return res.json({ ok: true });
     } catch (e) {
       if (e && (e.code === "ER_DUP_ENTRY" || e.errno === 1062)) {
         return res.status(409).json({ ok: false, error: "contact_exists" });
       }
-      throw e;
+      logError("emergency-contacts:edit", e);
+      return res.status(500).json({ ok: false, error: "server_error" });
     }
-  } catch (e) {
-    logError("emergency-contacts:edit", e);
-    return res.status(500).json({ ok: false, error: "server_error" });
-  }
-});
+  })
+);
 
-router.delete("/emergency-contacts/:id", async (req, res) => {
-  try {
-    const userId = getUserIdFromAccessCookie(req);
-    if (!userId) return res.status(401).json({ ok: false, error: "not_authenticated" });
+router.delete(
+  "/emergency-contacts/:id",
+  asyncHandler(async (req, res) => {
+    const userId = await requireActiveSubscription(req, res);
+    if (!userId) return;
 
     const contactId = String(req.params.id || "").trim();
     if (!/^\d+$/.test(contactId)) return res.status(400).json({ ok: false, error: "invalid_contact_id" });
@@ -1018,10 +2299,10 @@ router.delete("/emergency-contacts/:id", async (req, res) => {
     try {
       await conn.beginTransaction();
 
-      const [rows] = await conn.query(
-        "SELECT id FROM emergency_contacts WHERE id = ? AND user_id = ? LIMIT 1",
-        [contactId, userId]
-      );
+      const [rows] = await conn.query("SELECT id FROM emergency_contacts WHERE id = ? AND user_id = ? LIMIT 1", [
+        contactId,
+        String(userId),
+      ]);
       if (!rows[0]) {
         await conn.rollback();
         return res.status(404).json({ ok: false, error: "not_found" });
@@ -1029,7 +2310,7 @@ router.delete("/emergency-contacts/:id", async (req, res) => {
 
       await conn.query("DELETE FROM emergency_contact_file_assignments WHERE contact_id = ?", [contactId]);
       await conn.query("DELETE FROM emergency_contact_verification_tokens WHERE contact_id = ?", [contactId]);
-      await conn.query("DELETE FROM emergency_contacts WHERE id = ? AND user_id = ? LIMIT 1", [contactId, userId]);
+      await conn.query("DELETE FROM emergency_contacts WHERE id = ? AND user_id = ? LIMIT 1", [contactId, String(userId)]);
 
       await conn.commit();
       return res.json({ ok: true });
@@ -1037,20 +2318,19 @@ router.delete("/emergency-contacts/:id", async (req, res) => {
       try {
         await conn.rollback();
       } catch {}
-      throw e;
+      logError("emergency-contacts:delete", e);
+      return res.status(500).json({ ok: false, error: "server_error" });
     } finally {
       conn.release();
     }
-  } catch (e) {
-    logError("emergency-contacts:delete", e);
-    return res.status(500).json({ ok: false, error: "server_error" });
-  }
-});
+  })
+);
 
-router.put("/emergency-contacts/:id/files", async (req, res) => {
-  try {
-    const userId = getUserIdFromAccessCookie(req);
-    if (!userId) return res.status(401).json({ ok: false, error: "not_authenticated" });
+router.put(
+  "/emergency-contacts/:id/files",
+  asyncHandler(async (req, res) => {
+    const userId = await requireActiveSubscription(req, res);
+    if (!userId) return;
 
     const contactId = String(req.params.id || "").trim();
     if (!/^\d+$/.test(contactId)) return res.status(400).json({ ok: false, error: "invalid_contact_id" });
@@ -1065,10 +2345,10 @@ router.put("/emergency-contacts/:id/files", async (req, res) => {
     try {
       await conn.beginTransaction();
 
-      const [rows] = await conn.query(
-        "SELECT id FROM emergency_contacts WHERE id = ? AND user_id = ? LIMIT 1",
-        [contactId, userId]
-      );
+      const [rows] = await conn.query("SELECT id FROM emergency_contacts WHERE id = ? AND user_id = ? LIMIT 1", [
+        contactId,
+        String(userId),
+      ]);
       if (!rows[0]) {
         await conn.rollback();
         return res.status(404).json({ ok: false, error: "not_found" });
@@ -1078,10 +2358,7 @@ router.put("/emergency-contacts/:id/files", async (req, res) => {
 
       if (fileIds.length > 0) {
         const values = fileIds.map((fid) => [contactId, String(fid)]);
-        await conn.query(
-          "INSERT INTO emergency_contact_file_assignments (contact_id, file_id) VALUES ?",
-          [values]
-        );
+        await conn.query("INSERT INTO emergency_contact_file_assignments (contact_id, file_id) VALUES ?", [values]);
       }
 
       await conn.commit();
@@ -1090,20 +2367,19 @@ router.put("/emergency-contacts/:id/files", async (req, res) => {
       try {
         await conn.rollback();
       } catch {}
-      throw e;
+      logError("emergency-contacts:files", e);
+      return res.status(500).json({ ok: false, error: "server_error" });
     } finally {
       conn.release();
     }
-  } catch (e) {
-    logError("emergency-contacts:files", e);
-    return res.status(500).json({ ok: false, error: "server_error" });
-  }
-});
+  })
+);
 
-router.post("/emergency-contacts/:id/resend", async (req, res) => {
-  try {
-    const userId = getUserIdFromAccessCookie(req);
-    if (!userId) return res.status(401).json({ ok: false, error: "not_authenticated" });
+router.post(
+  "/emergency-contacts/:id/resend",
+  asyncHandler(async (req, res) => {
+    const userId = await requireActiveSubscription(req, res);
+    if (!userId) return;
 
     const contactId = String(req.params.id || "").trim();
     if (!/^\d+$/.test(contactId)) return res.status(400).json({ ok: false, error: "invalid_contact_id" });
@@ -1117,10 +2393,10 @@ router.post("/emergency-contacts/:id/resend", async (req, res) => {
     try {
       await conn.beginTransaction();
 
-      const [rows] = await conn.query(
-        "SELECT email, verified_at FROM emergency_contacts WHERE id = ? AND user_id = ? LIMIT 1",
-        [contactId, userId]
-      );
+      const [rows] = await conn.query("SELECT email, verified_at FROM emergency_contacts WHERE id = ? AND user_id = ? LIMIT 1", [
+        contactId,
+        String(userId),
+      ]);
       if (!rows[0]) {
         await conn.rollback();
         return res.status(404).json({ ok: false, error: "not_found" });
@@ -1133,7 +2409,7 @@ router.post("/emergency-contacts/:id/resend", async (req, res) => {
 
       contactEmail = String(rows[0].email);
 
-      const [urows] = await conn.query("SELECT email FROM users WHERE id = ? LIMIT 1", [userId]);
+      const [urows] = await conn.query("SELECT email FROM users WHERE id = ? LIMIT 1", [String(userId)]);
       ownerEmail = urows?.[0]?.email ? String(urows[0].email) : "your account";
 
       verifyCode = await createEmergencyContactVerificationCode(conn, contactId);
@@ -1144,7 +2420,8 @@ router.post("/emergency-contacts/:id/resend", async (req, res) => {
       try {
         await conn.rollback();
       } catch {}
-      throw e;
+      logError("emergency-contacts:resend", e);
+      return res.status(500).json({ ok: false, error: "server_error" });
     } finally {
       conn.release();
     }
@@ -1158,20 +2435,13 @@ router.post("/emergency-contacts/:id/resend", async (req, res) => {
       emailSent = false;
     }
 
-    return res.json({
-      ok: true,
-      email_sent: emailSent,
-      verify_code_dev_only: verifyCode,
-      verify_url_dev_only: verifyUrl
-    });
-  } catch (e) {
-    logError("emergency-contacts:resend", e);
-    return res.status(500).json({ ok: false, error: "server_error" });
-  }
-});
+    return res.json({ ok: true, email_sent: emailSent, verify_code_dev_only: verifyCode, verify_url_dev_only: verifyUrl });
+  })
+);
 
-router.get("/emergency-contacts/verify", async (req, res) => {
-  try {
+router.get(
+  "/emergency-contacts/verify",
+  asyncHandler(async (req, res) => {
     const token = String(req.query?.token || "");
     const accept = String(req.headers?.accept || "");
     const wantsHtml = accept.includes("text/html");
@@ -1197,8 +2467,11 @@ router.get("/emergency-contacts/verify", async (req, res) => {
         await conn.commit();
       }
     } catch (e) {
-      try { await conn.rollback(); } catch {}
-      throw e;
+      try {
+        await conn.rollback();
+      } catch {}
+      logError("emergency-contacts:verify", e);
+      return res.status(500).json({ ok: false, error: "server_error" });
     } finally {
       conn.release();
     }
@@ -1210,7 +2483,7 @@ router.get("/emergency-contacts/verify", async (req, res) => {
           ok: false,
           reason: out.reason,
           ownerEmail: ctx?.owner_email || "",
-          contactName: ctx?.contact_name || ""
+          contactName: ctx?.contact_name || "",
         });
         return res.status(400).set("Content-Type", "text/html; charset=utf-8").send(html);
       }
@@ -1222,524 +2495,151 @@ router.get("/emergency-contacts/verify", async (req, res) => {
       const html = renderEmergencyContactVerifyHtml({
         ok: true,
         ownerEmail: ctx?.owner_email || "",
-        contactName: ctx?.contact_name || ""
+        contactName: ctx?.contact_name || "",
       });
       return res.status(200).set("Content-Type", "text/html; charset=utf-8").send(html);
     }
 
     return res.json({ ok: true });
-  } catch (e) {
-    logError("emergency-contacts:verify", e);
-    return res.status(500).json({ ok: false, error: "server_error" });
-  }
-});
+  })
+);
+router.post(
+  "/device-token",
+  asyncHandler(async (req, res) => {
+    const userId = requireUserId(req, res);
+    if (!userId) return;
 
-function daysForFrequency(freq) {
-  if (freq === "daily") return 1;
-  if (freq === "weekly") return 7;
-  return 30;
-}
-
-function isValidFrequency(freq) {
-  return freq === "daily" || freq === "weekly" || freq === "monthly";
-}
-
-function isValidGraceHours(n) {
-  return Number.isInteger(n) && n >= 6 && n <= 72 && n % 6 === 0;
-}
-
-function isValidReminders(n) {
-  return Number.isInteger(n) && n >= 1 && n <= 5;
-}
-
-function requireUserId(req, res) {
-  const userId = getUserIdFromAccessCookie(req);
-  if (!userId) {
-    res.status(401).json({ ok: false, error: "not_authenticated" });
-    return null;
-  }
-  return userId;
-}
-
-const publicWebBaseUrl = PUBLIC_WEB_BASE_URL || "http://localhost:8080";
-
-router.post("/password-reset/request", async (req, res) => {
-  try {
-    const email = normalizeEmail(req.body?.email);
-    if (!validateEmail(email)) return res.status(400).json({ ok: false, error: "invalid_email" });
-
-    const user = await getUserByEmail(email);
-
-    if (!user || user.status !== "active" || !user.email_verified_at) {
-      return res.json({ ok: true, email_sent: true });
+    const token = String(req.body?.token || "").trim();
+    if (!token) {
+      return res.status(400).json({ ok: false, error: "missing_token" });
     }
 
-    const conn = await pool.getConnection();
-    let rawToken = "";
-    let resetUrl = "";
-    try {
-      await conn.beginTransaction();
+    const pool = getPool();
 
-      rawToken = await createPasswordResetToken(conn, user.id);
-      resetUrl = `${publicWebBaseUrl}/reset-password?token=${encodeURIComponent(rawToken)}`;
+    await pool.query(
+      `
+      INSERT INTO user_device_tokens (user_id, token)
+      VALUES (?, ?)
+      ON DUPLICATE KEY UPDATE token = VALUES(token)
+      `,
+      [String(userId), token]
+    );
 
-      await conn.commit();
-    } catch (e) {
-      try {
-        await conn.rollback();
-      } catch {}
-      throw e;
-    } finally {
-      conn.release();
-    }
-
-    let emailSent = false;
-    try {
-      const out = await sendPasswordResetEmail(email, resetUrl);
-      emailSent = !!out?.ok;
-    } catch (e) {
-      logError("sendPasswordResetEmail(request)", e);
-      emailSent = false;
-    }
-
-    return res.json({
-      ok: true,
-      email_sent: emailSent,
-      reset_token_dev_only: rawToken,
-      reset_url_dev_only: resetUrl
-    });
-  } catch (e) {
-    logError("password-reset:request", e);
-    return res.status(500).json({ ok: false, error: "server_error" });
-  }
-});
-
-router.post("/password-reset/confirm", async (req, res) => {
-  try {
-    const token = String(req.body?.token || "");
-    const newPassword = String(req.body?.password || "");
-
-    if (!/^[A-Za-z0-9_-]{20,200}$/.test(token)) {
-      return res.status(400).json({ ok: false, error: "invalid_token" });
-    }
-
-    if (newPassword.length < 10) {
-      return res.status(400).json({ ok: false, error: "weak_password" });
-    }
-
-    const conn = await pool.getConnection();
-    try {
-      await conn.beginTransaction();
-
-      const out = await consumePasswordResetToken(conn, token, newPassword);
-      if (!out.ok) {
-        await conn.rollback();
-        return res.status(400).json({ ok: false, error: out.reason });
-      }
-
-      await conn.commit();
-    } catch (e) {
-      try {
-        await conn.rollback();
-      } catch {}
-      throw e;
-    } finally {
-      conn.release();
-    }
-
-    clearAuthCookies(res);
     return res.json({ ok: true });
-  } catch (e) {
-    logError("password-reset:confirm", e);
-    return res.status(500).json({ ok: false, error: "server_error" });
-  }
-});
+  })
+);
 
-function addHours(d, hours) {
-  const x = new Date(d.getTime());
-  x.setUTCHours(x.getUTCHours() + hours);
-  return x;
-}
+router.get(
+  "/me",
+  asyncHandler(async (req, res) => {
+    const access = req.cookies?.access_token ? String(req.cookies.access_token) : "";
+    if (!access) return res.json({ ok: false });
 
-function genResetToken() {
-  return crypto.randomBytes(48).toString("base64url");
-}
+    let payload;
+    try {
+      payload = jwt.verify(access, JWT_ACCESS_SECRET);
+    } catch {
+      return res.json({ ok: false });
+    }
 
-async function createPasswordResetToken(conn, userId) {
-  await conn.query(
-    "DELETE FROM password_reset_tokens WHERE user_id = ? AND used_at IS NULL",
-    [userId]
-  );
+    const userId = payload?.sub ? String(payload.sub) : "";
+    if (!userId) return res.json({ ok: false });
 
-  const expiresAt = addHours(nowUtc(), 2);
+    return res.json({ ok: true, role: "user", userId });
+  })
+);
 
-  for (let i = 0; i < 10; i++) {
-    const raw = genResetToken();
-    const tokenHash = sha256Hex(raw);
+async function stripeWebhookHandler(req, res) {
+  try {
+    if (!stripe) return res.status(500).send("stripe_not_configured");
+
+    const secret = process.env.STRIPE_WEBHOOK_SECRET || "";
+    if (!secret) return res.status(500).send("missing_webhook_secret");
+
+    const sig = req.headers["stripe-signature"];
+    let event;
 
     try {
-      await conn.query(
-        "INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES (?, ?, ?)",
-        [userId, tokenHash, expiresAt]
-      );
-      return raw;
-    } catch (e) {
-      if (e && (e.code === "ER_DUP_ENTRY" || e.errno === 1062)) continue;
-      throw e;
-    }
-  }
-
-  throw new Error("Failed to generate unique password reset token");
-}
-
-async function consumePasswordResetToken(conn, rawToken, newPassword) {
-  const tokenHash = sha256Hex(rawToken);
-
-  const [rows] = await conn.query(
-    "SELECT id, user_id, expires_at, used_at FROM password_reset_tokens WHERE token_hash = ? LIMIT 1",
-    [tokenHash]
-  );
-
-  const row = rows[0];
-  if (!row) return { ok: false, reason: "invalid_token" };
-  if (row.used_at) return { ok: false, reason: "already_used" };
-  if (new Date(row.expires_at).getTime() < nowUtc().getTime()) return { ok: false, reason: "expired" };
-
-  const passwordHash = await bcrypt.hash(newPassword, 12);
-
-  await conn.query("UPDATE password_reset_tokens SET used_at = NOW() WHERE id = ?", [row.id]);
-  await conn.query("UPDATE users SET password_hash = ? WHERE id = ? LIMIT 1", [passwordHash, row.user_id]);
-  await conn.query("UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = ? AND revoked_at IS NULL", [row.user_id]);
-
-  return { ok: true, userId: row.user_id };
-}
-
-async function sendPasswordResetEmail(toEmail, resetUrl) {
-  const transporter = getMailer();
-  const from = EMAIL_FROM || `UnderAnyCircumstance <${SMTP_USER || "no-reply@localhost"}>`;
-
-  if (!transporter) {
-    console.error("[MAILER] Missing SMTP env vars; skipping password reset email.");
-    return { ok: false, skipped: true };
-  }
-
-  const subject = "Reset your UnderAnyCircumstance password";
-  const text =
-    `Reset your password by opening this link:\n\n` +
-    `${resetUrl}\n\n` +
-    `If you did not request this, you can ignore this email.\n`;
-
-  const html =
-    `<p>Reset your password by opening this link:</p>` +
-    `<p><a href="${resetUrl}">${resetUrl}</a></p>` +
-    `<p>If you did not request this, you can ignore this email.</p>`;
-
-  await transporter.sendMail({
-    from,
-    to: toEmail,
-    subject,
-    text,
-    html
-  });
-
-  return { ok: true };
-}
-
-async function getVerificationSettingsRow(userId) {
-  const [rows] = await pool.query(
-    "SELECT user_id, frequency, grace_period_hours, reminders, last_checkin_at, next_due_at FROM verification_settings WHERE user_id = ? LIMIT 1",
-    [userId]
-  );
-  return rows[0] || null;
-}
-
-function settingsDto(row) {
-  return {
-    frequency: row.frequency,
-    gracePeriodHours: Number(row.grace_period_hours),
-    reminders: Number(row.reminders),
-    lastCheckinAt: row.last_checkin_at ? new Date(row.last_checkin_at).toISOString() : null,
-    nextDueAt: row.next_due_at ? new Date(row.next_due_at).toISOString() : null
-  };
-}
-
-router.get("/verification-settings", async (req, res) => {
-  try {
-    const userId = requireUserId(req, res);
-    if (!userId) return;
-
-    const row = await getVerificationSettingsRow(userId);
-    if (!row) {
-      return res.json({
-        ok: true,
-        settings: {
-          frequency: "weekly",
-          gracePeriodHours: 24,
-          reminders: 3,
-          lastCheckinAt: null,
-          nextDueAt: null
-        }
-      });
+      event = stripe.webhooks.constructEvent(req.body, sig, secret);
+    } catch {
+      return res.status(400).send("bad_signature");
     }
 
-    return res.json({ ok: true, settings: settingsDto(row) });
-  } catch (e) {
-    logError("verification-settings:get", e);
-    return res.status(500).json({ ok: false, error: "server_error" });
-  }
-});
-
-router.put("/verification-settings", async (req, res) => {
-  try {
-    const userId = requireUserId(req, res);
-    if (!userId) return;
-
-    const frequency = String(req.body?.frequency || "");
-    const gracePeriodHours = Number(req.body?.gracePeriodHours);
-    const reminders = Number(req.body?.reminders);
-
-    if (!isValidFrequency(frequency)) return res.status(400).json({ ok: false, error: "invalid_frequency" });
-    if (!isValidGraceHours(gracePeriodHours)) return res.status(400).json({ ok: false, error: "invalid_grace_period" });
-    if (!isValidReminders(reminders)) return res.status(400).json({ ok: false, error: "invalid_reminders" });
-
-    const days = daysForFrequency(frequency);
-    const existing = await getVerificationSettingsRow(userId);
-
-    const last = existing?.last_checkin_at ? new Date(existing.last_checkin_at) : nowUtc();
-    const nextDue = addDays(last, days);
-
-    await pool.query(
-      "INSERT INTO verification_settings (user_id, frequency, grace_period_hours, reminders, last_checkin_at, next_due_at) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE frequency = VALUES(frequency), grace_period_hours = VALUES(grace_period_hours), reminders = VALUES(reminders), last_checkin_at = COALESCE(verification_settings.last_checkin_at, VALUES(last_checkin_at)), next_due_at = VALUES(next_due_at)",
-      [userId, frequency, gracePeriodHours, reminders, last, nextDue]
-    );
-
-    const saved = await getVerificationSettingsRow(userId);
-    return res.json({ ok: true, settings: saved ? settingsDto(saved) : null });
-  } catch (e) {
-    logError("verification-settings:put", e);
-    return res.status(500).json({ ok: false, error: "server_error" });
-  }
-});
-
-router.post("/verification-check-in", async (req, res) => {
-  try {
-    const userId = requireUserId(req, res);
-    if (!userId) return;
-
-    const pin = String(req.body?.pin || "");
-    if (!/^\d{4,6}$/.test(pin)) return res.status(400).json({ ok: false, error: "invalid_pin" });
-
-    const [urows] = await pool.query("SELECT pin_hash FROM users WHERE id = ? LIMIT 1", [userId]);
-    const pinHash = urows?.[0]?.pin_hash ? String(urows[0].pin_hash) : "";
-
-    if (!pinHash) return res.status(400).json({ ok: false, error: "pin_not_set" });
-
-    const ok = await bcrypt.compare(pin, pinHash);
-    if (!ok) return res.status(401).json({ ok: false, error: "invalid_pin" });
-
-    const row = await getVerificationSettingsRow(userId);
-
-    const frequency = row?.frequency || "weekly";
-    const gracePeriodHours = row ? Number(row.grace_period_hours) : 24;
-    const reminders = row ? Number(row.reminders) : 3;
-
-    const now = nowUtc();
-    const nextDue = addDays(now, daysForFrequency(frequency));
-
-    await pool.query("INSERT INTO verification_checkins (user_id, method) VALUES (?, 'manual')", [userId]);
-
-    await pool.query(
-      "INSERT INTO verification_settings (user_id, frequency, grace_period_hours, reminders, last_checkin_at, next_due_at) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE last_checkin_at = VALUES(last_checkin_at), next_due_at = VALUES(next_due_at)",
-      [userId, frequency, gracePeriodHours, reminders, now, nextDue]
-    );
-
-    const saved = await getVerificationSettingsRow(userId);
-    return res.json({ ok: true, settings: saved ? settingsDto(saved) : null });
-  } catch (e) {
-    logError("verification-check-in:post", e);
-    return res.status(500).json({ ok: false, error: "server_error" });
-  }
-});
-
-router.get("/verification-checkins", async (req, res) => {
-  try {
-    const userId = requireUserId(req, res);
-    if (!userId) return;
-
-    let limit = Number(req.query?.limit);
-    if (!Number.isFinite(limit)) limit = 50;
-    limit = Math.max(1, Math.min(200, Math.floor(limit)));
-
-    const [rows] = await pool.query(
-      "SELECT id, checked_in_at, method FROM verification_checkins WHERE user_id = ? ORDER BY checked_in_at DESC LIMIT ?",
-      [userId, limit]
-    );
-
-    return res.json({
-      ok: true,
-      checkins: rows.map((r) => ({
-        id: String(r.id),
-        checkedInAt: new Date(r.checked_in_at).toISOString(),
-        method: r.method === "email_link" ? "email_link" : "manual"
-      }))
-    });
-  } catch (e) {
-    logError("verification-checkins:get", e);
-    return res.status(500).json({ ok: false, error: "server_error" });
-  }
-});
-
-router.get("/verification-status", async (req, res) => {
-  try {
-    const userId = requireUserId(req, res);
-    if (!userId) return;
-
-    const row = await getVerificationSettingsRow(userId);
-    if (!row || !row.next_due_at) {
-      return res.json({
-        ok: true,
-        status: {
-          state: "not_configured",
-          nextDueAt: null,
-          graceEndsAt: null
-        }
-      });
-    }
-
-    const nextDueAt = new Date(row.next_due_at);
-    const graceEndsAt = new Date(nextDueAt.getTime() + Number(row.grace_period_hours) * 60 * 60 * 1000);
-    const now = nowUtc();
-
-    let state = "ok";
-    if (now.getTime() > graceEndsAt.getTime()) state = "expired";
-    else if (now.getTime() > nextDueAt.getTime()) state = "overdue";
-
-    return res.json({
-      ok: true,
-      status: {
-        state,
-        nextDueAt: nextDueAt.toISOString(),
-        graceEndsAt: graceEndsAt.toISOString()
+    const eventId = String(event.id || "");
+    if (eventId) {
+      try {
+        await pool.query("INSERT INTO stripe_events (event_id) VALUES (?)", [eventId]);
+      } catch {
+        return res.status(200).json({ ok: true });
       }
-    });
+    }
+
+    if (event.type === "checkout.session.completed") {
+      const session = event.data.object;
+      const subscriptionId = session?.subscription ? String(session.subscription) : "";
+      let userId = session?.client_reference_id ? String(session.client_reference_id) : "";
+
+      if (!userId && subscriptionId) {
+        const sub = await stripe.subscriptions.retrieve(subscriptionId);
+        userId = sub?.metadata?.user_id ? String(sub.metadata.user_id) : "";
+      }
+
+      if (userId && subscriptionId) {
+        await pool.query("UPDATE billing_profiles SET stripe_subscription_id = ?, status = 'active' WHERE user_id = ?", [
+          subscriptionId,
+          String(userId),
+        ]);
+      }
+    }
+
+    if (event.type === "customer.subscription.updated" || event.type === "customer.subscription.deleted") {
+      const sub = event.data.object;
+      const userId = sub?.metadata?.user_id ? String(sub.metadata.user_id) : "";
+      const status = String(sub.status || "");
+
+      let mapped = "past_due";
+      if (status === "active" || status === "trialing") mapped = "active";
+      if (status === "past_due" || status === "unpaid") mapped = "past_due";
+      if (status === "canceled") mapped = "paused";
+
+      const periodEnd = sub?.current_period_end ? new Date(Number(sub.current_period_end) * 1000) : null;
+
+      if (userId) {
+        await pool.query("UPDATE billing_profiles SET status = ?, current_period_end = ? WHERE user_id = ?", [
+          mapped,
+          periodEnd,
+          String(userId),
+        ]);
+      }
+    }
+
+    if (event.type === "invoice.paid") {
+      const inv = event.data.object;
+      const subId = inv?.subscription ? String(inv.subscription) : "";
+      if (subId) {
+        const [rows] = await pool.query(
+          "SELECT user_id FROM billing_profiles WHERE stripe_subscription_id = ? LIMIT 1",
+          [subId]
+        );
+        const userId = rows?.[0]?.user_id ? String(rows[0].user_id) : "";
+        if (userId) {
+          const amountPaid = Number(inv.amount_paid || 0);
+          const hostedUrl = inv.hosted_invoice_url ? String(inv.hosted_invoice_url) : null;
+          const desc = "Subscription";
+          await pool.query(
+            "INSERT INTO billing_invoices (user_id, description, amount_cents, status, invoice_url, stripe_invoice_id) VALUES (?, ?, ?, 'paid', ?, ?)",
+            [Number(userId), desc, amountPaid, hostedUrl, String(inv.id)]
+          );
+        }
+      }
+    }
+
+    return res.status(200).json({ ok: true });
   } catch (e) {
-    logError("verification-status:get", e);
-    return res.status(500).json({ ok: false, error: "server_error" });
+    logError("stripeWebhookHandler", e);
+    return res.status(500).send("server_error");
   }
-});
-
-const BILLING_PLANS = {
-  starter: { id: "starter", name: "Starter", priceMonthlyUsd: 4.99, storageLimitMb: 5000, overageRateUsdPerGb: 0.75 },
-  plus: { id: "plus", name: "Plus", priceMonthlyUsd: 12.99, storageLimitMb: 20000, overageRateUsdPerGb: 0.65 },
-  commercial: { id: "commercial", name: "Commercial", priceMonthlyUsd: 75, storageLimitMb: 200000, overageRateUsdPerGb: 0.4 }
-};
-
-function isPlanId(x) {
-  return x === "starter" || x === "plus" || x === "commercial";
 }
 
-async function getOrCreateSubscription(userId) {
-  const [rows] = await pool.query(
-    "SELECT user_id, plan_id, status FROM billing_subscriptions WHERE user_id = ? LIMIT 1",
-    [userId]
-  );
+module.exports = { authRouter: router, authPool: pool, stripeWebhookHandler };
 
-  if (rows[0]) {
-    return {
-      userId: String(rows[0].user_id),
-      planId: String(rows[0].plan_id),
-      status: String(rows[0].status)
-    };
-  }
-
-  await pool.query(
-    "INSERT INTO billing_subscriptions (user_id, plan_id, status) VALUES (?, 'starter', 'active')",
-    [userId]
-  );
-
-  return { userId: String(userId), planId: "starter", status: "active" };
-}
-
-async function listInvoices(userId, limit) {
-  const lim = Number.isFinite(limit) ? Math.max(1, Math.min(200, Number(limit))) : 50;
-
-  const [rows] = await pool.query(
-    "SELECT id, invoice_date, description, amount_cents, status, invoice_url FROM billing_invoices WHERE user_id = ? ORDER BY invoice_date DESC LIMIT ?",
-    [userId, lim]
-  );
-
-  return rows.map((r) => ({
-    id: String(r.id),
-    date: new Date(r.invoice_date).toISOString(),
-    description: String(r.description),
-    amount: Number(r.amount_cents) / 100,
-    status: String(r.status),
-    invoiceUrl: r.invoice_url ? String(r.invoice_url) : null
-  }));
-}
-
-router.get("/billing/summary", async (req, res) => {
-  try {
-    const userId = requireUserId(req, res);
-    if (!userId) return;
-
-    const sub = await getOrCreateSubscription(userId);
-    const plan = BILLING_PLANS[sub.planId] || BILLING_PLANS.starter;
-    const invoices = await listInvoices(userId, Number(req.query?.limit));
-
-    return res.json({
-      ok: true,
-      subscription: sub,
-      plan,
-      invoices
-    });
-  } catch (e) {
-    logError("billing:summary", e);
-    return res.status(500).json({ ok: false, error: "server_error" });
-  }
-});
-
-router.post("/billing/choose-plan", async (req, res) => {
-  try {
-    const userId = requireUserId(req, res);
-    if (!userId) return;
-
-    const planId = String(req.body?.planId || "");
-    if (!isPlanId(planId)) return res.status(400).json({ ok: false, error: "invalid_plan" });
-
-    await pool.query(
-      "INSERT INTO billing_subscriptions (user_id, plan_id, status) VALUES (?, ?, 'active') ON DUPLICATE KEY UPDATE plan_id = VALUES(plan_id), status = 'active'",
-      [userId, planId]
-    );
-
-    const sub = await getOrCreateSubscription(userId);
-    const plan = BILLING_PLANS[sub.planId] || BILLING_PLANS.starter;
-    const invoices = await listInvoices(userId, Number(req.query?.limit));
-
-    return res.json({
-      ok: true,
-      subscription: sub,
-      plan,
-      invoices
-    });
-  } catch (e) {
-    logError("billing:choose-plan", e);
-    return res.status(500).json({ ok: false, error: "server_error" });
-  }
-});
-
-router.get("/billing/invoices", async (req, res) => {
-  try {
-    const userId = requireUserId(req, res);
-    if (!userId) return;
-
-    const invoices = await listInvoices(userId, Number(req.query?.limit));
-    return res.json({ ok: true, invoices });
-  } catch (e) {
-    logError("billing:invoices", e);
-    return res.status(500).json({ ok: false, error: "server_error" });
-  }
-});
-
-
-module.exports = { authRouter: router, authPool: pool };

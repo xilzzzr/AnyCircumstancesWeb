@@ -14,6 +14,33 @@ import {
   FileText,
   AlertTriangle,
 } from "lucide-react";
+import { computePlanPrice, formatMoney } from "@/lib/pricing";
+
+function paywallDescriptionForDefaultPlan() {
+  const p = computePlanPrice({
+    storageGb: 5,
+    addons: [],
+    checkInFrequency: "monthly",
+    billingInterval: "monthly",
+  });
+
+  const annual = computePlanPrice({
+    storageGb: 5,
+    addons: [],
+    checkInFrequency: "monthly",
+    billingInterval: "annual",
+  });
+
+  return [
+    `Default plan (editable on Pricing):`,
+    `• Storage: ${formatMoney(p.storage)}/mo (5 GB)`,
+    `• Check-ins: ${formatMoney(p.frequency)}/mo (Monthly)`,
+    `• Add-ons: ${formatMoney(p.addons)}/mo`,
+    ``,
+    `Total: ${formatMoney(p.monthlyTotal)}/mo`,
+    `Annual: ${formatMoney(annual.annualTotal ?? p.monthlyTotal * 10)} once per year (pay 10 months, get 2 free)`,
+  ].join("\n");
+}
 
 type Frequency = "daily" | "weekly" | "monthly";
 
@@ -41,7 +68,40 @@ type EmergencyContact = {
   addedAt: string;
 };
 
-const API_BASE = (import.meta as any).env?.VITE_API_BASE_URL || "http://localhost:3001";
+type BillingStatusResp = {
+  ok?: boolean;
+  status?: string;
+};
+
+type BillingSummaryResp = {
+  ok?: boolean;
+  billing?: {
+    storageLimitGb?: number | null;
+  };
+  profile?: {
+    storageLimitGb?: number | null;
+  };
+  subscription?: {
+    storageLimitGb?: number | null;
+  };
+};
+
+type CheckinRow = {
+  id: string;
+  checkedInAt: string;
+  method: "manual" | "email_link";
+};
+
+type VaultFile = {
+  key: string;
+  name: string;
+  content_type: string;
+  size_bytes: number | null;
+  created_at: string;
+  include_in_emergency: boolean;
+};
+
+const API_BASE = (import.meta as any).env?.VITE_API_BASE_URL ?? "";
 
 function formatRelativeTime(targetIso: string) {
   const now = Date.now();
@@ -73,6 +133,19 @@ function formatFrequencyLabel(freq: Frequency) {
   return "Monthly";
 }
 
+function isNetworkFetchError(e: any) {
+  const msg = String(e?.message || "");
+  return msg.toLowerCase().includes("failed to fetch") || e?.name === "TypeError";
+}
+
+function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes < 0) return "—";
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  if (bytes < 1024 * 1024) return `${Math.round((bytes / 1024) * 10) / 10} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MB`;
+  return `${Math.round((bytes / (1024 * 1024 * 1024)) * 10) / 10} GB`;
+}
+
 export function DashboardPage() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -81,11 +154,22 @@ export function DashboardPage() {
   const [settings, setSettings] = useState<VerificationSettings | null>(null);
   const [status, setStatus] = useState<VerificationStatus | null>(null);
   const [contacts, setContacts] = useState<EmergencyContact[]>([]);
+  const [billingSummary, setBillingSummary] = useState<BillingSummaryResp | null>(null);
+  const [checkins, setCheckins] = useState<CheckinRow[]>([]);
+
+  const [vaultUsedBytes, setVaultUsedBytes] = useState<number | null>(null);
+  const [vaultLimitBytes, setVaultLimitBytes] = useState<number | null>(null);
+
+  const [isFreeLimited, _setIsFreeLimited] = useState(false);
+  const setIsFreeLimited = (v: boolean) => {
+    console.log("[Dashboard] setIsFreeLimited =", v, "at", new Error().stack);
+    _setIsFreeLimited(v);
+  };
 
   const displayName = useMemo(() => {
     const name = (user as any)?.name ? String((user as any).name) : "";
     if (name.trim()) return name.trim().split(" ")[0];
-    const email = (user as any)?.email ? String((user as any).email) : "";
+    const email = (user as any)?.email ? String((user as any)?.email) : "";
     return email ? email : "there";
   }, [user]);
 
@@ -97,10 +181,24 @@ export function DashboardPage() {
 
   const verifiedContacts = useMemo(() => contacts.filter((c) => c.verified).length, [contacts]);
 
-  const storageUsed = (user as any)?.storageUsed;
-  const storageLimit = (user as any)?.storageLimit;
-  const hasStorage = Number.isFinite(storageUsed) && Number.isFinite(storageLimit) && storageLimit > 0;
-  const storagePercent = hasStorage ? (Number(storageUsed) / Number(storageLimit)) * 100 : 0;
+  const storageLimitGbFromSummary = useMemo(() => {
+    const s: any = billingSummary || {};
+    const raw =
+      s?.billing?.storageLimitGb ??
+      s?.profile?.storageLimitGb ??
+      s?.subscription?.storageLimitGb ??
+      null;
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }, [billingSummary]);
+
+  const hasVaultLimit = vaultLimitBytes !== null && Number.isFinite(vaultLimitBytes) && vaultLimitBytes > 0;
+  const hasVaultUsed = vaultUsedBytes !== null && Number.isFinite(vaultUsedBytes) && vaultUsedBytes >= 0;
+
+  const storagePercent = useMemo(() => {
+    if (!hasVaultUsed || !hasVaultLimit) return 0;
+    return (Number(vaultUsedBytes) / Number(vaultLimitBytes)) * 100;
+  }, [hasVaultUsed, hasVaultLimit, vaultUsedBytes, vaultLimitBytes]);
 
   useEffect(() => {
     let alive = true;
@@ -118,34 +216,125 @@ export function DashboardPage() {
 
     async function load() {
       setLoading(true);
+      setIsFreeLimited(false);
+
       try {
-        const [settingsRes, statusRes, contactsRes] = await Promise.all([
-          fetchJson("/auth/verification-settings"),
-          fetchJson("/auth/verification-status"),
-          fetchJson("/auth/emergency-contacts"),
-        ]);
+        try {
+          const billing: BillingStatusResp = await fetchJson("/auth/billing/status");
+          const s = String(billing?.status || "");
+          const paid = s === "active" || s === "trialing";
+          if (!paid && alive) setIsFreeLimited(true);
+        } catch (e: any) {
+          if (alive) setIsFreeLimited(true);
+        }
 
-        if (!alive) return;
+        try {
+          const summaryRes: BillingSummaryResp = await fetchJson("/auth/billing/summary?limit=1");
+          if (!alive) return;
+          setBillingSummary(summaryRes || null);
+        } catch (e: any) {
+          if (!alive) return;
+          const code = String(e?.message || "");
+          const http = (e as any)?.status;
+          if (http === 401 || code === "not_authenticated") throw e;
+          if (http === 402 || code === "payment_required") setIsFreeLimited(true);
+          if (isNetworkFetchError(e)) setIsFreeLimited(true);
+          setBillingSummary(null);
+        }
 
-        setSettings(settingsRes?.settings || null);
-        setStatus(statusRes?.status || null);
-        setContacts(Array.isArray(contactsRes?.contacts) ? contactsRes.contacts : []);
+        try {
+          const out = await fetchJson("/files/list");
+          if (!alive) return;
+          const files: VaultFile[] = Array.isArray(out?.files) ? out.files : [];
+          const used = files.reduce((sum, f) => {
+            const b = Number(f?.size_bytes);
+            return sum + (Number.isFinite(b) && b > 0 ? b : 0);
+          }, 0);
+          setVaultUsedBytes(used);
+
+          if (storageLimitGbFromSummary !== null) {
+            setVaultLimitBytes(Math.round(storageLimitGbFromSummary * 1024 * 1024 * 1024));
+          } else {
+            setVaultLimitBytes(null);
+          }
+        } catch (e: any) {
+          if (!alive) return;
+          const code = String(e?.message || "");
+          const http = (e as any)?.status;
+          if (http === 401 || code === "not_authenticated") throw e;
+          if (http === 402 || code === "payment_required") setIsFreeLimited(true);
+          if (isNetworkFetchError(e)) setIsFreeLimited(true);
+          setVaultUsedBytes(null);
+          setVaultLimitBytes(null);
+        }
+
+        try {
+          const out = await fetchJson("/auth/verification-checkins?limit=5");
+          if (!alive) return;
+          setCheckins(Array.isArray(out?.checkins) ? out.checkins : []);
+        } catch (e: any) {
+          if (!alive) return;
+          const code = String(e?.message || "");
+          const http = (e as any)?.status;
+          if (http === 401 || code === "not_authenticated") throw e;
+          if (http === 402 || code === "payment_required") setIsFreeLimited(true);
+          if (isNetworkFetchError(e)) setIsFreeLimited(true);
+          setCheckins([]);
+        }
+
+        try {
+          const settingsRes = await fetchJson("/auth/verification-settings");
+          if (!alive) return;
+          setSettings(settingsRes?.settings || null);
+        } catch (e: any) {
+          if (!alive) return;
+          const code = String(e?.message || "");
+          const http = (e as any)?.status;
+          if (http === 401 || code === "not_authenticated") throw e;
+          if (http === 402 || code === "payment_required") setIsFreeLimited(true);
+          if (isNetworkFetchError(e)) setIsFreeLimited(true);
+          setSettings(null);
+        }
+
+        try {
+          const statusRes = await fetchJson("/auth/verification-status");
+          if (!alive) return;
+          setStatus(statusRes?.status || null);
+        } catch (e: any) {
+          if (!alive) return;
+          const code = String(e?.message || "");
+          const http = (e as any)?.status;
+          if (http === 401 || code === "not_authenticated") throw e;
+          if (http === 402 || code === "payment_required") setIsFreeLimited(true);
+          if (isNetworkFetchError(e)) setIsFreeLimited(true);
+          setStatus(null);
+        }
+
+        try {
+          const contactsRes = await fetchJson("/auth/emergency-contacts");
+          if (!alive) return;
+          setContacts(Array.isArray(contactsRes?.contacts) ? contactsRes.contacts : []);
+        } catch (e: any) {
+          if (!alive) return;
+          const code = String(e?.message || "");
+          const http = (e as any)?.status;
+          if (http === 401 || code === "not_authenticated") throw e;
+          if (http === 402 || code === "payment_required") setIsFreeLimited(true);
+          if (isNetworkFetchError(e)) setIsFreeLimited(true);
+          setContacts([]);
+        }
       } catch (e: any) {
         if (!alive) return;
 
         const code = String(e?.message || "server_error");
-        if (e?.status === 401 || code === "not_authenticated") {
+        if ((e as any)?.status === 401 || code === "not_authenticated") {
           toast({
             title: "Session expired",
             description: "Please log in again.",
             variant: "destructive",
           });
         } else {
-          toast({
-            title: "Couldn’t load dashboard",
-            description: code,
-            variant: "destructive",
-          });
+          setIsFreeLimited(true);
         }
       } finally {
         if (alive) setLoading(false);
@@ -156,7 +345,7 @@ export function DashboardPage() {
     return () => {
       alive = false;
     };
-  }, [toast]);
+  }, [toast, storageLimitGbFromSummary]);
 
   const nextVerificationText = useMemo(() => {
     if (!status || status.state === "not_configured" || !status.nextDueAt) return "Not set";
@@ -203,6 +392,10 @@ export function DashboardPage() {
     return null;
   }, [status]);
 
+  const recentActivityRows = useMemo(() => {
+    return Array.isArray(checkins) ? checkins.slice(0, 5) : [];
+  }, [checkins]);
+
   return (
     <div className="p-6 lg:p-8 space-y-6">
       <div>
@@ -210,8 +403,29 @@ export function DashboardPage() {
         <p className="text-muted-foreground">Welcome back, {displayName}</p>
       </div>
 
+      {isFreeLimited && (
+        <Card className="border-primary/20 bg-primary/5">
+          <CardContent className="py-4 text-sm">
+            <div className="font-medium text-foreground">You’re on a Free plan</div>
+            <div className="text-muted-foreground mt-1">
+              Dashboard functionality is limited. Build a plan to unlock full features.
+            </div>
+            <div className="mt-3 flex gap-2">
+              <Link to="/app/plan">
+                <Button size="sm">Build a plan</Button>
+              </Link>
+              <Link to="/pricing">
+                <Button size="sm" variant="outline">
+                  View pricing
+                </Button>
+              </Link>
+            </div>
+            <pre className="mt-3 text-xs text-muted-foreground whitespace-pre-wrap">{paywallDescriptionForDefaultPlan()}</pre>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-        {/* Next Verification */}
         <Card className="card-hover">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Next Verification</CardTitle>
@@ -238,7 +452,6 @@ export function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Storage (backend not wired yet, so we show AuthContext values if present) */}
         <Card className="card-hover">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Storage Used</CardTitle>
@@ -246,10 +459,14 @@ export function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-foreground">
-              {hasStorage ? `${storageUsed} MB` : "—"}
+              {loading ? "Loading…" : hasVaultUsed ? formatBytes(vaultUsedBytes as number) : "—"}
             </div>
-            <Progress value={storagePercent} className="h-1.5 mt-2" />
-            <p className="text-xs text-muted-foreground mt-1">{hasStorage ? `of ${storageLimit} MB` : "Billing not wired yet"}</p>
+
+            <Progress value={hasVaultLimit ? storagePercent : 0} className="h-1.5 mt-2" />
+            <p className="text-xs text-muted-foreground mt-1">
+              {hasVaultLimit ? (hasVaultUsed ? `of ${formatBytes(vaultLimitBytes as number)}` : "—") : "—"}
+            </p>
+
             <Link to="/app/billing" className="block mt-4">
               <Button size="sm" variant="outline" className="w-full gap-1">
                 View billing <ArrowRight className="h-3 w-3" />
@@ -258,7 +475,6 @@ export function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Emergency Contacts */}
         <Card className="card-hover">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Emergency Contacts</CardTitle>
@@ -268,9 +484,7 @@ export function DashboardPage() {
             <div className="text-2xl font-bold text-foreground">
               {loading ? "Loading…" : `${verifiedContacts} verified`}
             </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              {loading ? "…" : `${contacts.length} total contacts`}
-            </p>
+            <p className="text-xs text-muted-foreground mt-1">{loading ? "…" : `${contacts.length} total contacts`}</p>
             <Link to="/app/emergency-contacts" className="block mt-4">
               <Button size="sm" variant="outline" className="w-full gap-1" disabled={loading}>
                 Manage <ArrowRight className="h-3 w-3" />
@@ -279,7 +493,6 @@ export function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Emergency Package (derived from contact assignments) */}
         <Card className="card-hover">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Emergency Package</CardTitle>
@@ -299,7 +512,6 @@ export function DashboardPage() {
         </Card>
       </div>
 
-      {/* Recent Activity (backend not wired yet) */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Recent Activity</CardTitle>
@@ -310,9 +522,24 @@ export function DashboardPage() {
           </Link>
         </CardHeader>
         <CardContent>
-          <div className="text-sm text-muted-foreground">
-            Activity feed isn’t connected to the backend yet.
-          </div>
+          {loading ? (
+            <div className="text-sm text-muted-foreground">Loading…</div>
+          ) : recentActivityRows.length === 0 ? (
+            <div className="text-sm text-muted-foreground">No check-ins recorded yet.</div>
+          ) : (
+            <div className="space-y-3">
+              {recentActivityRows.map((c) => (
+                <div key={c.id} className="flex items-start justify-between gap-4">
+                  <div className="text-sm text-foreground leading-snug">
+                    Check-in completed{c.method ? ` • ${c.method === "manual" ? "PIN" : "Email link"}` : ""}
+                  </div>
+                  <div className="text-xs text-muted-foreground whitespace-nowrap">
+                    {c.checkedInAt ? formatRelativeTime(c.checkedInAt) : "—"}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

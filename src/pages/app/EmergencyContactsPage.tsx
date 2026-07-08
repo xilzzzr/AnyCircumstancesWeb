@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Checkbox } from '@/components/ui/checkbox';
+import { useEffect, useMemo, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -12,19 +12,27 @@ import {
   DialogTitle,
   DialogDescription,
   DialogFooter,
-} from '@/components/ui/dialog';
+} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { useToast } from '@/hooks/use-toast';
-import { mockFiles } from '@/lib/mockApi';
+} from "@/components/ui/dropdown-menu";
+import { useToast } from "@/hooks/use-toast";
+import { listVaultFiles, type VaultFile } from "@/lib/uacFilesApi";
 import {
-  UserPlus, MoreHorizontal, Trash2, Pencil,
-  CheckCircle2, Clock, Send, Users, Shield, Loader2
-} from 'lucide-react';
+  UserPlus,
+  MoreHorizontal,
+  Trash2,
+  Pencil,
+  CheckCircle2,
+  Clock,
+  Send,
+  Users,
+  Shield,
+  Loader2,
+} from "lucide-react";
 
 interface EmergencyContact {
   id: string;
@@ -40,9 +48,51 @@ type ApiListResp =
   | { ok: true; contacts: EmergencyContact[] }
   | { ok: false; error: string };
 
+function emitPaywall(title?: string, description?: string) {
+  const returnTo = window.location.pathname + window.location.search;
+  window.dispatchEvent(
+    new CustomEvent("uac:paywall", {
+      detail: {
+        title: title || "Paid feature",
+        description:
+          description ||
+          "This feature is part of a paid plan. Build a plan starting at $4.99/month to unlock it.",
+        returnTo,
+      },
+    })
+  );
+}
+
+async function readJsonSafe(res: Response) {
+  const txt = await res.text();
+  try {
+    return txt ? JSON.parse(txt) : null;
+  } catch {
+    return null;
+  }
+}
+
+function isPaymentRequired(resp: Response, data: any) {
+  const code = data?.error ? String(data.error) : "";
+  return resp.status === 402 || code === "payment_required";
+}
+
+function formatBytes(bytes: number | null) {
+  const b = typeof bytes === "number" ? bytes : 0;
+  if (b <= 0) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.floor(Math.log(b) / Math.log(k));
+  const v = b / Math.pow(k, i);
+  return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${sizes[i]}`;
+}
+
 export function EmergencyContactsPage() {
   const [contacts, setContacts] = useState<EmergencyContact[]>([]);
   const [initialLoading, setInitialLoading] = useState(true);
+
+  const [vaultFiles, setVaultFiles] = useState<VaultFile[]>([]);
+  const [filesLoading, setFilesLoading] = useState(true);
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -52,63 +102,96 @@ export function EmergencyContactsPage() {
   const [selectedContact, setSelectedContact] = useState<EmergencyContact | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const [formName, setFormName] = useState('');
-  const [formEmail, setFormEmail] = useState('');
-  const [formRelationship, setFormRelationship] = useState('');
+  const [skipNotify, setSkipNotify] = useState(false);
+  const [showSkipNotifyConfirm, setShowSkipNotifyConfirm] = useState(false);
+
+  const [formName, setFormName] = useState("");
+  const [formEmail, setFormEmail] = useState("");
+  const [formRelationship, setFormRelationship] = useState("");
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
 
   const { toast } = useToast();
 
-  const filesById = useMemo(() => {
-    const m = new Map<string, { id: string; name: string; size: number }>();
-    for (const f of mockFiles) m.set(f.id, f);
+  const filesByKey = useMemo(() => {
+    const m = new Map<string, VaultFile>();
+    for (const f of vaultFiles) m.set(f.key, f);
     return m;
-  }, []);
+  }, [vaultFiles]);
 
   const resetForm = () => {
-    setFormName('');
-    setFormEmail('');
-    setFormRelationship('');
+    setFormName("");
+    setFormEmail("");
+    setFormRelationship("");
     setSelectedFiles([]);
+    setSkipNotify(false);
   };
 
   const fetchContacts = async () => {
     try {
-      const resp = await fetch('/auth/emergency-contacts', { credentials: 'include' });
-      const data = (await resp.json().catch(() => null)) as ApiListResp | null;
+      const resp = await fetch("/auth/emergency-contacts", { credentials: "include" });
+      const data = (await readJsonSafe(resp)) as ApiListResp | null;
 
-      if (!resp.ok || !data || data.ok === false) {
-        const code = (data && 'error' in data ? data.error : '') || 'load_failed';
-        if (code === 'not_authenticated') {
-          toast({
-            title: 'Please log in',
-            description: 'Your session is required to manage emergency contacts.',
-            variant: 'destructive',
-          });
-        } else {
-          toast({
-            title: 'Could not load contacts',
-            description: 'Please refresh and try again.',
-            variant: 'destructive',
-          });
+      if (!resp.ok || !data || (data as any).ok === false) {
+        if (isPaymentRequired(resp, data)) {
+          emitPaywall(
+            "Emergency contacts are a paid feature",
+            "You can view the page, but adding or managing contacts requires an active plan."
+          );
+          setContacts([]);
+          return;
         }
+
+        const code = (data && "error" in data ? (data as any).error : "") || "load_failed";
+
+        if (code === "not_authenticated") {
+          toast({
+            title: "Please log in",
+            description: "Your session is required to manage emergency contacts.",
+            variant: "destructive",
+          });
+          return;
+        }
+
+        toast({
+          title: "Could not load contacts",
+          description: "Please refresh and try again.",
+          variant: "destructive",
+        });
         return;
       }
 
       setContacts(data.contacts);
     } catch {
       toast({
-        title: 'Network error',
-        description: 'Could not reach the server.',
-        variant: 'destructive',
+        title: "Network error",
+        description: "Could not reach the server.",
+        variant: "destructive",
       });
+    }
+  };
+
+  const fetchFiles = async () => {
+    setFilesLoading(true);
+    try {
+      const files = await listVaultFiles();
+      setVaultFiles(Array.isArray(files) ? files : []);
+    } catch (e: any) {
+      const msg = String(e?.message || "");
+      if (msg === "payment_required" || msg === "http_402") {
+        setVaultFiles([]);
+        setFilesLoading(false);
+        return;
+      }
+      setVaultFiles([]);
+    } finally {
+      setFilesLoading(false);
     }
   };
 
   useEffect(() => {
     (async () => {
       setInitialLoading(true);
-      await fetchContacts();
+      await Promise.all([fetchContacts(), fetchFiles()]);
       setInitialLoading(false);
     })();
   }, []);
@@ -116,63 +199,72 @@ export function EmergencyContactsPage() {
   const handleAddContact = async () => {
     if (!formName || !formEmail) {
       toast({
-        title: 'Missing information',
-        description: 'Please fill in all required fields.',
-        variant: 'destructive',
+        title: "Missing information",
+        description: "Please fill in all required fields.",
+        variant: "destructive",
       });
       return;
     }
 
     setLoading(true);
     try {
-      const resp = await fetch('/auth/emergency-contacts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
+      const resp = await fetch("/auth/emergency-contacts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({
           name: formName,
           email: formEmail,
           relationship: formRelationship,
           assignedFiles: selectedFiles,
+          notifyContact: !skipNotify,
         }),
       });
 
-      const data = await resp.json().catch(() => ({}));
+      const data = await readJsonSafe(resp);
 
       if (!resp.ok || !data?.ok) {
-        const code = data?.error || 'create_failed';
+        if (isPaymentRequired(resp, data)) {
+          emitPaywall(
+            "Add emergency contacts requires a plan",
+            "Upgrade to add contacts and assign files."
+          );
+          return;
+        }
 
-        if (code === 'contact_exists') {
+        const code = data?.error || "create_failed";
+
+        if (code === "contact_exists") {
           toast({
-            title: 'Contact already exists',
-            description: 'You already added this email as a contact.',
-            variant: 'destructive',
+            title: "Contact already exists",
+            description: "You already added this email as a contact.",
+            variant: "destructive",
           });
           return;
         }
 
-        if (code === 'invalid_email') {
+        if (code === "invalid_email") {
           toast({
-            title: 'Invalid email',
-            description: 'Please enter a valid email address.',
-            variant: 'destructive',
+            title: "Invalid email",
+            description: "Please enter a valid email address.",
+            variant: "destructive",
           });
           return;
         }
 
-        if (code === 'not_authenticated') {
+        if (code === "not_authenticated") {
           toast({
-            title: 'Session expired',
-            description: 'Please log in again.',
-            variant: 'destructive',
+            title: "Session expired",
+            description: "Please log in again.",
+            variant: "destructive",
           });
           return;
         }
 
         toast({
-          title: 'Could not add contact',
-          description: 'Please try again.',
-          variant: 'destructive',
+          title: "Could not add contact",
+          description: "Please try again.",
+          variant: "destructive",
         });
         return;
       }
@@ -182,14 +274,14 @@ export function EmergencyContactsPage() {
       resetForm();
 
       toast({
-        title: 'Contact added',
-        description: 'A verification email has been sent to your contact.',
+        title: "Contact added",
+        description: skipNotify ? "Contact added without notifying them. You can resend verification anytime." : "A verification email has been sent to your contact.",
       });
     } catch {
       toast({
-        title: 'Network error',
-        description: 'Could not reach the server.',
-        variant: 'destructive',
+        title: "Network error",
+        description: "Could not reach the server.",
+        variant: "destructive",
       });
     } finally {
       setLoading(false);
@@ -202,9 +294,9 @@ export function EmergencyContactsPage() {
     setLoading(true);
     try {
       const resp = await fetch(`/auth/emergency-contacts/${selectedContact.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({
           name: formName,
           email: formEmail,
@@ -212,24 +304,32 @@ export function EmergencyContactsPage() {
         }),
       });
 
-      const data = await resp.json().catch(() => ({}));
+      const data = await readJsonSafe(resp);
 
       if (!resp.ok || !data?.ok) {
-        const code = data?.error || 'edit_failed';
+        if (isPaymentRequired(resp, data)) {
+          emitPaywall(
+            "Editing contacts requires a plan",
+            "Upgrade to edit contacts and manage assignments."
+          );
+          return;
+        }
 
-        if (code === 'contact_exists') {
+        const code = data?.error || "edit_failed";
+
+        if (code === "contact_exists") {
           toast({
-            title: 'Email already used',
-            description: 'You already have a contact with that email.',
-            variant: 'destructive',
+            title: "Email already used",
+            description: "You already have a contact with that email.",
+            variant: "destructive",
           });
           return;
         }
 
         toast({
-          title: 'Could not update contact',
-          description: 'Please try again.',
-          variant: 'destructive',
+          title: "Could not update contact",
+          description: "Please try again.",
+          variant: "destructive",
         });
         return;
       }
@@ -246,14 +346,14 @@ export function EmergencyContactsPage() {
       resetForm();
 
       toast({
-        title: 'Contact updated',
-        description: 'Emergency contact details have been saved.',
+        title: "Contact updated",
+        description: "Emergency contact details have been saved.",
       });
     } catch {
       toast({
-        title: 'Network error',
-        description: 'Could not reach the server.',
-        variant: 'destructive',
+        title: "Network error",
+        description: "Could not reach the server.",
+        variant: "destructive",
       });
     } finally {
       setLoading(false);
@@ -266,17 +366,25 @@ export function EmergencyContactsPage() {
     setLoading(true);
     try {
       const resp = await fetch(`/auth/emergency-contacts/${selectedContact.id}`, {
-        method: 'DELETE',
-        credentials: 'include',
+        method: "DELETE",
+        credentials: "include",
       });
 
-      const data = await resp.json().catch(() => ({}));
+      const data = await readJsonSafe(resp);
 
       if (!resp.ok || !data?.ok) {
+        if (isPaymentRequired(resp, data)) {
+          emitPaywall(
+            "Removing contacts requires a plan",
+            "Upgrade to manage contacts."
+          );
+          return;
+        }
+
         toast({
-          title: 'Could not remove contact',
-          description: 'Please try again.',
-          variant: 'destructive',
+          title: "Could not remove contact",
+          description: "Please try again.",
+          variant: "destructive",
         });
         return;
       }
@@ -286,14 +394,14 @@ export function EmergencyContactsPage() {
       setSelectedContact(null);
 
       toast({
-        title: 'Contact removed',
-        description: 'The emergency contact has been deleted.',
+        title: "Contact removed",
+        description: "The emergency contact has been deleted.",
       });
     } catch {
       toast({
-        title: 'Network error',
-        description: 'Could not reach the server.',
-        variant: 'destructive',
+        title: "Network error",
+        description: "Could not reach the server.",
+        variant: "destructive",
       });
     } finally {
       setLoading(false);
@@ -306,19 +414,27 @@ export function EmergencyContactsPage() {
     setLoading(true);
     try {
       const resp = await fetch(`/auth/emergency-contacts/${selectedContact.id}/files`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ fileIds: selectedFiles }),
       });
 
-      const data = await resp.json().catch(() => ({}));
+      const data = await readJsonSafe(resp);
 
       if (!resp.ok || !data?.ok) {
+        if (isPaymentRequired(resp, data)) {
+          emitPaywall(
+            "Assigning files requires a plan",
+            "Upgrade to assign files to your emergency contacts."
+          );
+          return;
+        }
+
         toast({
-          title: 'Could not save assignments',
-          description: 'Please try again.',
-          variant: 'destructive',
+          title: "Could not save assignments",
+          description: "Please try again.",
+          variant: "destructive",
         });
         return;
       }
@@ -330,14 +446,14 @@ export function EmergencyContactsPage() {
       setShowFilesModal(false);
 
       toast({
-        title: 'Files updated',
-        description: 'File assignments have been saved.',
+        title: "Files updated",
+        description: "File assignments have been saved.",
       });
     } catch {
       toast({
-        title: 'Network error',
-        description: 'Could not reach the server.',
-        variant: 'destructive',
+        title: "Network error",
+        description: "Could not reach the server.",
+        variant: "destructive",
       });
     } finally {
       setLoading(false);
@@ -348,30 +464,38 @@ export function EmergencyContactsPage() {
     setLoading(true);
     try {
       const resp = await fetch(`/auth/emergency-contacts/${contact.id}/resend`, {
-        method: 'POST',
-        credentials: 'include',
+        method: "POST",
+        credentials: "include",
       });
 
-      const data = await resp.json().catch(() => ({}));
+      const data = await readJsonSafe(resp);
 
       if (!resp.ok || !data?.ok) {
+        if (isPaymentRequired(resp, data)) {
+          emitPaywall(
+            "Resending verification requires a plan",
+            "Upgrade to manage contacts."
+          );
+          return;
+        }
+
         toast({
-          title: 'Could not resend',
-          description: 'Please try again.',
-          variant: 'destructive',
+          title: "Could not resend",
+          description: "Please try again.",
+          variant: "destructive",
         });
         return;
       }
 
       toast({
-        title: 'Verification sent',
+        title: "Verification sent",
         description: `A new verification email has been sent to ${contact.email}.`,
       });
     } catch {
       toast({
-        title: 'Network error',
-        description: 'Could not reach the server.',
-        variant: 'destructive',
+        title: "Network error",
+        description: "Could not reach the server.",
+        variant: "destructive",
       });
     } finally {
       setLoading(false);
@@ -388,7 +512,7 @@ export function EmergencyContactsPage() {
 
   const openFilesModal = (contact: EmergencyContact) => {
     setSelectedContact(contact);
-    setSelectedFiles(contact.assignedFiles);
+    setSelectedFiles(Array.isArray(contact.assignedFiles) ? contact.assignedFiles : []);
     setShowFilesModal(true);
   };
 
@@ -472,14 +596,17 @@ export function EmergencyContactsPage() {
                   <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
                     <span>{contact.relationship}</span>
                     <span>•</span>
-                    <span>{contact.assignedFiles.length} file{contact.assignedFiles.length !== 1 ? 's' : ''} assigned</span>
+                    <span>
+                      {Array.isArray(contact.assignedFiles) ? contact.assignedFiles.length : 0} file
+                      {Array.isArray(contact.assignedFiles) && contact.assignedFiles.length !== 1 ? "s" : ""} assigned
+                    </span>
                   </div>
 
-                  {contact.assignedFiles.length > 0 && (
+                  {Array.isArray(contact.assignedFiles) && contact.assignedFiles.length > 0 && (
                     <div className="mt-2 text-xs text-muted-foreground">
-                      {contact.assignedFiles.slice(0, 2).map((fid) => (
-                        <div key={fid} className="truncate">
-                          {filesById.get(fid)?.name || fid}
+                      {contact.assignedFiles.slice(0, 2).map((key) => (
+                        <div key={key} className="truncate">
+                          {filesByKey.get(key)?.name || key}
                         </div>
                       ))}
                       {contact.assignedFiles.length > 2 && (
@@ -490,12 +617,7 @@ export function EmergencyContactsPage() {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => openFilesModal(contact)}
-                    disabled={loading}
-                  >
+                  <Button variant="outline" size="sm" onClick={() => openFilesModal(contact)} disabled={loading}>
                     Manage files
                   </Button>
 
@@ -516,10 +638,7 @@ export function EmergencyContactsPage() {
                           Resend verification
                         </DropdownMenuItem>
                       )}
-                      <DropdownMenuItem
-                        onClick={() => openDeleteModal(contact)}
-                        className="text-destructive"
-                      >
+                      <DropdownMenuItem onClick={() => openDeleteModal(contact)} className="text-destructive">
                         <Trash2 className="mr-2 h-4 w-4" />
                         Remove contact
                       </DropdownMenuItem>
@@ -536,10 +655,9 @@ export function EmergencyContactsPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Add emergency contact</DialogTitle>
-            <DialogDescription>
-              This person will receive your assigned files if you miss check-ins.
-            </DialogDescription>
+            <DialogDescription>This person will receive your assigned files if you miss check-ins.</DialogDescription>
           </DialogHeader>
+
           <div className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="name">Full name</Label>
@@ -551,6 +669,7 @@ export function EmergencyContactsPage() {
                 disabled={loading}
               />
             </div>
+
             <div className="space-y-2">
               <Label htmlFor="email">Email address</Label>
               <Input
@@ -562,6 +681,7 @@ export function EmergencyContactsPage() {
                 disabled={loading}
               />
             </div>
+
             <div className="space-y-2">
               <Label htmlFor="relationship">Relationship</Label>
               <Input
@@ -575,45 +695,114 @@ export function EmergencyContactsPage() {
 
             <div className="space-y-2">
               <Label>Assign files</Label>
-              <div className="space-y-2 max-h-44 overflow-y-auto">
-                {mockFiles.map((file) => (
-                  <label
-                    key={file.id}
-                    className="flex items-center gap-3 p-3 rounded-lg border cursor-pointer hover:bg-muted/50 transition-colors"
-                  >
-                    <Checkbox
-                      checked={selectedFiles.includes(file.id)}
-                      onCheckedChange={(checked) => {
-                        setSelectedFiles(
-                          checked
-                            ? [...selectedFiles, file.id]
-                            : selectedFiles.filter((id) => id !== file.id)
-                        );
-                      }}
-                      disabled={loading}
-                    />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{file.name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {(file.size / 1024).toFixed(1)} KB
-                      </p>
-                    </div>
-                  </label>
-                ))}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                These are placeholders for now. Later, this will come from your real S3-backed file list.
-              </p>
+
+              {filesLoading ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading files...
+                </div>
+              ) : vaultFiles.length === 0 ? (
+                <div className="text-sm text-muted-foreground py-2">Nothing uploaded</div>
+              ) : (
+                <div className="space-y-2 max-h-44 overflow-y-auto">
+                  {vaultFiles.map((file) => (
+                    <label
+                      key={file.key}
+                      className="flex items-center gap-3 p-3 rounded-lg border cursor-pointer hover:bg-muted/50 transition-colors"
+                    >
+                      <Checkbox
+                        checked={selectedFiles.includes(file.key)}
+                        onCheckedChange={(checked) => {
+                          setSelectedFiles(
+                            checked
+                              ? [...selectedFiles, file.key]
+                              : selectedFiles.filter((k) => k !== file.key)
+                          );
+                        }}
+                        disabled={loading}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{file.name}</p>
+                        <p className="text-xs text-muted-foreground">{formatBytes(file.size_bytes)}</p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
+
+          <div className="mt-2">
+            <label className="flex items-start gap-3 rounded-lg border p-3 cursor-pointer hover:bg-muted/50 transition-colors">
+              <Checkbox
+                checked={skipNotify}
+                onCheckedChange={(checked) => {
+                  if (checked) { setSkipNotify(false); setShowSkipNotifyConfirm(true); }
+                  else setSkipNotify(false);
+                }}
+                disabled={loading}
+              />
+              <div className="text-sm leading-snug">
+                <p className="font-medium text-foreground">
+                  I wish not to notify this person that they have been added as an emergency contact unless it's in case of emergency
+                </p>
+                <p className="text-muted-foreground mt-1">
+                  We recommend notifying them so they can verify their email and be ready.
+                </p>
+              </div>
+            </label>
+          </div>
+
+	
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowAddModal(false)} disabled={loading}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowAddModal(false);
+                setSkipNotify(false);
+              }}
+              disabled={loading}
+            >
               Cancel
             </Button>
             <Button onClick={handleAddContact} disabled={loading}>
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Add contact'}
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Add contact"}
             </Button>
           </DialogFooter>
+          <Dialog open={showSkipNotifyConfirm} onOpenChange={setShowSkipNotifyConfirm}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Are you sure?</DialogTitle>
+                <DialogDescription>
+                  If this person doesn't know they've been added as your emergency contact, they may not check their email when they need to.
+                </DialogDescription>
+              </DialogHeader>
+
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowSkipNotifyConfirm(false);
+                    setSkipNotify(false);
+                  }}
+                  disabled={loading}
+                >
+                  Go back
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={() => {
+                    setShowSkipNotifyConfirm(false);
+                    setSkipNotify(true);
+                  }}
+                  disabled={loading}
+                >
+                  Yes, don't notify
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
         </DialogContent>
       </Dialog>
 
@@ -623,6 +812,7 @@ export function EmergencyContactsPage() {
             <DialogTitle>Edit contact</DialogTitle>
             <DialogDescription>Update the contact&apos;s information.</DialogDescription>
           </DialogHeader>
+
           <div className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="edit-name">Full name</Label>
@@ -653,12 +843,13 @@ export function EmergencyContactsPage() {
               />
             </div>
           </div>
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowEditModal(false)} disabled={loading}>
               Cancel
             </Button>
             <Button onClick={handleEditContact} disabled={loading}>
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save changes'}
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save changes"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -670,34 +861,45 @@ export function EmergencyContactsPage() {
             <DialogTitle>Assign files to {selectedContact?.name}</DialogTitle>
             <DialogDescription>Select which files this contact should receive.</DialogDescription>
           </DialogHeader>
-          <div className="space-y-3 max-h-64 overflow-y-auto">
-            {mockFiles.map((file) => (
-              <label
-                key={file.id}
-                className="flex items-center gap-3 p-3 rounded-lg border cursor-pointer hover:bg-muted/50 transition-colors"
-              >
-                <Checkbox
-                  checked={selectedFiles.includes(file.id)}
-                  onCheckedChange={(checked) => {
-                    setSelectedFiles(
-                      checked ? [...selectedFiles, file.id] : selectedFiles.filter((id) => id !== file.id)
-                    );
-                  }}
-                  disabled={loading}
-                />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{file.name}</p>
-                  <p className="text-xs text-muted-foreground">{(file.size / 1024).toFixed(1)} KB</p>
-                </div>
-              </label>
-            ))}
-          </div>
+
+          {filesLoading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading files...
+            </div>
+          ) : vaultFiles.length === 0 ? (
+            <div className="text-sm text-muted-foreground py-2">Nothing uploaded</div>
+          ) : (
+            <div className="space-y-3 max-h-64 overflow-y-auto">
+              {vaultFiles.map((file) => (
+                <label
+                  key={file.key}
+                  className="flex items-center gap-3 p-3 rounded-lg border cursor-pointer hover:bg-muted/50 transition-colors"
+                >
+                  <Checkbox
+                    checked={selectedFiles.includes(file.key)}
+                    onCheckedChange={(checked) => {
+                      setSelectedFiles(
+                        checked ? [...selectedFiles, file.key] : selectedFiles.filter((k) => k !== file.key)
+                      );
+                    }}
+                    disabled={loading}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{file.name}</p>
+                    <p className="text-xs text-muted-foreground">{formatBytes(file.size_bytes)}</p>
+                  </div>
+                </label>
+              ))}
+            </div>
+          )}
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowFilesModal(false)} disabled={loading}>
               Cancel
             </Button>
             <Button onClick={handleUpdateFiles} disabled={loading}>
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save assignments'}
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save assignments"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -712,12 +914,13 @@ export function EmergencyContactsPage() {
               They will no longer receive any files.
             </DialogDescription>
           </DialogHeader>
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowDeleteModal(false)} disabled={loading}>
               Cancel
             </Button>
             <Button variant="destructive" onClick={handleDeleteContact} disabled={loading}>
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Remove contact'}
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Remove contact"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -725,3 +928,4 @@ export function EmergencyContactsPage() {
     </div>
   );
 }
+

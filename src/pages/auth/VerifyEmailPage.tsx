@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Mail, ArrowLeft, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
+import { useAuth } from '@/contexts/AuthContext';
 
 export function VerifyEmailPage() {
   const [code, setCode] = useState('');
@@ -13,6 +14,7 @@ export function VerifyEmailPage() {
 
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { setRole } = useAuth();
 
   useEffect(() => {
     const saved = sessionStorage.getItem('pending_verify_email') || '';
@@ -54,10 +56,14 @@ export function VerifyEmailPage() {
 
       sessionStorage.removeItem('pending_verify_email');
 
+      // IMPORTANT: mark user as logged in on the frontend too
+      setRole('user');
+
       toast({
         title: 'Email verified',
         description: 'Your account has been verified. Please set up your PIN.',
       });
+
       navigate('/create-pin');
     } catch {
       toast({

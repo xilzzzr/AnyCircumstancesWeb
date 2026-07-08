@@ -23,7 +23,7 @@ export function PublicLayout() {
               <Shield className="h-5 w-5 text-primary-foreground" />
             </div>
             <span className="font-semibold text-lg text-foreground group-hover:text-primary transition-colors">
-              UnderAnyCircumstance
+              anycircumstances
             </span>
           </Link>
 
@@ -104,7 +104,7 @@ export function PublicLayout() {
                 <div className="h-8 w-8 rounded-lg bg-gradient-security flex items-center justify-center">
                   <Shield className="h-4 w-4 text-primary-foreground" />
                 </div>
-                <span className="font-semibold text-foreground">UnderAnyCircumstance</span>
+                <span className="font-semibold text-foreground">anycircumstances</span>
               </Link>
               <p className="text-sm text-muted-foreground">
                 Secure emergency data delivery for when you need it most.
@@ -140,7 +140,7 @@ export function PublicLayout() {
           </div>
 
           <div className="mt-12 pt-8 border-t border-border flex flex-col md:flex-row justify-between items-center gap-4 text-sm text-muted-foreground">
-            <p>&copy; {new Date().getFullYear()} UnderAnyCircumstance. All rights reserved.</p>
+            <p>&copy; {new Date().getFullYear()} anycircumstances. All rights reserved.</p>
             <p>Your data is end-to-end encrypted</p>
           </div>
         </div>

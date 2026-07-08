@@ -1,95 +1,157 @@
-import { Link } from 'react-router-dom';
-import { Button } from '@/components/ui/button';
-import { Check, ArrowRight, Building2, Users, Shield, Zap } from 'lucide-react';
-import { motion } from 'framer-motion';
-import { cn } from '@/lib/utils';
+import { useState, useMemo } from "react";
+import { Link } from "react-router-dom";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Slider } from "@/components/ui/slider";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+import { Check, ArrowRight, Phone, MessageSquare, MapPin, Calendar } from "lucide-react";
+import { motion } from "framer-motion";
+import { cn } from "@/lib/utils";
+import { createCheckoutSession } from "@/lib/billingClient";
 
-const plans = [
+// Storage tiers with pricing (price per GB decreases as you go higher)
+// Max storage price is $29.99 at 200GB
+const storageTiers = [
+  { gb: 5, price: 4.99, perGb: 1.0 },
+  { gb: 10, price: 7.99, perGb: 0.8 },
+  { gb: 25, price: 12.99, perGb: 0.52 },
+  { gb: 50, price: 17.99, perGb: 0.36 },
+  { gb: 100, price: 22.99, perGb: 0.23 },
+  { gb: 200, price: 29.99, perGb: 0.15 },
+];
+
+const addons = [
   {
-    name: 'Starter',
-    description: 'Get started with essential protection',
-    price: 4.99,
-    storage: '5 GB',
-    overageRate: 0.75,
-    features: [
-      'Secure file storage',
-      'Inactivity check-ins (daily/weekly/monthly)',
-      'Automated delivery to trusted contacts',
-      'Email reminders',
-      'Optional 2FA',
-    ],
-    cta: 'Get started',
-    popular: false,
-    icon: Shield,
+    id: "call-contacts",
+    label: "Call emergency contacts",
+    description: "We'll call your emergency contacts when triggered",
+    price: 1.99,
+    icon: Phone,
+    comingSoon: true,
   },
   {
-    name: 'Plus',
-    description: 'More control and priority support',
-    price: 12.99,
-    storage: '20 GB',
-    overageRate: 0.65,
-    features: [
-      'Everything in Starter',
-      'Priority support',
-      'Advanced release options',
-      'Custom verification schedules',
-      'Multiple notification channels',
-    ],
-    cta: 'Get started',
-    popular: true,
-    icon: Zap,
+    id: "text-contacts",
+    label: "Text emergency contacts",
+    description: "We'll send SMS to your emergency contacts",
+    price: 0.49,
+    icon: MessageSquare,
+    comingSoon: true,
   },
   {
-    name: 'Commercial',
-    description: 'For teams and organizations',
-    price: 75,
-    storage: '200 GB',
-    overageRate: 0.40,
-    features: [
-      'Everything in Plus',
-      'Multi-user / team support',
-      'Dedicated onboarding',
-      'Team management dashboard',
-      'Activity audit logs',
-    ],
-    cta: 'Get started',
-    popular: false,
-    icon: Users,
-  },
-  {
-    name: 'Enterprise',
-    description: 'Custom solutions for high-volume needs',
-    price: null,
-    storage: 'Custom',
-    overageRate: null,
-    features: [
-      'Everything in Commercial',
-      'Custom storage allocations',
-      'Volume-based pricing discounts',
-      'Dedicated account manager',
-      'Custom SLA',
-      'API access',
-    ],
-    cta: 'Contact us',
-    popular: false,
-    icon: Building2,
-    isEnterprise: true,
+    id: "log-location",
+    label: "Log location at check-in",
+    description: "Record your GPS location each time you check in",
+    price: 0.99,
+    icon: MapPin,
+    comingSoon: true,
   },
 ];
 
+const checkInFrequencies = [
+  { id: "monthly", label: "Monthly", price: 0.0 },
+  { id: "weekly", label: "Weekly", price: 1.99 },
+  { id: "daily", label: "Daily", price: 2.99 },
+];
+
+function getStoragePrice(gb: number): number {
+  for (let i = storageTiers.length - 1; i >= 0; i--) {
+    if (gb >= storageTiers[i].gb) {
+      if (i === storageTiers.length - 1) return storageTiers[i].price;
+      const currentTier = storageTiers[i];
+      const nextTier = storageTiers[i + 1];
+      const ratio = (gb - currentTier.gb) / (nextTier.gb - currentTier.gb);
+      return currentTier.price + ratio * (nextTier.price - currentTier.price);
+    }
+  }
+  return storageTiers[0].price;
+}
+
+function getPricePerGb(gb: number): number {
+  for (let i = storageTiers.length - 1; i >= 0; i--) {
+    if (gb >= storageTiers[i].gb) return storageTiers[i].perGb;
+  }
+  return storageTiers[0].perGb;
+}
+
 export function PricingPage() {
+  const [storageGb, setStorageGb] = useState(5);
+  const [selectedAddons, setSelectedAddons] = useState<string[]>([]);
+  const [checkInFrequency, setCheckInFrequency] = useState("monthly");
+  const [isAnnual, setIsAnnual] = useState(false);
+
+  const pricing = useMemo(() => {
+    const storagePrice = getStoragePrice(storageGb);
+    const addonsPrice = addons
+      .filter((addon) => selectedAddons.includes(addon.id))
+      .reduce((sum, addon) => sum + addon.price, 0);
+    const frequencyPrice = checkInFrequencies.find((f) => f.id === checkInFrequency)?.price || 0;
+
+    const monthlyTotal = storagePrice + addonsPrice + frequencyPrice;
+    const annualTotal = monthlyTotal * 10;
+
+    return {
+      storage: storagePrice,
+      addons: addonsPrice,
+      frequency: frequencyPrice,
+      monthlyTotal,
+      annualTotal,
+      annualMonthly: annualTotal / 12,
+      savings: monthlyTotal * 2,
+    };
+  }, [storageGb, selectedAddons, checkInFrequency]);
+
+  const onCheckout = async () => {
+    try {
+      const payload = {
+        storageGb,
+        checkInFrequency: checkInFrequency as "monthly" | "weekly" | "daily",
+        billingInterval: isAnnual ? "annual" : "monthly",
+        addons: selectedAddons,
+      };
+
+      const data = await createCheckoutSession(payload);
+      window.location.href = data.url;
+    } catch (e: any) {
+      const code = e?.data?.error || e?.message || "";
+      if (code === "not_authenticated") {
+        localStorage.setItem(
+          "pendingCheckout",
+          JSON.stringify({
+            storageGb,
+            checkInFrequency,
+            billingInterval: isAnnual ? "annual" : "monthly",
+            addons: selectedAddons,
+          })
+        );
+        window.location.href = "/signup?next=/pricing";
+        return;
+      }
+      throw e;
+    }
+  };
+
+  const toggleAddon = (addonId: string) => {
+    setSelectedAddons((prev) => (prev.includes(addonId) ? prev.filter((id) => id !== addonId) : [...prev, addonId]));
+  };
+
   return (
-    <div className="flex flex-col">
-      {/* Hero */}
+    <div className="flex flex-col pb-48 lg:pb-0">
       <section className="py-16 lg:py-24 bg-gradient-hero">
         <div className="container mx-auto px-4">
+
+        <div className="mb-6 text-sm text-muted-foreground">
+          <span className="mr-2">Related:</span>
+          <Link to="/digital-vault" className="underline underline-offset-4 hover:opacity-90 mr-3">secure digital vault</Link>
+          <Link to="/dead-mans-switch" className="underline underline-offset-4 hover:opacity-90">dead man’s switch</Link>
+        </div>
           <div className="max-w-3xl mx-auto text-center">
             <motion.h1
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               className="text-4xl md:text-5xl font-bold text-vault-foreground mb-6"
             >
-              Simple, Transparent Pricing
+              Build Your Plan
             </motion.h1>
             <motion.p
               initial={{ opacity: 0, y: 20 }}
@@ -97,249 +159,190 @@ export function PricingPage() {
               transition={{ delay: 0.1 }}
               className="text-lg text-vault-foreground/70 mb-6"
             >
-              Choose the plan that fits your needs. All plans include end-to-end encryption and no hidden fees.
+              Only pay for what you need. Choose your storage, add features, and set your check-in frequency.
             </motion.p>
-
-            {/* Monthly billing notice */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2 }}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-vault-foreground/10 text-vault-foreground/80 text-sm"
-            >
-              <span className="font-medium">Monthly billing only</span>
-              <span className="text-vault-foreground/50">•</span>
-              <span>No annual plans</span>
-            </motion.div>
           </div>
         </div>
       </section>
 
-      {/* Plans */}
       <section className="py-16 bg-background">
         <div className="container mx-auto px-4">
-          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 max-w-7xl mx-auto">
-            {plans.map((plan, index) => {
-              const IconComponent = plan.icon;
-              return (
+          <div className="max-w-4xl mx-auto">
+            <div className="grid lg:grid-cols-5 gap-8">
+              <div className="lg:col-span-3 space-y-8">
                 <motion.div
-                  key={plan.name}
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.1 }}
-                  className={cn(
-                    "relative rounded-2xl p-6 flex flex-col",
-                    plan.popular 
-                      ? "bg-primary text-primary-foreground ring-2 ring-primary shadow-glow"
-                      : "bg-card border border-border"
-                  )}
+                  className="p-6 rounded-2xl bg-card border border-border"
                 >
-                  {plan.popular && (
-                    <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-primary-foreground text-primary text-xs font-medium">
-                      Most Popular
-                    </div>
-                  )}
+                  <h2 className="text-lg font-semibold text-foreground mb-2">Storage</h2>
+                  <p className="text-sm text-muted-foreground mb-6">The more storage you choose, the lower your per-GB rate</p>
 
-                  <div className="mb-6">
-                    <div className="flex items-center gap-2 mb-2">
-                      <IconComponent className={cn(
-                        "h-5 w-5",
-                        plan.popular ? "text-primary-foreground" : "text-primary"
-                      )} />
-                      <h3 className={cn(
-                        "text-lg font-semibold",
-                        plan.popular ? "text-primary-foreground" : "text-foreground"
-                      )}>
-                        {plan.name}
-                      </h3>
+                  <div className="mb-4">
+                    <div className="flex justify-between items-baseline mb-2">
+                      <span className="text-3xl font-bold text-foreground">{storageGb} GB</span>
+                      <span className="text-sm text-muted-foreground">${getPricePerGb(storageGb).toFixed(2)}/GB</span>
                     </div>
-                    <p className={cn(
-                      "text-sm",
-                      plan.popular ? "text-primary-foreground/80" : "text-muted-foreground"
-                    )}>
-                      {plan.description}
-                    </p>
+                    <Slider
+                      value={[storageGb]}
+                      onValueChange={([value]) => setStorageGb(value)}
+                      min={5}
+                      max={200}
+                      step={5}
+                      className="my-4"
+                    />
+                    <div className="flex justify-between text-xs text-muted-foreground">
+                      <span>5 GB</span>
+                      <span>200 GB</span>
+                    </div>
                   </div>
+                </motion.div>
 
-                  <div className="mb-6">
-                    {plan.price !== null ? (
-                      <>
-                        <div className="flex items-baseline gap-1">
-                          <span className={cn(
-                            "text-4xl font-bold",
-                            plan.popular ? "text-primary-foreground" : "text-foreground"
-                          )}>
-                            ${plan.price}
-                          </span>
-                          <span className={cn(
-                            "text-sm",
-                            plan.popular ? "text-primary-foreground/70" : "text-muted-foreground"
-                          )}>
-                            /month
-                          </span>
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.05 }}
+                  className="p-6 rounded-2xl bg-card border border-border"
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    <Calendar className="w-5 h-5 text-muted-foreground" />
+                    <h2 className="text-lg font-semibold text-foreground">Check-in Frequency</h2>
+                  </div>
+                  <p className="text-sm text-muted-foreground mb-6">Choose how often you want to verify you’re okay</p>
+
+                  <div className="space-y-3">
+                    {checkInFrequencies.map((freq) => {
+                      const selected = checkInFrequency === freq.id;
+                      return (
+                        <button
+                          key={freq.id}
+                          type="button"
+                          onClick={() => setCheckInFrequency(freq.id)}
+                          className={cn(
+                            "w-full p-4 rounded-xl border text-left transition",
+                            selected ? "border-primary bg-primary/5" : "border-border hover:bg-muted/40"
+                          )}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="font-medium text-foreground">{freq.label}</div>
+                            <div className="text-sm text-muted-foreground">{freq.price === 0 ? "Included" : `+$${freq.price.toFixed(2)}/mo`}</div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </motion.div>
+
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.1 }}
+                  className="p-6 rounded-2xl bg-card border border-border"
+                >
+                  <h2 className="text-lg font-semibold text-foreground mb-2">Add-ons</h2>
+                  <p className="text-sm text-muted-foreground mb-6">Optional features you can add to your plan</p>
+
+                  <div className="space-y-4">
+                    {addons.map((addon) => {
+                      const checked = selectedAddons.includes(addon.id);
+                      const Icon = addon.icon;
+
+                      return (
+                        <div
+                          key={addon.id}
+                          className={cn(
+                            "flex items-start gap-4 p-4 rounded-xl border",
+                            addon.comingSoon ? "opacity-60" : "hover:bg-muted/40",
+                            checked ? "border-primary bg-primary/5" : "border-border"
+                          )}
+                        >
+                          <Checkbox
+                            checked={checked}
+                            onCheckedChange={() => !addon.comingSoon && toggleAddon(addon.id)}
+                            disabled={addon.comingSoon}
+                            className="mt-1"
+                          />
+
+                          <div className="flex-1">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="flex items-center gap-2">
+                                <Icon className="w-4 h-4 text-muted-foreground" />
+                                <div className="font-medium text-foreground">{addon.label}</div>
+                              </div>
+                              <div className="text-sm text-muted-foreground">
+                                {addon.comingSoon ? "Coming soon" : `+$${addon.price.toFixed(2)}/mo`}
+                              </div>
+                            </div>
+                            <div className="text-sm text-muted-foreground mt-1">{addon.description}</div>
+                          </div>
                         </div>
-                        <p className={cn(
-                          "text-sm mt-1",
-                          plan.popular ? "text-primary-foreground/70" : "text-muted-foreground"
-                        )}>
-                          {plan.storage} included
-                        </p>
-                      </>
-                    ) : (
-                      <div>
-                        <span className={cn(
-                          "text-2xl font-bold",
-                          plan.popular ? "text-primary-foreground" : "text-foreground"
-                        )}>
-                          Custom Pricing
-                        </span>
-                        <p className={cn(
-                          "text-sm mt-1",
-                          plan.popular ? "text-primary-foreground/70" : "text-muted-foreground"
-                        )}>
-                          Contact us to discuss
-                        </p>
+                      );
+                    })}
+                  </div>
+                </motion.div>
+              </div>
+
+              <div className="lg:col-span-2">
+                <div className="sticky top-24 p-6 rounded-2xl bg-card border border-border">
+                  <h2 className="text-lg font-semibold text-foreground mb-4">Summary</h2>
+
+                  <div className="space-y-3 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Storage</span>
+                      <span className="text-foreground">${pricing.storage.toFixed(2)}/mo</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Check-ins</span>
+                      <span className="text-foreground">${pricing.frequency.toFixed(2)}/mo</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Add-ons</span>
+                      <span className="text-foreground">${pricing.addons.toFixed(2)}/mo</span>
+                    </div>
+
+                    <div className="border-t border-border pt-3 flex justify-between">
+                      <span className="font-medium text-foreground">Total</span>
+                      <span className="font-semibold text-foreground">
+                        {isAnnual ? `$${pricing.annualTotal.toFixed(2)} once/yr` : `$${pricing.monthlyTotal.toFixed(2)}/mo`}
+                      </span>
+                    </div>
+
+                    {isAnnual && (
+                      <div className="text-xs text-muted-foreground">
+                        Annual billing: pay for 10 months, get 2 free.
                       </div>
                     )}
                   </div>
 
-                  {/* Overage rate */}
-                  {plan.overageRate !== null && (
-                    <div className={cn(
-                      "mb-6 px-3 py-2 rounded-lg text-sm",
-                      plan.popular ? "bg-primary-foreground/10" : "bg-muted/50"
-                    )}>
-                      <span className={plan.popular ? "text-primary-foreground/80" : "text-muted-foreground"}>
-                        Overage: 
-                      </span>
-                      <span className={cn(
-                        "font-medium ml-1",
-                        plan.popular ? "text-primary-foreground" : "text-foreground"
-                      )}>
-                        ${plan.overageRate.toFixed(2)}/GB
-                      </span>
-                      <span className={plan.popular ? "text-primary-foreground/60" : "text-muted-foreground"}>
-                        /month
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Enterprise note */}
-                  {plan.isEnterprise && (
-                    <div className="mb-6 px-3 py-2 rounded-lg bg-muted/50 text-sm">
-                      <p className="text-muted-foreground">
-                        Larger volume = smaller tariffs
-                      </p>
-                      <p className="text-xs text-muted-foreground/70 mt-1">
-                        Ideal for businesses, law firms, creators
-                      </p>
-                    </div>
-                  )}
-
-                  <ul className="space-y-3 mb-8 flex-1">
-                    {plan.features.map((feature) => (
-                      <li key={feature} className="flex items-start gap-2 text-sm">
-                        <Check className={cn(
-                          "h-4 w-4 shrink-0 mt-0.5",
-                          plan.popular ? "text-primary-foreground" : "text-primary"
-                        )} />
-                        <span className={plan.popular ? "text-primary-foreground/90" : "text-foreground"}>
-                          {feature}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-
-                  <Link to={plan.isEnterprise ? "/contact" : "/signup"}>
-                    <Button 
-                      className={cn(
-                        "w-full",
-                        plan.popular && "bg-primary-foreground text-primary hover:bg-primary-foreground/90"
-                      )}
-                      variant={plan.popular ? "default" : "outline"}
-                    >
-                      {plan.cta}
-                    </Button>
-                  </Link>
-                </motion.div>
-              );
-            })}
-          </div>
-        </div>
-      </section>
-
-      {/* Overage Explanation */}
-      <section className="py-16 bg-muted/30">
-        <div className="container mx-auto px-4">
-          <div className="max-w-3xl mx-auto text-center">
-            <h2 className="text-2xl font-bold text-foreground mb-4">
-              How Storage Overage Works
-            </h2>
-            <p className="text-muted-foreground mb-8">
-              Storage overage charges apply only when you exceed your plan's included storage.
-            </p>
-            
-            <div className="grid sm:grid-cols-2 gap-6 text-left">
-              <div className="p-6 rounded-xl bg-card border border-border">
-                <h3 className="font-semibold text-foreground mb-2">Example</h3>
-                <p className="text-sm text-muted-foreground">
-                  On the <span className="font-medium text-foreground">Plus plan</span> with 20 GB included, if you use 25 GB:
-                </p>
-                <div className="mt-4 space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Plan base price</span>
-                    <span className="font-medium text-foreground">$12.99</span>
+                  <div className="mt-6 flex items-center justify-between gap-3">
+                    <Label htmlFor="annual" className="text-sm text-muted-foreground">
+                      Annual billing (pay 10 months, get 2 free)
+                    </Label>
+                    <Switch id="annual" checked={isAnnual} onCheckedChange={setIsAnnual} />
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">5 GB overage × $0.65</span>
-                    <span className="font-medium text-foreground">$3.25</span>
+
+                  <Button className="w-full mt-6" onClick={onCheckout}>
+                    Continue to checkout <ArrowRight className="w-4 h-4 ml-2" />
+                  </Button>
+
+                  <div className="mt-4 text-xs text-muted-foreground">
+                    Already have an account? <Link to="/login" className="underline">Log in</Link>
                   </div>
-                  <div className="border-t border-border pt-2 flex justify-between">
-                    <span className="font-medium text-foreground">Total monthly</span>
-                    <span className="font-bold text-primary">$16.24</span>
+
+                  <div className="mt-6 space-y-2 text-xs text-muted-foreground">
+                    <div className="flex items-center gap-2">
+                      <Check className="w-4 h-4" />
+                      <span>Cancel anytime</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Check className="w-4 h-4" />
+                      <span>Secure by default</span>
+                    </div>
                   </div>
                 </div>
               </div>
-              
-              <div className="p-6 rounded-xl bg-card border border-border">
-                <h3 className="font-semibold text-foreground mb-2">Transparency Promise</h3>
-                <ul className="space-y-3 text-sm">
-                  <li className="flex items-start gap-2">
-                    <Check className="h-4 w-4 shrink-0 mt-0.5 text-primary" />
-                    <span className="text-muted-foreground">No hidden fees or surprise charges</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <Check className="h-4 w-4 shrink-0 mt-0.5 text-primary" />
-                    <span className="text-muted-foreground">Clear usage tracking in your dashboard</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <Check className="h-4 w-4 shrink-0 mt-0.5 text-primary" />
-                    <span className="text-muted-foreground">Alerts before you exceed storage</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <Check className="h-4 w-4 shrink-0 mt-0.5 text-primary" />
-                    <span className="text-muted-foreground">Upgrade anytime for better rates</span>
-                  </li>
-                </ul>
-              </div>
+              {/* end summary */}
             </div>
-          </div>
-        </div>
-      </section>
-
-      {/* FAQ Link */}
-      <section className="py-16 bg-background">
-        <div className="container mx-auto px-4">
-          <div className="max-w-xl mx-auto text-center">
-            <h2 className="text-xl font-semibold text-foreground mb-4">
-              Have questions about pricing?
-            </h2>
-            <Link to="/faq">
-              <Button variant="outline" className="gap-2">
-                View FAQ
-                <ArrowRight className="h-4 w-4" />
-              </Button>
-            </Link>
           </div>
         </div>
       </section>

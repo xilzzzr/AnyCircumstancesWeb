@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { HelpCircle } from "lucide-react";
 import {
   Accordion,
@@ -246,7 +247,13 @@ const FaqPage = () => {
   return (
     <div className="min-h-screen bg-background">
       {/* Hero Section */}
-      <section className="py-20 px-4">
+      
+        <div className="mb-6 text-sm text-muted-foreground">
+          <span className="mr-2">Related:</span>
+          <Link to="/digital-vault" className="underline underline-offset-4 hover:opacity-90 mr-3">secure digital vault</Link>
+          <Link to="/dead-mans-switch" className="underline underline-offset-4 hover:opacity-90">dead man’s switch</Link>
+        </div>
+<section className="py-20 px-4">
         <div className="max-w-3xl mx-auto text-center">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary/10 mb-6">
             <HelpCircle className="w-8 h-8 text-primary" />
