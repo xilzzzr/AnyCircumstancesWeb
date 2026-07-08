@@ -7,6 +7,7 @@ const crypto = require("crypto");
 const fs = require("fs");
 const mysql = require("mysql2/promise");
 const nodemailer = require("nodemailer");
+const { sendPushToUser } = require("./push_notifications");
 
 function sha256Hex(input) {
   return crypto.createHash("sha256").update(String(input)).digest("hex");
@@ -79,6 +80,26 @@ const stepMs = Math.max(1, Math.floor(graceMs / reminders));
       try {
         await mail.transporter.sendMail({ from: mail.from, to: ownerEmail, subject, text });
         console.log("[dispatcher] reminder sent user_id=", userId, "idx=", idx);
+
+        try {
+          await sendPushToUser(conn, userId, {
+            title: "Check-in reminder",
+            body: "Your check-in is overdue but still within the grace period.",
+            data: {
+              type: "verification_reminder",
+              route: "/app/verification"
+            }
+          });
+        } catch (pushError) {
+          console.log(
+            "[dispatcher] reminder push failed user_id=",
+            userId,
+            "idx=",
+            idx,
+            "msg=",
+            String((pushError && pushError.message) || pushError || "").slice(0, 200)
+          );
+        }
       } catch (e) {
         const code = (e && (e.code || e.responseCode)) || "send_failed";
         const msg = (e && (e.response || e.message)) || "";
