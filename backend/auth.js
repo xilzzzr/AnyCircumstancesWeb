@@ -7,6 +7,7 @@ const crypto = require("crypto");
 const nodemailer = require("nodemailer");
 const Stripe = require("stripe");
 const { escapeHtml, renderAnyCircumstancesEmail } = require("./emails");
+const { currentApnsEnv } = require("./push_notifications");
 const router = express.Router();
 
 function asyncHandler(fn) {
@@ -2514,15 +2515,23 @@ router.post(
       return res.status(400).json({ ok: false, error: "missing_token" });
     }
 
-    const pool = getPool();
+    if (!/^[0-9a-fA-F]{64,255}$/.test(token)) {
+      return res.status(400).json({ ok: false, error: "invalid_token" });
+    }
+
+    const apnsEnv = currentApnsEnv();
 
     await pool.query(
       `
-      INSERT INTO user_device_tokens (user_id, token)
-      VALUES (?, ?)
-      ON DUPLICATE KEY UPDATE token = VALUES(token)
+      INSERT INTO user_device_tokens (user_id, token, platform, apns_env, invalidated_at)
+      VALUES (?, ?, 'ios', ?, NULL)
+      ON DUPLICATE KEY UPDATE
+        user_id = VALUES(user_id),
+        apns_env = VALUES(apns_env),
+        invalidated_at = NULL,
+        updated_at = CURRENT_TIMESTAMP
       `,
-      [String(userId), token]
+      [String(userId), token.toLowerCase(), apnsEnv]
     );
 
     return res.json({ ok: true });
@@ -2642,4 +2651,3 @@ async function stripeWebhookHandler(req, res) {
 }
 
 module.exports = { authRouter: router, authPool: pool, stripeWebhookHandler };
-

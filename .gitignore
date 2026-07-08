@@ -30,6 +30,7 @@ backend/.env
 backend/.env.*
 *.pem
 *.key
+AuthKey_*.p8
 *.p8
 cookies.txt
 backend/cookies.txt
