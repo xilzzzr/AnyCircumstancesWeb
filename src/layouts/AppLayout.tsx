@@ -32,8 +32,26 @@ import {
   Lock,
   Unlock,
 } from 'lucide-react';
-import { useState, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { cn } from '@/lib/utils';
+
+type VaultFile = {
+  key: string;
+  name: string;
+  content_type: string;
+  size_bytes: number | null;
+  created_at: string;
+  include_in_emergency: boolean;
+};
+
+type BillingSummaryResp = {
+  ok?: boolean;
+  billing?: { storageLimitGb?: number | null };
+  profile?: { storageLimitGb?: number | null };
+  subscription?: { storageLimitGb?: number | null };
+};
+
+const API_BASE = (import.meta as any).env?.VITE_API_BASE_URL ?? "";
 
 const sidebarItems = [
   { label: 'Dashboard', href: '/app', icon: LayoutDashboard },
@@ -64,6 +82,20 @@ function getInitials(name?: string | null, email?: string | null) {
   }
 
   return 'U';
+}
+
+function formatBytes(bytes: number) {
+  const n = Number(bytes);
+  if (!Number.isFinite(n) || n < 0) return "—";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let v = n;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i += 1;
+  }
+  const rounded = i === 0 ? String(Math.round(v)) : v.toFixed(v >= 10 ? 1 : 2);
+  return `${rounded} ${units[i]}`;
 }
 
 function SidebarContent({ onItemClick }: { onItemClick?: () => void }) {
@@ -101,12 +133,77 @@ export function AppLayout() {
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  const storagePercent = user ? (user.storageUsed / user.storageLimit) * 100 : 0;
+  const [storageUsedBytes, setStorageUsedBytes] = useState<number | null>(null);
+  const [storageLimitBytes, setStorageLimitBytes] = useState<number | null>(null);
 
   const initials = useMemo(
     () => getInitials((user as any)?.name, (user as any)?.email),
     [user]
   );
+
+  const storagePercent = useMemo(() => {
+    if (storageUsedBytes === null || storageLimitBytes === null) return 0;
+    if (!Number.isFinite(storageUsedBytes) || !Number.isFinite(storageLimitBytes)) return 0;
+    if (storageLimitBytes <= 0) return 0;
+    return Math.min(100, (storageUsedBytes / storageLimitBytes) * 100);
+  }, [storageUsedBytes, storageLimitBytes]);
+
+  useEffect(() => {
+    let alive = true;
+
+    async function fetchJson(path: string) {
+      const r = await fetch(`${API_BASE}${path}`, { credentials: "include" });
+      if (!r.ok) {
+        const body = await r.json().catch(() => null);
+        const err = new Error(body?.error || `http_${r.status}`);
+        (err as any).status = r.status;
+        throw err;
+      }
+      return r.json();
+    }
+
+    async function loadStorage() {
+      try {
+        const [filesOut, billingOut] = await Promise.all([
+          fetchJson("/files/list"),
+          fetchJson("/auth/billing/summary?limit=1"),
+        ]);
+
+        if (!alive) return;
+
+        const files: VaultFile[] = Array.isArray(filesOut?.files) ? filesOut.files : [];
+        const used = files.reduce((sum, f) => {
+          const b = Number(f?.size_bytes);
+          return sum + (Number.isFinite(b) && b > 0 ? b : 0);
+        }, 0);
+
+        const s: BillingSummaryResp = billingOut || {};
+        const rawGb =
+          (s as any)?.billing?.storageLimitGb ??
+          (s as any)?.profile?.storageLimitGb ??
+          (s as any)?.subscription?.storageLimitGb ??
+          null;
+
+        const gb = Number(rawGb);
+        const limit = Number.isFinite(gb) && gb > 0 ? Math.round(gb * 1024 * 1024 * 1024) : null;
+
+        setStorageUsedBytes(used);
+        setStorageLimitBytes(limit);
+      } catch {
+        if (!alive) return;
+        setStorageUsedBytes(null);
+        setStorageLimitBytes(null);
+      }
+    }
+
+    loadStorage();
+    const t = window.setInterval(loadStorage, 15000);
+
+    return () => {
+      alive = false;
+      window.clearInterval(t);
+    };
+  }, []);
 
   const handleLogout = () => {
     logout();
@@ -115,19 +212,17 @@ export function AppLayout() {
 
   return (
     <div className="min-h-screen flex bg-background">
-      {/* Desktop Sidebar */}
       <aside className="hidden lg:flex flex-col w-64 border-r border-border bg-card">
         <div className="h-16 flex items-center gap-2 px-6 border-b border-border">
           <Link to="/" className="flex items-center gap-2">
             <div className="h-8 w-8 rounded-lg bg-gradient-security flex items-center justify-center">
               <Shield className="h-4 w-4 text-primary-foreground" />
             </div>
-            <span className="font-semibold text-foreground">UnderAnyCircumstance</span>
+            <span className="font-semibold text-foreground">anycircumstances</span>
           </Link>
         </div>
         <SidebarContent />
 
-        {/* Vault Lock Status */}
         <div className="p-4 border-t border-border">
           <button
             onClick={() => vaultLocked ? navigate('/app/check-in') : lockVault()}
@@ -144,11 +239,8 @@ export function AppLayout() {
         </div>
       </aside>
 
-      {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Top Bar */}
         <header className="h-16 border-b border-border bg-card flex items-center justify-between px-4 lg:px-6 gap-4">
-          {/* Mobile Menu */}
           <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
             <SheetTrigger asChild className="lg:hidden">
               <Button variant="ghost" size="icon">
@@ -160,25 +252,25 @@ export function AppLayout() {
                 <div className="h-8 w-8 rounded-lg bg-gradient-security flex items-center justify-center">
                   <Shield className="h-4 w-4 text-primary-foreground" />
                 </div>
-                <span className="font-semibold text-foreground">UnderAnyCircumstance</span>
+                <span className="font-semibold text-foreground">anycircumstances</span>
               </div>
               <SidebarContent onItemClick={() => setMobileOpen(false)} />
             </SheetContent>
           </Sheet>
 
-          {/* Storage Display */}
           <div className="hidden sm:flex items-center gap-3 flex-1 max-w-xs">
             <div className="flex-1">
               <div className="flex items-center justify-between text-xs mb-1">
                 <span className="text-muted-foreground">Storage</span>
-                <span className="font-medium">{user?.storageUsed || 0} MB</span>
+                <span className="font-medium">
+                  {storageUsedBytes === null ? "—" : formatBytes(storageUsedBytes)}
+                </span>
               </div>
               <Progress value={storagePercent} className="h-1.5" />
             </div>
           </div>
 
           <div className="flex items-center gap-2 ml-auto">
-            {/* Upload Button */}
             <Link to="/app/upload">
               <Button size="sm" className="gap-2 shadow-md">
                 <Upload className="h-4 w-4" />
@@ -186,13 +278,11 @@ export function AppLayout() {
               </Button>
             </Link>
 
-            {/* Notifications */}
             <Button variant="ghost" size="icon" className="relative">
               <Bell className="h-5 w-5" />
               <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-destructive" />
             </Button>
 
-            {/* User Menu */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon" className="rounded-full">
@@ -205,8 +295,8 @@ export function AppLayout() {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
                 <div className="px-2 py-1.5">
-                  <p className="text-sm font-medium">{user?.name}</p>
-                  <p className="text-xs text-muted-foreground">{user?.email}</p>
+                  <p className="text-sm font-medium">{(user as any)?.name}</p>
+                  <p className="text-xs text-muted-foreground">{(user as any)?.email}</p>
                 </div>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => navigate('/app/settings')}>
@@ -223,7 +313,6 @@ export function AppLayout() {
           </div>
         </header>
 
-        {/* Page Content */}
         <main className="flex-1 overflow-y-auto">
           <Outlet />
         </main>

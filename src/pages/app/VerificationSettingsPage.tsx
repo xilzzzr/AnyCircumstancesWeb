@@ -1,21 +1,47 @@
-import { useEffect, useState } from 'react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Label } from '@/components/ui/label';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Slider } from '@/components/ui/slider';
-import { useToast } from '@/hooks/use-toast';
-import { Calendar, Clock, Bell, Shield, Loader2, Save, AlertTriangle } from 'lucide-react';
+import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Slider } from "@/components/ui/slider";
+import { useToast } from "@/hooks/use-toast";
+import { Calendar, Clock, Bell, Shield, Loader2, Save, AlertTriangle } from "lucide-react";
 
-type Frequency = 'daily' | 'weekly' | 'monthly';
+type Frequency = "daily" | "weekly" | "monthly";
+
+type BillingStatusResp = { ok?: boolean; status?: string };
+type SettingsResp = {
+  ok?: boolean;
+  settings?: {
+    frequency?: Frequency;
+    gracePeriodHours?: number;
+    reminders?: number;
+  };
+  error?: string;
+};
+
+function formatFrequencyLabel(freq: Frequency) {
+  if (freq === "daily") return "Daily";
+  if (freq === "weekly") return "Weekly";
+  return "Monthly";
+}
+
+function getFrequencyDescription(freq: Frequency) {
+  if (freq === "daily") return "You will need to check in every 24 hours.";
+  if (freq === "weekly") return "You will need to check in once every 7 days.";
+  return "You will need to check in once every 30 days.";
+}
 
 export function VerificationSettingsPage() {
-  const [frequency, setFrequency] = useState<Frequency>('weekly');
+  const [frequency, setFrequency] = useState<Frequency>("weekly");
   const [gracePeriod, setGracePeriod] = useState(24);
-  const [reminders, setReminders] = useState('3');
+  const [reminders, setReminders] = useState("3");
   const [saving, setSaving] = useState(false);
   const [loadingInitial, setLoadingInitial] = useState(true);
+
+  const [isPaid, setIsPaid] = useState(false);
+
   const { toast } = useToast();
 
   useEffect(() => {
@@ -23,37 +49,64 @@ export function VerificationSettingsPage() {
 
     (async () => {
       try {
-        const resp = await fetch('/auth/verification-settings', {
-          method: 'GET',
-          credentials: 'include',
-        });
+        const [billingResp, settingsResp] = await Promise.all([
+          fetch("/auth/billing/status", { method: "GET", credentials: "include" }).catch(() => null),
+          fetch("/auth/verification-settings", { method: "GET", credentials: "include" }).catch(() => null),
+        ]);
 
-        const data = await resp.json().catch(() => null);
+        if (cancelled) return;
 
-        if (!resp.ok || !data?.ok) {
-          if (!cancelled) {
+        if (billingResp) {
+          const billing = (await billingResp.json().catch(() => null)) as BillingStatusResp | null;
+          const s = String(billing?.status || "");
+          setIsPaid(s === "active" || s === "trialing");
+        } else {
+          setIsPaid(false);
+        }
+
+        if (!settingsResp) {
+          toast({
+            title: "Could not load settings",
+            description: "You are on a Free plan therefore some functionality is limited.",
+            variant: "destructive",
+          });
+          return;
+        }
+
+        const data = (await settingsResp.json().catch(() => null)) as SettingsResp | null;
+
+        if (!settingsResp.ok || !data?.ok) {
+          const code = data?.error || "load_failed";
+          if (code === "not_authenticated") {
             toast({
-              title: 'Could not load settings',
-              description: 'Please log in again and retry.',
-              variant: 'destructive',
+              title: "Session expired",
+              description: "Please log in again.",
+              variant: "destructive",
+            });
+          } else if (code === "payment_required") {
+            setIsPaid(false);
+          } else {
+            toast({
+              title: "Could not load settings",
+              description: "You are on a Free plan therefore some functionality is limited.",
             });
           }
           return;
         }
 
         const s = data.settings;
-        if (!cancelled && s) {
-          setFrequency(s.frequency);
+        if (s) {
+          setFrequency((s.frequency as Frequency) || "weekly");
           setGracePeriod(Number(s.gracePeriodHours ?? 24));
           setReminders(String(s.reminders ?? 3));
         }
       } catch {
         if (!cancelled) {
           toast({
-            title: 'Network error',
-            description: 'Could not reach the server.',
-            variant: 'destructive',
+            title: "Limited dashboard on Free",
+            description: "You are on a Free plan therefore your verification controls are limited.",
           });
+          setIsPaid(false);
         }
       } finally {
         if (!cancelled) setLoadingInitial(false);
@@ -66,15 +119,23 @@ export function VerificationSettingsPage() {
   }, [toast]);
 
   const handleSave = async () => {
+    if (!isPaid) {
+      toast({
+        title: "Paid feature",
+        description: "Adjusting grace period and reminders requires an active plan.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setSaving(true);
 
     try {
-      const resp = await fetch('/auth/verification-settings', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
+      const resp = await fetch("/auth/verification-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({
-          frequency,
           gracePeriodHours: gracePeriod,
           reminders: Number(reminders),
         }),
@@ -83,58 +144,57 @@ export function VerificationSettingsPage() {
       const data = await resp.json().catch(() => null);
 
       if (!resp.ok || !data?.ok) {
-        const code = data?.error || 'save_failed';
+        const code = data?.error || "save_failed";
 
-        if (code === 'not_authenticated') {
+        if (code === "not_authenticated") {
           toast({
-            title: 'Session expired',
-            description: 'Please log in again.',
-            variant: 'destructive',
+            title: "Session expired",
+            description: "Please log in again.",
+            variant: "destructive",
           });
           return;
         }
 
+        if (code === "payment_required") {
+          toast({
+            title: "Paid feature",
+            description: "Adjusting these settings requires an active plan.",
+            variant: "destructive",
+          });
+          setIsPaid(false);
+          return;
+        }
+
         toast({
-          title: 'Save failed',
-          description: 'Please try again.',
-          variant: 'destructive',
+          title: "Save failed",
+          description: "Please try again.",
+          variant: "destructive",
         });
         return;
       }
 
       toast({
-        title: 'Settings saved',
-        description: 'Your verification settings have been updated.',
+        title: "Settings saved",
+        description: "Your verification settings have been updated.",
       });
     } catch {
       toast({
-        title: 'Network error',
-        description: 'Could not reach the server.',
-        variant: 'destructive',
+        title: "Network error",
+        description: "Could not reach the server.",
+        variant: "destructive",
       });
     } finally {
       setSaving(false);
     }
   };
 
-  const getFrequencyDescription = () => {
-    switch (frequency) {
-      case 'daily':
-        return 'You will need to check in every 24 hours.';
-      case 'weekly':
-        return 'You will need to check in once every 7 days.';
-      case 'monthly':
-        return 'You will need to check in once every 30 days.';
-    }
-  };
-
-  const getGracePeriodLabel = () => {
+  const graceLabel = useMemo(() => {
     if (gracePeriod < 24) return `${gracePeriod} hours`;
-    if (gracePeriod === 24) return '1 day';
-    if (gracePeriod === 48) return '2 days';
-    if (gracePeriod === 72) return '3 days';
+    if (gracePeriod === 24) return "1 day";
+    if (gracePeriod === 48) return "2 days";
+    if (gracePeriod === 72) return "3 days";
     return `${gracePeriod} hours`;
-  };
+  }, [gracePeriod]);
 
   if (loadingInitial) {
     return (
@@ -151,8 +211,34 @@ export function VerificationSettingsPage() {
     <div className="p-6 lg:p-8 pb-24 space-y-6 max-w-3xl">
       <div>
         <h1 className="text-2xl font-bold text-foreground">Verification Settings</h1>
-        <p className="text-muted-foreground">Configure how and when you verify your status</p>
+        <p className="text-muted-foreground">Configure your grace period and reminder notifications</p>
       </div>
+
+      {!isPaid && (
+        <Card className="bg-primary/5 border-primary/20">
+          <CardContent className="py-4">
+            <div className="flex items-start gap-3">
+              <Shield className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+              <div className="text-sm">
+                <p className="font-medium text-foreground">Free plan limitations</p>
+                <p className="text-muted-foreground mt-1">
+                  You can view your schedule, but changing grace period and reminder notifications requires a paid plan.
+                </p>
+                <div className="mt-3 flex gap-2">
+                  <Link to="/app/plan">
+                    <Button size="sm">Build a plan</Button>
+                  </Link>
+                  <Link to="/pricing">
+                    <Button size="sm" variant="outline">
+                      View pricing
+                    </Button>
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>
@@ -160,54 +246,20 @@ export function VerificationSettingsPage() {
             <Calendar className="h-5 w-5 text-primary" />
             Check-in Frequency
           </CardTitle>
-          <CardDescription>How often do you want to confirm you're okay?</CardDescription>
+          <CardDescription>This is based on your plan and can’t be changed here</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <RadioGroup value={frequency} onValueChange={(v) => setFrequency(v as Frequency)}>
-            <div className="grid gap-3">
-              <Label
-                htmlFor="daily"
-                className={`flex items-center gap-4 p-4 rounded-lg border cursor-pointer transition-colors ${
-                  frequency === 'daily' ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'
-                }`}
-              >
-                <RadioGroupItem value="daily" id="daily" />
-                <div className="flex-1">
-                  <p className="font-medium">Daily</p>
-                  <p className="text-sm text-muted-foreground">Check in every 24 hours</p>
-                </div>
-              </Label>
-
-              <Label
-                htmlFor="weekly"
-                className={`flex items-center gap-4 p-4 rounded-lg border cursor-pointer transition-colors ${
-                  frequency === 'weekly' ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'
-                }`}
-              >
-                <RadioGroupItem value="weekly" id="weekly" />
-                <div className="flex-1">
-                  <p className="font-medium">Weekly</p>
-                  <p className="text-sm text-muted-foreground">Check in once a week</p>
-                </div>
-                <span className="text-xs bg-primary/10 text-primary px-2 py-1 rounded">Recommended</span>
-              </Label>
-
-              <Label
-                htmlFor="monthly"
-                className={`flex items-center gap-4 p-4 rounded-lg border cursor-pointer transition-colors ${
-                  frequency === 'monthly' ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'
-                }`}
-              >
-                <RadioGroupItem value="monthly" id="monthly" />
-                <div className="flex-1">
-                  <p className="font-medium">Monthly</p>
-                  <p className="text-sm text-muted-foreground">Check in once a month</p>
-                </div>
-              </Label>
+        <CardContent className="space-y-3">
+          <div className="flex items-center justify-between rounded-lg border p-4">
+            <div>
+              <div className="font-medium text-foreground">{formatFrequencyLabel(frequency)}</div>
+              <div className="text-sm text-muted-foreground">{getFrequencyDescription(frequency)}</div>
             </div>
-          </RadioGroup>
-
-          <p className="text-sm text-muted-foreground bg-muted/50 p-3 rounded-lg">{getFrequencyDescription()}</p>
+            <Link to="/app/plan">
+              <Button variant="outline" size="sm">
+                Change plan
+              </Button>
+            </Link>
+          </div>
         </CardContent>
       </Card>
 
@@ -223,7 +275,7 @@ export function VerificationSettingsPage() {
           <div className="space-y-4">
             <div className="flex justify-between items-center">
               <span className="text-sm text-muted-foreground">Grace period duration</span>
-              <span className="font-medium text-primary">{getGracePeriodLabel()}</span>
+              <span className="font-medium text-primary">{graceLabel}</span>
             </div>
             <Slider
               value={[gracePeriod]}
@@ -232,11 +284,18 @@ export function VerificationSettingsPage() {
               max={72}
               step={6}
               className="w-full"
+              disabled={!isPaid || saving}
             />
             <div className="flex justify-between text-xs text-muted-foreground">
               <span>6 hours</span>
               <span>72 hours</span>
             </div>
+
+            {!isPaid && (
+              <div className="text-xs text-muted-foreground">
+                Upgrade to adjust grace period.
+              </div>
+            )}
           </div>
 
           <div className="flex items-start gap-3 p-3 rounded-lg bg-warning/10 border border-warning/20">
@@ -260,7 +319,7 @@ export function VerificationSettingsPage() {
           <CardDescription>How many reminders should we send before delivering your files?</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Select value={reminders} onValueChange={setReminders}>
+          <Select value={reminders} onValueChange={setReminders} disabled={!isPaid || saving}>
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
@@ -274,44 +333,41 @@ export function VerificationSettingsPage() {
           </Select>
 
           <p className="text-sm text-muted-foreground bg-muted/50 p-3 rounded-lg">
-            We'll send {reminders} reminder{parseInt(reminders) > 1 ? 's' : ''} via email and push notification during
+            We'll send {reminders} reminder{parseInt(reminders) > 1 ? "s" : ""} via email and push notification during
             your grace period before any files are delivered.
           </p>
-        </CardContent>
-      </Card>
 
-      <Card className="bg-primary/5 border-primary/20">
-        <CardContent className="py-4">
-          <div className="flex items-start gap-3">
-            <Shield className="h-5 w-5 text-primary shrink-0 mt-0.5" />
-            <div className="text-sm">
-              <p className="font-medium text-foreground">Your current settings</p>
-              <p className="text-muted-foreground mt-1">
-                You will check in <span className="font-medium text-foreground">{frequency}</span>. If you miss a check-in,
-                you'll receive <span className="font-medium text-foreground">{reminders} reminder{parseInt(reminders) > 1 ? 's' : ''}</span>{' '}
-                over a <span className="font-medium text-foreground">{getGracePeriodLabel()}</span> grace period before your
-                files are sent to your emergency contacts.
-              </p>
+          {!isPaid && (
+            <div className="text-xs text-muted-foreground">
+              Upgrade to change reminder count.
             </div>
-          </div>
+          )}
         </CardContent>
       </Card>
 
       <div className="fixed bottom-0 left-0 right-0 p-4 bg-background/80 backdrop-blur-sm border-t z-40 lg:left-64">
         <div className="max-w-3xl mx-auto flex justify-center">
-          <Button onClick={handleSave} disabled={saving} className="gap-2 shadow-lg">
-            {saving ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Saving...
-              </>
-            ) : (
-              <>
-                <Save className="h-4 w-4" />
-                Save settings
-              </>
-            )}
-          </Button>
+          {isPaid ? (
+            <Button onClick={handleSave} disabled={saving} className="gap-2 shadow-lg">
+              {saving ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save className="h-4 w-4" />
+                  Save settings
+                </>
+              )}
+            </Button>
+          ) : (
+            <Link to="/app/plan">
+              <Button className="gap-2 shadow-lg">
+                Build a plan to edit
+              </Button>
+            </Link>
+          )}
         </div>
       </div>
     </div>

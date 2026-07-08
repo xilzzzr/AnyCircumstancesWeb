@@ -88,7 +88,7 @@ export function CreatePinPage() {
         title: 'PIN created',
         description: 'Your verification PIN has been set.',
       });
-      navigate('/onboarding');
+      navigate('/create-panic-pin');
     } catch {
       toast({
         title: 'Network error',

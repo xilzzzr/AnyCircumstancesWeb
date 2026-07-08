@@ -46,7 +46,7 @@ function getRelativeTime(dateString: string) {
 
 function getApiBaseUrl() {
   const v = (import.meta as any)?.env?.VITE_API_BASE_URL;
-  return typeof v === "string" && v.trim() ? v.trim() : "http://localhost:3001";
+  return typeof v === "string" && v.trim() ? v.trim() : "";
 }
 
 async function apiFetch(path: string, init?: RequestInit) {

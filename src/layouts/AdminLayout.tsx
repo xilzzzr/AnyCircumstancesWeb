@@ -89,7 +89,7 @@ export function AdminLayout() {
               <ShieldCheck className="h-4 w-4 text-warning-foreground" />
             </div>
             <div>
-              <span className="font-semibold">UnderAnyCircumstance</span>
+              <span className="font-semibold">anycircumstances</span>
               <span className="text-xs text-vault-foreground/60 block -mt-0.5">Admin</span>
             </div>
           </Link>
@@ -114,7 +114,7 @@ export function AdminLayout() {
                   <ShieldCheck className="h-4 w-4 text-warning-foreground" />
                 </div>
                 <div>
-                  <span className="font-semibold">UnderAnyCircumstance</span>
+                  <span className="font-semibold">anycircumstances</span>
                   <span className="text-xs text-vault-foreground/60 block -mt-0.5">Admin</span>
                 </div>
               </div>

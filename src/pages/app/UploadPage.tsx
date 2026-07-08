@@ -1,75 +1,440 @@
-import { useState, useCallback } from 'react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
-import { Progress } from '@/components/ui/progress';
-import { Card, CardContent } from '@/components/ui/card';
-import { Upload, X, FileText, Check, Loader2, Shield } from 'lucide-react';
-import { useToast } from '@/hooks/use-toast';
-import { cn } from '@/lib/utils';
+import React, { useState, useCallback, useMemo, useRef } from "react";
+import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { Progress } from "@/components/ui/progress";
+import { Card, CardContent } from "@/components/ui/card";
+import { Upload, X, FileText, Check, Loader2, Shield, Lock, AlertTriangle } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { encryptFileToAesGcm, ensureServerHasUserPublicKey, ensureUserKeypair, wrapAesKeyForUser } from "@/lib/vaultCrypto";
 
-interface UploadingFile {
+async function saveEscrowForFile(fileId: string, rawAesKey: Uint8Array) {
+  const pubRes = await fetch("/files/escrow-public-key", { credentials: "include" });
+  const pubJson = await pubRes.json();
+  if (!pubRes.ok || !pubJson?.ok || !pubJson?.public_key_pem) {
+    throw new Error("escrow_public_key_unavailable");
+  }
+
+  const pem: string = String(pubJson.public_key_pem);
+  const b64 = pem.replace(/-----BEGIN PUBLIC KEY-----/g, "")
+    .replace(/-----END PUBLIC KEY-----/g, "")
+    .replace(/\s+/g, "");
+
+  const spkiDer = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)).buffer;
+
+  const pubKey = await crypto.subtle.importKey(
+    "spki",
+    spkiDer,
+    { name: "RSA-OAEP", hash: "SHA-256" },
+    false,
+    ["encrypt"]
+  );
+
+  const wrapped = new Uint8Array(await crypto.subtle.encrypt({ name: "RSA-OAEP" }, pubKey, rawAesKey));
+
+  const wrappedB64 = btoa(String.fromCharCode(...wrapped));
+
+  const saveRes = await fetch("/files/save-file-escrow", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({
+      file_id: fileId,
+      alg: "rsa-oaep-sha256",
+      enc_key_b64: wrappedB64,
+    }),
+  });
+
+  const saveJson = await saveRes.json().catch(() => ({}));
+  if (!saveRes.ok || !saveJson?.ok) {
+    throw new Error(saveJson?.error || "save_file_escrow_failed");
+  }
+}
+
+
+type UploadingFile = {
   id: string;
   file: File;
   progress: number;
-  status: 'encrypting' | 'uploading' | 'complete' | 'error';
+  status: "needs_passphrase" | "encrypting" | "uploading" | "complete" | "error";
   includeInEmergency: boolean;
+  key?: string;
+  error?: string;
+};
+
+type PresignUploadResponse = {
+  ok: boolean;
+  method?: "PUT";
+  url?: string;
+  key?: string;
+  headers?: Record<string, string>;
+  error?: string;
+};
+
+function emitPaywall(title?: string, description?: string) {
+  const returnTo = window.location.pathname + window.location.search;
+  window.dispatchEvent(
+    new CustomEvent("uac:paywall", {
+      detail: {
+        title: title || "Paid feature",
+        description:
+          description ||
+          "This feature is part of a paid plan. Build a plan starting at $4.99/month to unlock it.",
+        returnTo,
+      },
+    })
+  );
 }
+
+function xhrPutWithProgress(url: string, body: Blob, headers: Record<string, string>, onProgress: (pct: number) => void) {
+  return new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", url, true);
+    Object.entries(headers || {}).forEach(([k, v]) => xhr.setRequestHeader(k, v));
+    xhr.upload.onprogress = (e) => {
+      if (!e.lengthComputable) return;
+      const pct = Math.min(99, Math.round((e.loaded / e.total) * 100));
+      onProgress(pct);
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) return resolve();
+      reject(new Error(`upload_failed_http_${xhr.status}`));
+    };
+    xhr.onerror = () => reject(new Error("upload_failed_network"));
+    xhr.send(body);
+  });
+}
+
+const LS_PUB = "uac_user_pub_spki_b64";
+const LS_PRIV_ENC = "uac_user_priv_pkcs8_enc_b64";
+const LS_PRIV_SALT = "uac_user_priv_salt_b64";
+const LS_PRIV_IV = "uac_user_priv_iv_b64";
 
 export function UploadPage() {
   const [files, setFiles] = useState<UploadingFile[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const { toast } = useToast();
 
-  const handleFiles = useCallback((newFiles: FileList | null) => {
-    if (!newFiles) return;
-    
-    const uploadFiles: UploadingFile[] = Array.from(newFiles).map(file => ({
-      id: `${Date.now()}-${file.name}`,
-      file,
-      progress: 0,
-      status: 'encrypting' as const,
-      includeInEmergency: true,
-    }));
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-    setFiles(prev => [...prev, ...uploadFiles]);
+  const [passphrase, setPassphrase] = useState("");
+  const [passphraseOpen, setPassphraseOpen] = useState(false);
+  const passphraseOk = useMemo(() => passphrase.trim().length >= 8, [passphrase]);
 
-    // Simulate upload process
-    uploadFiles.forEach(uf => {
-      setTimeout(() => {
-        setFiles(prev => prev.map(f => f.id === uf.id ? { ...f, status: 'uploading', progress: 30 } : f));
-      }, 1000);
-      setTimeout(() => {
-        setFiles(prev => prev.map(f => f.id === uf.id ? { ...f, progress: 70 } : f));
-      }, 2000);
-      setTimeout(() => {
-        setFiles(prev => prev.map(f => f.id === uf.id ? { ...f, status: 'complete', progress: 100 } : f));
-        toast({ title: 'File uploaded', description: `${uf.file.name} has been encrypted and stored.` });
-      }, 3000);
+  const [isPaidCache, setIsPaidCache] = useState<boolean | null>(null);
+
+  const updateFile = useCallback((id: string, patch: Partial<UploadingFile>) => {
+    setFiles((prev) => prev.map((f) => (f.id === id ? { ...f, ...patch } : f)));
+  }, []);
+
+  const resetVaultOnDevice = useCallback(() => {
+    try {
+      localStorage.removeItem(LS_PUB);
+      localStorage.removeItem(LS_PRIV_ENC);
+      localStorage.removeItem(LS_PRIV_SALT);
+      localStorage.removeItem(LS_PRIV_IV);
+    } catch {}
+    setPassphrase("");
+    toast({
+      title: "Vault reset on this device",
+      description: "Enter a new passphrase to generate fresh local vault keys.",
     });
   }, [toast]);
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setDragOver(false);
-    handleFiles(e.dataTransfer.files);
-  }, [handleFiles]);
+  const checkPaid = useCallback(async () => {
+    if (isPaidCache === true) return true;
+    if (isPaidCache === false) return false;
+
+    try {
+      const r = await fetch("/files/list", { credentials: "include" });
+      if (r.status === 402) {
+        setIsPaidCache(false);
+        return false;
+      }
+      if (r.ok) {
+        setIsPaidCache(true);
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  }, [isPaidCache]);
+
+  const startUpload = useCallback(
+    async (uf: UploadingFile) => {
+      try {
+        const paid = await checkPaid();
+        if (!paid) {
+          emitPaywall(
+            "Vault uploads are a paid feature",
+            "Build a plan to start storing encrypted files in your vault."
+          );
+          updateFile(uf.id, { status: "error", progress: 0, error: "payment_required" });
+          return;
+        }
+
+        if (!passphraseOk) {
+          updateFile(uf.id, { status: "needs_passphrase", progress: 0, error: undefined });
+          setPassphraseOpen(true);
+          return;
+        }
+
+        updateFile(uf.id, { status: "encrypting", progress: 5, error: undefined });
+
+        let pubKey: CryptoKey;
+        let pubSpkiB64: string;
+
+        try {
+          const kp = await ensureUserKeypair(passphrase.trim());
+          pubKey = kp.pubKey;
+          pubSpkiB64 = kp.pubSpkiB64;
+        } catch (e: any) {
+          const msg = String(e?.message || "");
+          if (msg === "bad_passphrase") {
+            updateFile(uf.id, { status: "needs_passphrase", progress: 0, error: "bad_passphrase" });
+            setPassphraseOpen(true);
+            toast({
+              title: "Wrong passphrase",
+              description: "That passphrase can’t unlock your vault key on this device. Try again, or reset the vault on this device.",
+              variant: "destructive",
+            });
+            return;
+          }
+          throw e;
+        }
+
+        const okPub = await ensureServerHasUserPublicKey(pubSpkiB64);
+        if (!okPub) {
+          updateFile(uf.id, { status: "error", progress: 0, error: "public_key_not_saved" });
+          toast({
+            title: "Upload failed",
+            description: "Could not save your encryption public key.",
+            variant: "destructive",
+          });
+          return;
+        }
+
+        const enc = await encryptFileToAesGcm(uf.file);
+        const ciphertextBlob = enc.blob as Blob;
+        const rawAes = enc.rawAes as Uint8Array;
+        const chunkMeta = (enc as any).meta || null;
+
+        updateFile(uf.id, { progress: 15 });
+
+        const presignResp = await fetch("/files/presign-upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            filename: uf.file.name,
+            contentType: uf.file.type || "application/octet-stream",
+          }),
+        });
+
+        if (presignResp.status === 402) {
+          setIsPaidCache(false);
+          emitPaywall(
+            "Vault uploads are a paid feature",
+            "Build a plan to start storing encrypted files in your vault."
+          );
+          updateFile(uf.id, { status: "error", progress: 0, error: "payment_required" });
+          return;
+        }
+
+        const presign: PresignUploadResponse = await presignResp.json().catch(() => ({ ok: false, error: "bad_json" }));
+
+        if (!presignResp.ok || !presign.ok || !presign.url || !presign.key) {
+          const msg = presign?.error || `presign_failed_http_${presignResp.status}`;
+          updateFile(uf.id, { status: "error", progress: 0, error: msg });
+          toast({
+            title: "Upload failed",
+            description: `Could not start upload (${msg}).`,
+            variant: "destructive",
+          });
+          return;
+        }
+
+        updateFile(uf.id, { status: "uploading", progress: 20, key: presign.key });
+
+        await xhrPutWithProgress(
+          presign.url,
+          ciphertextBlob,
+          presign.headers || { "Content-Type": "application/octet-stream" },
+          (pct) => updateFile(uf.id, { progress: Math.max(20, pct) })
+        );
+
+        updateFile(uf.id, { progress: 99 });
+
+        const confirmResp = await fetch("/files/confirm-upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            key: presign.key,
+            size_bytes: ciphertextBlob.size,
+          }),
+        });
+
+        const confirm = await confirmResp.json().catch(() => ({}));
+        if (!confirmResp.ok || !confirm?.ok) {
+          const msg = confirm?.error || "confirm_failed";
+          updateFile(uf.id, { status: "error", progress: 0, error: msg });
+          toast({
+            title: "Upload failed",
+            description: `Confirm step failed (${msg}).`,
+            variant: "destructive",
+          });
+          return;
+        }
+	await saveEscrowForFile(presign.key, rawAes);
+
+        const wrappedAesB64 = await wrapAesKeyForUser(pubKey, rawAes);
+
+        const envResp = await fetch("/files/save-user-envelope", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            file_id: presign.key,
+            alg: "RSA-OAEP+AES-256-GCM",
+            enc_key_b64: wrappedAesB64,
+            meta_json: {
+              original_name: uf.file.name,
+              original_content_type: uf.file.type || "application/octet-stream",
+              original_size_bytes: uf.file.size,
+              ciphertext_size_bytes: ciphertextBlob.size,
+              chunked: true,
+              chunk_meta: chunkMeta,
+            },
+          }),
+        });
+
+        const env = await envResp.json().catch(() => ({}));
+        if (!envResp.ok || !env?.ok) {
+          const msg = env?.error || "envelope_save_failed";
+          updateFile(uf.id, { status: "error", progress: 0, error: msg });
+          toast({
+            title: "Upload failed",
+            description: `Could not save encryption envelope (${msg}).`,
+            variant: "destructive",
+          });
+          return;
+        }
+
+        updateFile(uf.id, { status: "complete", progress: 100 });
+        toast({
+          title: "File uploaded (encrypted)",
+          description: `${uf.file.name} was encrypted locally and uploaded.`,
+        });
+      } catch (e: any) {
+        const msg = String(e?.message || "upload_failed");
+        updateFile(uf.id, { status: "error", progress: 0, error: msg });
+        toast({ title: "Upload failed", description: msg, variant: "destructive" });
+      }
+    },
+    [checkPaid, passphraseOk, passphrase, toast, updateFile]
+  );
+
+  const resumePassphraseQueue = useCallback(() => {
+    setFiles((prev) => {
+      const pending = prev.filter((f) => f.status === "needs_passphrase");
+      if (pending.length) {
+        setTimeout(() => pending.forEach((f) => startUpload(f)), 0);
+      }
+      return prev;
+    });
+  }, [startUpload]);
+
+  const handleFiles = useCallback(
+    (newFiles: FileList | null) => {
+      if (!newFiles) return;
+
+      const now = Date.now();
+      const uploadFiles: UploadingFile[] = Array.from(newFiles).map((file) => ({
+        id: `${now}-${Math.random().toString(16).slice(2)}-${file.name}`,
+        file,
+        progress: 0,
+        status: "encrypting",
+        includeInEmergency: true,
+      }));
+
+      setFiles((prev) => [...prev, ...uploadFiles]);
+      uploadFiles.forEach((uf) => startUpload(uf));
+    },
+    [startUpload]
+  );
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      setDragOver(false);
+      handleFiles(e.dataTransfer.files);
+    },
+    [handleFiles]
+  );
 
   const removeFile = (id: string) => {
-    setFiles(prev => prev.filter(f => f.id !== id));
+    setFiles((prev) => prev.filter((f) => f.id !== id));
   };
 
   return (
     <div className="p-6 lg:p-8 max-w-3xl mx-auto space-y-6">
+      <Dialog open={passphraseOpen} onOpenChange={setPassphraseOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Lock className="h-4 w-4" /> Vault passphrase
+            </DialogTitle>
+            <DialogDescription>
+              This passphrase encrypts your private vault key on your device. You’ll enter it once per session.
+            </DialogDescription>
+          </DialogHeader>
+
+          <input
+            type="password"
+            value={passphrase}
+            onChange={(e) => setPassphrase(e.target.value)}
+            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+            placeholder="At least 8 characters"
+          />
+
+          <div className="rounded-lg border border-border p-3 text-sm text-muted-foreground flex items-start gap-2">
+            <AlertTriangle className="h-4 w-4 mt-0.5" />
+            <div>
+              If you forgot the passphrase used on this device, you can reset the vault keys locally. This does not delete
+              server files, but you won’t be able to decrypt old files from this device unless you had the right passphrase.
+            </div>
+          </div>
+
+          <DialogFooter className="flex gap-2">
+            <Button variant="outline" onClick={resetVaultOnDevice}>
+              Reset vault on this device
+            </Button>
+            <Button
+              onClick={() => {
+                setPassphraseOpen(false);
+                resumePassphraseQueue();
+              }}
+              disabled={!passphraseOk}
+            >
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <div>
         <h1 className="text-2xl font-bold text-foreground">Upload Files</h1>
-        <p className="text-muted-foreground">Files are encrypted on your device before upload.</p>
+        <p className="text-muted-foreground">Files are encrypted on your device before upload. Only ciphertext is stored.</p>
       </div>
 
-      {/* Drop Zone */}
       <div
-        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragOver(true);
+        }}
         onDragLeave={() => setDragOver(false)}
         onDrop={handleDrop}
         className={cn(
@@ -82,13 +447,19 @@ export function UploadPage() {
         </div>
         <h3 className="font-semibold text-foreground mb-2">Drop files here</h3>
         <p className="text-sm text-muted-foreground mb-4">or click to browse</p>
+
         <input
+          ref={fileInputRef}
           type="file"
           multiple
-          onChange={(e) => handleFiles(e.target.files)}
+          onChange={(e) => {
+            handleFiles(e.target.files);
+            e.currentTarget.value = "";
+          }}
           className="hidden"
           id="file-input"
         />
+
         <label htmlFor="file-input">
           <Button variant="outline" asChild>
             <span>Choose files</span>
@@ -96,7 +467,6 @@ export function UploadPage() {
         </label>
       </div>
 
-      {/* Upload Queue */}
       {files.length > 0 && (
         <div className="space-y-3">
           <h3 className="font-medium text-foreground">Upload Queue</h3>
@@ -104,41 +474,58 @@ export function UploadPage() {
             <Card key={uf.id}>
               <CardContent className="flex items-center gap-4 py-3">
                 <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                  {uf.status === 'complete' ? (
+                  {uf.status === "complete" ? (
                     <Check className="h-5 w-5 text-success" />
                   ) : (
                     <FileText className="h-5 w-5 text-primary" />
                   )}
                 </div>
+
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-foreground truncate">{uf.file.name}</p>
+
                   <div className="flex items-center gap-2 mt-1">
-                    {uf.status === 'encrypting' && (
+                    {uf.status === "needs_passphrase" && (
+                      <span className="text-xs text-muted-foreground flex items-center gap-1">
+                        <Lock className="h-3 w-3" /> Waiting for passphrase...
+                      </span>
+                    )}
+
+                    {uf.status === "encrypting" && (
                       <span className="text-xs text-warning flex items-center gap-1">
                         <Loader2 className="h-3 w-3 animate-spin" /> Encrypting...
                       </span>
                     )}
-                    {uf.status === 'uploading' && (
+
+                    {uf.status === "uploading" && (
                       <span className="text-xs text-primary flex items-center gap-1">
                         <Loader2 className="h-3 w-3 animate-spin" /> Uploading...
                       </span>
                     )}
-                    {uf.status === 'complete' && (
-                      <span className="text-xs text-success">Complete</span>
+
+                    {uf.status === "complete" && <span className="text-xs text-success">Complete</span>}
+
+                    {uf.status === "error" && (
+                      <span className="text-xs text-destructive">Error{uf.error ? `: ${uf.error}` : ""}</span>
                     )}
-                    <Progress value={uf.progress} className="h-1 flex-1 max-w-24" />
+
+                    <Progress value={uf.progress} className="h-1 flex-1 max-w-32" />
                   </div>
+
+                  {uf.key && <p className="text-[10px] text-muted-foreground mt-1 truncate">{uf.key}</p>}
                 </div>
+
                 <div className="flex items-center gap-3">
                   <div className="flex items-center gap-2">
                     <Shield className={cn("h-4 w-4", uf.includeInEmergency ? "text-primary" : "text-muted-foreground")} />
                     <Switch
                       checked={uf.includeInEmergency}
                       onCheckedChange={(checked) => {
-                        setFiles(prev => prev.map(f => f.id === uf.id ? { ...f, includeInEmergency: checked } : f));
+                        setFiles((prev) => prev.map((f) => (f.id === uf.id ? { ...f, includeInEmergency: checked } : f)));
                       }}
                     />
                   </div>
+
                   <Button variant="ghost" size="icon" onClick={() => removeFile(uf.id)}>
                     <X className="h-4 w-4" />
                   </Button>

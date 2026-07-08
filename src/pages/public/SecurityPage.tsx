@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { Shield, Lock, Users, Ban, Eye, Trash2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 
@@ -17,9 +18,9 @@ const SecurityPage = () => {
     },
     {
       icon: Shield,
-      title: "Account security with two-factor authentication",
+      title: "Infrastructure hosted on AWS",
       description:
-        "You can enable two-factor authentication so logging in requires both your password and a time-based code from an authenticator app. This protects your account even if someone else discovers your password.",
+        "Our infrastructure runs on Amazon Web Services (AWS), one of the most trusted cloud platforms used by governments, banks, and global technology companies. AWS provides enterprise-grade physical security, network protection, and highly resilient data centers designed to keep systems available and protected at all times.",
     },
     {
       icon: Ban,
@@ -44,7 +45,13 @@ const SecurityPage = () => {
   return (
     <div className="min-h-screen bg-background">
       {/* Hero Section */}
-      <section className="py-20 px-4">
+      
+        <div className="mb-6 text-sm text-muted-foreground">
+          <span className="mr-2">Related:</span>
+          <Link to="/digital-vault" className="underline underline-offset-4 hover:opacity-90 mr-3">secure digital vault</Link>
+          <Link to="/dead-mans-switch" className="underline underline-offset-4 hover:opacity-90">dead man’s switch</Link>
+        </div>
+<section className="py-20 px-4">
         <div className="max-w-4xl mx-auto text-center">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary/10 mb-6">
             <Shield className="w-8 h-8 text-primary" />
@@ -96,3 +103,4 @@ const SecurityPage = () => {
 };
 
 export default SecurityPage;
+

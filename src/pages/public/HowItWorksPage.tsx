@@ -47,13 +47,19 @@ export function HowItWorksPage() {
       {/* Hero */}
       <section className="py-16 lg:py-24 bg-gradient-hero">
         <div className="container mx-auto px-4">
+
+        <div className="mb-6 text-sm text-muted-foreground">
+          <span className="mr-2">Related:</span>
+          <Link to="/digital-vault" className="underline underline-offset-4 hover:opacity-90 mr-3">secure digital vault</Link>
+          <Link to="/dead-mans-switch" className="underline underline-offset-4 hover:opacity-90">dead man’s switch</Link>
+        </div>
           <div className="max-w-3xl mx-auto text-center">
             <motion.h1
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               className="text-4xl md:text-5xl font-bold text-vault-foreground mb-6"
             >
-              How UnderAnyCircumstance Works
+              How anycircumstances Works
             </motion.h1>
             <motion.p
               initial={{ opacity: 0, y: 20 }}

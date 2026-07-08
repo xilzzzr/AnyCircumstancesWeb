@@ -94,7 +94,7 @@ export function LoginPage() {
               <div className="h-10 w-10 rounded-xl bg-gradient-security flex items-center justify-center shadow-glow">
                 <Shield className="h-5 w-5 text-primary-foreground" />
               </div>
-              <span className="font-semibold text-xl text-foreground">UnderAnyCircumstance</span>
+              <span className="font-semibold text-xl text-foreground">anycircumstances</span>
             </Link>
             <h1 className="text-2xl font-bold text-foreground mb-2">Welcome back</h1>
             <p className="text-muted-foreground">Enter your credentials to access your vault</p>

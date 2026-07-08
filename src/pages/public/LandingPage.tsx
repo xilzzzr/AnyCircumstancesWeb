@@ -1,11 +1,11 @@
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { 
-  Shield, 
-  Lock, 
-  Clock, 
-  Users, 
-  ArrowRight, 
+import {
+  Shield,
+  Lock,
+  Clock,
+  Users,
+  ArrowRight,
   CheckCircle2,
   Zap,
   FileCheck,
@@ -59,7 +59,7 @@ export function LandingPage() {
         {/* Background gradient */}
         <div className="absolute inset-0 bg-gradient-hero" />
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,hsl(var(--primary)/0.15),transparent_50%)]" />
-        
+
         <div className="container mx-auto px-4 relative">
           <div className="max-w-3xl mx-auto text-center">
             <motion.div
@@ -89,11 +89,27 @@ export function LandingPage() {
               transition={{ duration: 0.5, delay: 0.2 }}
               className="text-lg md:text-xl text-vault-foreground/70 mb-8 max-w-2xl mx-auto"
             >
-              Store your important files with end-to-end encryption. If you stop checking in, 
-              your trusted contacts automatically receive secure access.
+              Store your important files with end-to-end encryption. Learn exactly how our{' '}
+              <Link to="/how-it-works" className="underline underline-offset-4 hover:opacity-90">
+                emergency check-in system works
+              </Link>
+              , review our{' '}
+              <Link to="/security" className="underline underline-offset-4 hover:opacity-90">
+                zero-knowledge security model
+              </Link>
+              , or compare{' '}
+              <Link to="/pricing" className="underline underline-offset-4 hover:opacity-90">
+                secure vault pricing plans
+              </Link>
+              . If you stop checking in, your trusted contacts automatically receive secure access.
             </motion.p>
 
-            <motion.div
+            
+
+            <div className="text-base text-vault-foreground/70 mb-8 max-w-2xl mx-auto">
+              <span>Use it as a </span><Link to="/digital-vault" className="underline underline-offset-4 hover:opacity-90">secure digital vault</Link><span> and a </span><Link to="/dead-mans-switch" className="underline underline-offset-4 hover:opacity-90">dead man’s switch for encrypted files</Link><span>.</span>
+            </div>
+<motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: 0.3 }}
@@ -106,7 +122,11 @@ export function LandingPage() {
                 </Button>
               </Link>
               <Link to="/how-it-works">
-                <Button size="lg" variant="outline" className="w-full sm:w-auto bg-transparent border-vault-foreground/30 text-vault-foreground hover:bg-vault-foreground/10">
+                <Button
+                  size="lg"
+                  variant="outline"
+                  className="w-full sm:w-auto bg-transparent border-vault-foreground/30 text-vault-foreground hover:bg-vault-foreground/10"
+                >
                   See how it works
                 </Button>
               </Link>
@@ -120,7 +140,7 @@ export function LandingPage() {
               className="mt-12 flex flex-wrap justify-center gap-4"
             >
               {trustBadges.map((badge) => (
-                <div 
+                <div
                   key={badge}
                   className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-vault-foreground/5 text-sm text-vault-foreground/60"
                 >
@@ -140,11 +160,22 @@ export function LandingPage() {
             <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-4">
               Security without complexity
             </h2>
-            <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-              We've built the most secure way to ensure your important files reach the right 
-              people at the right time.
-            </p>
-          </div>
+<p className="text-lg text-muted-foreground max-w-2xl mx-auto">
+  We've built the most secure way to ensure your important files reach the right people at the right time.
+  Explore the full{' '}
+  <Link to="/features" className="underline underline-offset-4 hover:opacity-90">
+    emergency vault feature set
+  </Link>
+  , see the full breakdown in{' '}
+  <Link to="/security" className="underline underline-offset-4 hover:opacity-90">
+    our security page
+  </Link>{' '}
+  and the step-by-step flow in{' '}
+  <Link to="/how-it-works" className="underline underline-offset-4 hover:opacity-90">
+    how emergency delivery works
+  </Link>
+  .
+</p>          </div>
 
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
             {features.map((feature, index) => (
@@ -180,7 +211,11 @@ export function LandingPage() {
                 Simple. Secure. Reliable.
               </h2>
               <p className="text-lg text-muted-foreground">
-                Three steps to peace of mind.
+                Three steps to peace of mind. If you want more storage, compare plans on{' '}
+                <Link to="/pricing" className="underline underline-offset-4 hover:opacity-90">
+                  our pricing page
+                </Link>
+                .
               </p>
             </div>
 
@@ -204,6 +239,26 @@ export function LandingPage() {
                 </motion.div>
               ))}
             </div>
+            <div className="mt-10 text-sm text-muted-foreground text-center">
+              Related:{" "}
+              <Link to="/features" className="underline underline-offset-4 hover:opacity-90">
+                emergency vault features
+              </Link>
+              {" · "}
+              <Link to="/security" className="underline underline-offset-4 hover:opacity-90">
+                zero-knowledge security model
+              </Link>
+              {" · "}
+              <Link to="/pricing" className="underline underline-offset-4 hover:opacity-90">
+                secure vault pricing plans
+              </Link>
+              {" · "}
+              <Link to="/faq" className="underline underline-offset-4 hover:opacity-90">
+                emergency vault FAQ
+              </Link>
+            </div>
+
+
 
             <div className="mt-12 text-center">
               <Link to="/how-it-works">
@@ -212,6 +267,11 @@ export function LandingPage() {
                   <ArrowRight className="h-4 w-4" />
                 </Button>
               </Link>
+<Link to="/features">
+  <Button size="lg" variant="outline">
+    Explore security features
+  </Button>
+</Link>
             </div>
           </div>
         </div>
@@ -220,7 +280,7 @@ export function LandingPage() {
       {/* CTA Section */}
       <section className="py-24 bg-gradient-hero relative overflow-hidden">
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_left,hsl(var(--primary)/0.2),transparent_50%)]" />
-        
+
         <div className="container mx-auto px-4 relative">
           <div className="max-w-2xl mx-auto text-center">
             <h2 className="text-3xl md:text-4xl font-bold text-vault-foreground mb-4">
@@ -237,11 +297,27 @@ export function LandingPage() {
                 </Button>
               </Link>
               <Link to="/pricing">
-                <Button size="lg" variant="outline" className="w-full sm:w-auto bg-transparent border-vault-foreground/30 text-vault-foreground hover:bg-vault-foreground/10">
+                <Button
+                  size="lg"
+                  variant="outline"
+                  className="w-full sm:w-auto bg-transparent border-vault-foreground/30 text-vault-foreground hover:bg-vault-foreground/10"
+                >
                   View pricing
                 </Button>
               </Link>
             </div>
+
+            <p className="mt-6 text-sm text-vault-foreground/70">
+              Questions? Read the{' '}
+              <Link to="/faq" className="underline underline-offset-4 hover:opacity-90">
+                FAQ
+              </Link>{' '}
+              or review{' '}
+              <Link to="/security" className="underline underline-offset-4 hover:opacity-90">
+                how we secure your files
+              </Link>
+              .
+            </p>
           </div>
         </div>
       </section>
