@@ -43,6 +43,7 @@ type BillingProfile = {
   addons: string[];
   updatedAt?: string;
   currentPeriodEnd?: string | null;
+  activeProviders: string[];
 };
 
 type BillingDashboardSummary = {
@@ -168,6 +169,7 @@ function normalizeSummary(data: any): BillingDashboardSummary {
       addons,
       updatedAt: billingRaw.updatedAt ? String(billingRaw.updatedAt) : undefined,
       currentPeriodEnd: billingRaw.currentPeriodEnd ? String(billingRaw.currentPeriodEnd) : null,
+      activeProviders: Array.isArray(billingRaw.activeProviders) ? billingRaw.activeProviders.map(String) : [],
     },
     invoices: Array.isArray(raw.invoices) ? raw.invoices : [],
   };
@@ -186,6 +188,7 @@ function buildFreeSummary(): BillingDashboardSummary {
       addons: [],
       updatedAt: undefined,
       currentPeriodEnd: null,
+      activeProviders: [],
     },
     invoices: [],
   };
@@ -265,6 +268,7 @@ export function BillingPage() {
 
   const billing = summary?.billing;
   const isPaid = String(billing?.status || "") === "active" || String(billing?.status || "") === "trial";
+  const isAppleBilled = Boolean(billing?.activeProviders?.includes("apple") && !billing?.activeProviders?.includes("stripe"));
 
   async function openBillingPortal() {
     if (portalLoading) return;
@@ -517,19 +521,27 @@ export function BillingPage() {
                 <CreditCard className="h-5 w-5" />
               </div>
               <div>
-                <p className="font-medium">{isPaid ? "Manage in Stripe" : "Not connected yet"}</p>
+                <p className="font-medium">{isPaid ? (isAppleBilled ? "Managed by Apple" : "Manage in Stripe") : "Not connected yet"}</p>
                 <p className="text-sm text-muted-foreground">
-                  {isPaid ? "Update your card and billing info in the Stripe portal" : "Stripe will be wired later"}
+                  {isPaid ? (isAppleBilled ? "Update or cancel your subscription in your Apple ID settings" : "Update your card and billing info in the Stripe portal") : "No payment method connected"}
                 </p>
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={openBillingPortal} disabled={!isPaid || portalLoading}>
-                {portalLoading ? "Opening…" : "Update"}
-              </Button>
-              <Button variant="outline" size="sm" onClick={openBillingPortal} disabled={!isPaid || portalLoading}>
-                {portalLoading ? "Opening…" : "Cancel subscription"}
-              </Button>
+              {isAppleBilled ? (
+                <Button variant="outline" size="sm" asChild>
+                  <a href="https://apps.apple.com/account/subscriptions" target="_blank" rel="noreferrer">Manage subscription</a>
+                </Button>
+              ) : (
+                <>
+                  <Button variant="outline" size="sm" onClick={openBillingPortal} disabled={!isPaid || portalLoading}>
+                    {portalLoading ? "Opening…" : "Update"}
+                  </Button>
+                  <Button variant="outline" size="sm" className="text-destructive" asChild disabled={!isPaid}>
+                    <Link to="/app/settings">Cancel subscription</Link>
+                  </Button>
+                </>
+              )}
             </div>
           </div>
         </CardContent>

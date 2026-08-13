@@ -103,10 +103,15 @@ async function requireActiveSubscription(req, res) {
   }
 
   const pool = getPool();
-  const [rows] = await pool.query("SELECT status FROM billing_profiles WHERE user_id = ? LIMIT 1", [userId]);
-
-  const status = rows?.[0]?.status ? String(rows[0].status) : "none";
-  if (status !== "active") {
+  const [rows] = await pool.query(
+    `SELECT EXISTS(
+       SELECT 1 FROM billing_entitlements
+       WHERE user_id = ? AND status = 'active'
+         AND (current_period_end IS NULL OR current_period_end > UTC_TIMESTAMP(3))
+     ) AS has_active`,
+    [userId]
+  );
+  if (!rows?.[0]?.has_active) {
     res.status(402).json({ ok: false, error: "payment_required" });
     return null;
   }

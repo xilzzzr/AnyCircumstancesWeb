@@ -8,6 +8,14 @@ const nodemailer = require("nodemailer");
 const Stripe = require("stripe");
 const { escapeHtml, renderAnyCircumstancesEmail } = require("./emails");
 const { currentApnsEnv } = require("./push_notifications");
+const {
+  ensureAppleAccountToken,
+  refreshAggregateBillingStatus,
+  transactionBelongsToAnotherUser,
+  upsertAppleEntitlement,
+  verifyTransaction,
+} = require("./apple_subscriptions");
+const { purgeVaultFiles, deleteUserRecords } = require("./account_lifecycle");
 const router = express.Router();
 
 function asyncHandler(fn) {
@@ -262,8 +270,15 @@ async function requireActiveSubscription(req, res) {
   const userId = requireUserId(req, res);
   if (!userId) return null;
 
-  const [rows] = await pool.query("SELECT status FROM billing_profiles WHERE user_id = ? LIMIT 1", [String(userId)]);
-  const status = rows?.[0]?.status ? String(rows[0].status) : "none";
+  const [rows] = await pool.query(
+    `SELECT EXISTS(
+       SELECT 1 FROM billing_entitlements
+       WHERE user_id = ? AND status = 'active'
+         AND (current_period_end IS NULL OR current_period_end > UTC_TIMESTAMP(3))
+     ) AS has_active`,
+    [String(userId)]
+  );
+  const status = rows?.[0]?.has_active ? "active" : "none";
 
   if (status !== "active") {
     res.status(402).json({ ok: false, error: "payment_required" });
@@ -458,8 +473,10 @@ router.post(
   asyncHandler(async (req, res) => {
     const email = normalizeEmail(req.body?.email);
     const password = String(req.body?.password || "");
+    const ageConfirmed = req.body?.ageConfirmed === true;
 
     if (!validateEmail(email)) return res.status(400).json({ ok: false, error: "invalid_email" });
+    if (!ageConfirmed) return res.status(400).json({ ok: false, error: "age_confirmation_required" });
     if (password.length < 10) return res.status(400).json({ ok: false, error: "weak_password" });
 
     const existing = await getUserByEmail(email);
@@ -1189,7 +1206,11 @@ router.get(
         storage_limit_gb,
         checkin_frequency,
         addons_json,
-        updated_at
+        updated_at,
+        (SELECT GROUP_CONCAT(DISTINCT provider ORDER BY provider)
+         FROM billing_entitlements be
+         WHERE be.user_id = billing_profiles.user_id AND be.status = 'active'
+           AND (be.current_period_end IS NULL OR be.current_period_end > UTC_TIMESTAMP(3))) AS active_providers
       FROM billing_profiles
       WHERE user_id = ?
       LIMIT 1`,
@@ -1199,9 +1220,11 @@ router.get(
     const r = rows[0] || null;
 
     const billing = r
-      ? {
+      ? (() => {
+          const activeProviders = r.active_providers ? String(r.active_providers).split(",") : [];
+          return {
           userId: String(r.user_id),
-          status: String(r.status),
+          status: activeProviders.length ? "active" : (String(r.status) === "active" ? "paused" : String(r.status)),
           billingInterval: String(r.billing_interval),
           amountCents: Number(r.amount_cents),
           currency: String(r.currency),
@@ -1209,7 +1232,8 @@ router.get(
           checkInFrequency: String(r.checkin_frequency),
           addons: Array.isArray(r.addons_json) ? r.addons_json : [],
           updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : undefined,
-        }
+          activeProviders,
+        }; })()
       : {
           userId: String(userId),
           status: "pending_setup",
@@ -1219,6 +1243,7 @@ router.get(
           storageLimitGb: 5,
           checkInFrequency: "monthly",
           addons: [],
+          activeProviders: [],
         };
 
     return res.json({ ok: true, billing, invoices });
@@ -1276,6 +1301,17 @@ router.post(
 
     await ensureBillingProfile(userId);
 
+    const [providerRows] = await pool.query(
+      `SELECT provider FROM billing_entitlements
+       WHERE user_id = ? AND status = 'active'
+         AND (current_period_end IS NULL OR current_period_end > UTC_TIMESTAMP(3))`,
+      [String(userId)]
+    );
+    const activeProviders = new Set((providerRows || []).map((row) => String(row.provider)));
+    if (activeProviders.has("apple") && !activeProviders.has("stripe")) {
+      return res.status(409).json({ ok: false, error: "subscription_managed_by_apple" });
+    }
+
     const storageGb = Number(req.body?.storageGb || 5);
     const checkInFrequency = normalizeFrequency(String(req.body?.checkInFrequency || "monthly"));
     const billingInterval = normalizeInterval(String(req.body?.billingInterval || "monthly"));
@@ -1315,6 +1351,16 @@ router.post(
       [String(userId)]
     );
     const subId = rows?.[0]?.stripe_subscription_id ? String(rows[0].stripe_subscription_id) : null;
+
+    if (subId) {
+      await pool.query(
+        `UPDATE billing_entitlements
+         SET storage_limit_gb = ?, checkin_frequency = ?, billing_interval = ?
+         WHERE provider = 'stripe' AND external_subscription_id = ?`,
+        [Number(safeStorageGb), String(checkInFrequency), String(billingInterval), subId]
+      );
+      await refreshAggregateBillingStatus(pool, userId);
+    }
 
     if (subId && typeof stripe !== "undefined" && stripe) {
       const sub = await stripe.subscriptions.retrieve(subId, { expand: ["items.data.price"] });
@@ -1639,17 +1685,60 @@ router.get(
     if (!userId) return;
 
     const [rows] = await pool.query(
-      "SELECT status, current_period_end, stripe_subscription_id FROM billing_profiles WHERE user_id = ? LIMIT 1",
+      `SELECT bp.status, bp.current_period_end, bp.stripe_subscription_id,
+        (SELECT GROUP_CONCAT(DISTINCT provider ORDER BY provider)
+         FROM billing_entitlements be
+         WHERE be.user_id = bp.user_id AND be.status = 'active'
+           AND (be.current_period_end IS NULL OR be.current_period_end > UTC_TIMESTAMP(3))) AS active_providers
+       FROM billing_profiles bp WHERE bp.user_id = ? LIMIT 1`,
       [String(userId)]
     );
 
     const row = rows?.[0] || null;
     return res.json({
       ok: true,
-      status: row?.status || "none",
+      status: row?.active_providers ? "active" : (String(row?.status || "none") === "active" ? "paused" : (row?.status || "none")),
       currentPeriodEnd: row?.current_period_end || null,
       stripeSubscriptionId: row?.stripe_subscription_id || null,
+      activeProviders: row?.active_providers ? String(row.active_providers).split(",") : [],
     });
+  })
+);
+
+router.get(
+  "/billing/apple/account-token",
+  asyncHandler(async (req, res) => {
+    const userId = requireUserId(req, res);
+    if (!userId) return;
+    await ensureBillingProfile(userId);
+    const appAccountToken = await ensureAppleAccountToken(pool, userId);
+    return res.json({ ok: true, appAccountToken });
+  })
+);
+
+router.post(
+  "/billing/apple/sync",
+  asyncHandler(async (req, res) => {
+    const userId = requireUserId(req, res);
+    if (!userId) return;
+    const signedTransactionInfo = String(req.body?.signedTransactionInfo || "");
+    if (!signedTransactionInfo) return res.status(400).json({ ok: false, error: "missing_signed_transaction" });
+    const expectedToken = await ensureAppleAccountToken(pool, userId);
+    const transaction = await verifyTransaction(signedTransactionInfo, req.body?.environment);
+    const transactionToken = String(transaction.appAccountToken || "").toLowerCase();
+    const originalTransactionId = String(transaction.originalTransactionId || "");
+    const alreadyOwnedElsewhere = await transactionBelongsToAnotherUser(pool, userId, originalTransactionId);
+    if (alreadyOwnedElsewhere || (transactionToken && transactionToken !== expectedToken.toLowerCase())) {
+      return res.status(403).json({ ok: false, error: "apple_account_mismatch" });
+    }
+    const entitlement = await upsertAppleEntitlement(
+      pool,
+      userId,
+      transaction,
+      "SUBSCRIBED",
+      transaction.environment || req.body?.environment
+    );
+    return res.json({ ok: true, entitlement });
   })
 );
 
@@ -2558,6 +2647,55 @@ router.get(
   })
 );
 
+router.post(
+  "/account/cancel-subscription",
+  asyncHandler(async (req, res) => {
+    const userId = requireUserId(req, res);
+    if (!userId) return;
+    if (String(req.body?.confirmation || "") !== "DELETE MY FILES") {
+      return res.status(400).json({ ok: false, error: "confirmation_required" });
+    }
+    const [rows] = await pool.query(
+      `SELECT bp.stripe_subscription_id,
+        EXISTS(SELECT 1 FROM billing_entitlements be WHERE be.user_id = bp.user_id AND be.provider = 'apple' AND be.status = 'active') AS has_apple
+       FROM billing_profiles bp WHERE bp.user_id = ? LIMIT 1`,
+      [String(userId)]
+    );
+    const profile = rows?.[0] || {};
+    const stripeSubscriptionId = String(profile.stripe_subscription_id || "");
+    if (stripeSubscriptionId && stripe) {
+      await stripe.subscriptions.cancel(stripeSubscriptionId);
+      await pool.query("UPDATE billing_entitlements SET status = 'inactive' WHERE provider = 'stripe' AND external_subscription_id = ?", [stripeSubscriptionId]);
+    }
+    const purge = await purgeVaultFiles(pool, userId);
+    await refreshAggregateBillingStatus(pool, userId);
+    return res.json({
+      ok: true,
+      ...purge,
+      requiresAppleAction: Boolean(profile.has_apple),
+      appleManageUrl: profile.has_apple ? "https://apps.apple.com/account/subscriptions" : null,
+    });
+  })
+);
+
+router.delete(
+  "/account",
+  asyncHandler(async (req, res) => {
+    const userId = requireUserId(req, res);
+    if (!userId) return;
+    if (String(req.body?.confirmation || "") !== "DELETE MY ACCOUNT") {
+      return res.status(400).json({ ok: false, error: "confirmation_required" });
+    }
+    const [rows] = await pool.query("SELECT stripe_subscription_id FROM billing_profiles WHERE user_id = ? LIMIT 1", [String(userId)]);
+    const stripeSubscriptionId = String(rows?.[0]?.stripe_subscription_id || "");
+    if (stripeSubscriptionId && stripe) await stripe.subscriptions.cancel(stripeSubscriptionId);
+    const purge = await purgeVaultFiles(pool, userId);
+    await deleteUserRecords(pool, userId);
+    clearAuthCookies(res);
+    return res.json({ ok: true, ...purge });
+  })
+);
+
 async function stripeWebhookHandler(req, res) {
   try {
     if (!stripe) return res.status(500).send("stripe_not_configured");
@@ -2598,6 +2736,19 @@ async function stripeWebhookHandler(req, res) {
           subscriptionId,
           String(userId),
         ]);
+        await pool.query(
+          `INSERT INTO billing_entitlements
+             (user_id, provider, external_subscription_id, status, storage_limit_gb,
+              checkin_frequency, billing_interval)
+           SELECT user_id, 'stripe', ?, 'active', storage_limit_gb, checkin_frequency, billing_interval
+           FROM billing_profiles WHERE user_id = ?
+           ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), status = 'active',
+             storage_limit_gb = VALUES(storage_limit_gb),
+             checkin_frequency = VALUES(checkin_frequency),
+             billing_interval = VALUES(billing_interval)`,
+          [subscriptionId, String(userId)]
+        );
+        await refreshAggregateBillingStatus(pool, userId);
       }
     }
 
@@ -2619,6 +2770,15 @@ async function stripeWebhookHandler(req, res) {
           periodEnd,
           String(userId),
         ]);
+        await pool.query(
+          `INSERT INTO billing_entitlements
+             (user_id, provider, external_subscription_id, status, current_period_end)
+           VALUES (?, 'stripe', ?, ?, ?)
+           ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), status = VALUES(status),
+             current_period_end = VALUES(current_period_end)`,
+          [String(userId), String(sub.id), mapped === "active" ? "active" : "inactive", periodEnd]
+        );
+        await refreshAggregateBillingStatus(pool, userId);
       }
     }
 

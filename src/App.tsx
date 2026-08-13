@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { DevRoleToggle } from "@/components/ui/DevRoleToggle";
+import { ScrollToTop } from "@/components/ScrollToTop";
 
 import { VaultPassphraseProvider } from "./contexts/VaultPassphraseContext";
 import { PaywallProvider } from "@/contexts/PaywallContext";
@@ -27,6 +28,9 @@ import { TermsPage } from "@/pages/public/TermsPage";
 import { DeadMansSwitchPage } from "@/pages/public/DeadMansSwitchPage";
 import { DigitalVaultPage } from "@/pages/public/DigitalVaultPage";
 import { AboutPage } from "@/pages/public/AboutPage";
+import { ContactPage } from "@/pages/public/ContactPage";
+import { ScenariosPage } from "@/pages/public/ScenariosPage";
+import { AccessibilityPage } from "@/pages/public/AccessibilityPage";
 
 // Auth Pages
 import { LoginPage } from "@/pages/auth/LoginPage";
@@ -47,6 +51,7 @@ import { VerificationSettingsPage } from "@/pages/app/VerificationSettingsPage";
 import { EmergencyContactsPage } from "@/pages/app/EmergencyContactsPage";
 import { ActivityPage } from "@/pages/app/ActivityPage";
 import { BillingPage } from "@/pages/app/BillingPage";
+import { AccountSettingsPage } from "@/pages/app/AccountSettingsPage";
 
 import PlanBuilderPage from "@/pages/app/PlanBuilderPage";
 import EditPlanPage from "@/pages/app/EditPlanPage";
@@ -68,14 +73,9 @@ function AppRoutes() {
         <Route path="/pricing" element={<PricingPage />} />
         <Route path="/security" element={<SecurityPage />} />
         <Route path="/faq" element={<FaqPage />} />
-        <Route
-          path="/contact"
-          element={
-            <div className="p-8 text-center">
-              <h1 className="text-2xl font-bold">Contact</h1>
-            </div>
-          }
-        />
+        <Route path="/contact" element={<ContactPage />} />
+        <Route path="/scenarios" element={<ScenariosPage />} />
+        <Route path="/accessibility" element={<AccessibilityPage />} />
         <Route path="/terms" element={<TermsPage />} />
         <Route path="/privacy" element={<PrivacyPage />} />
         <Route path="/about" element={<AboutPage />} />
@@ -121,6 +121,7 @@ function AppRoutes() {
         <Route path="emergency-contacts" element={<EmergencyContactsPage />} />
         <Route path="billing" element={<BillingPage />} />
         <Route path="activity" element={<ActivityPage />} />
+        <Route path="settings" element={<AccountSettingsPage />} />
         <Route path="plan" element={<PlanBuilderPage />} />
         <Route path="edit-plan" element={<EditPlanPage />} />
       </Route>
@@ -199,6 +200,7 @@ const App = () => (
         <AuthProvider>
           <PaywallProvider>
             <VaultPassphraseProvider>
+              <ScrollToTop />
               <AppRoutes />
             </VaultPassphraseProvider>
           </PaywallProvider>

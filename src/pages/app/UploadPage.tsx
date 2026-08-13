@@ -460,11 +460,9 @@ export function UploadPage() {
           id="file-input"
         />
 
-        <label htmlFor="file-input">
-          <Button variant="outline" asChild>
-            <span>Choose files</span>
-          </Button>
-        </label>
+        <Button variant="outline" asChild>
+          <label htmlFor="file-input">Choose files</label>
+        </Button>
       </div>
 
       {files.length > 0 && (

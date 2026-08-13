@@ -27,6 +27,7 @@ import {
   Activity,
   Settings,
   HelpCircle,
+  Lightbulb,
   LogOut,
   Menu,
   Lock,
@@ -61,6 +62,7 @@ const sidebarItems = [
   { label: 'Emergency Contacts', href: '/app/emergency-contacts', icon: Users },
   { label: 'Billing', href: '/app/billing', icon: CreditCard },
   { label: 'Activity Logs', href: '/app/activity', icon: Activity },
+  { label: 'Ideas', href: '/scenarios', icon: Lightbulb },
   { label: 'Settings', href: '/app/settings', icon: Settings },
   { label: 'Help', href: '/app/help', icon: HelpCircle },
 ];
@@ -102,7 +104,7 @@ function SidebarContent({ onItemClick }: { onItemClick?: () => void }) {
   const location = useLocation();
 
   return (
-    <nav className="flex-1 p-4 space-y-1">
+    <nav className="flex-1 px-3 py-5 space-y-1.5">
       {sidebarItems.map((item) => {
         const isActive = location.pathname === item.href ||
           (item.href !== '/app' && location.pathname.startsWith(item.href));
@@ -113,10 +115,10 @@ function SidebarContent({ onItemClick }: { onItemClick?: () => void }) {
             to={item.href}
             onClick={onItemClick}
             className={cn(
-              "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all",
+              "app-nav-item flex items-center gap-3 px-3 py-2.5 rounded-full text-xs font-medium transition-all",
               isActive
-                ? "bg-primary text-primary-foreground shadow-md"
-                : "text-muted-foreground hover:text-foreground hover:bg-accent"
+                ? "is-active"
+                : "text-muted-foreground hover:text-foreground"
             )}
           >
             <item.icon className="h-4 w-4 shrink-0" />
@@ -211,14 +213,15 @@ export function AppLayout() {
   };
 
   return (
-    <div className="min-h-screen flex bg-background">
-      <aside className="hidden lg:flex flex-col w-64 border-r border-border bg-card">
-        <div className="h-16 flex items-center gap-2 px-6 border-b border-border">
+    <div className="app-shell min-h-screen flex bg-background">
+      <a className="skip-link" href="#app-main-content">Skip to main content</a>
+      <aside className="app-sidebar hidden lg:flex flex-col w-60 border-r border-border bg-card">
+        <div className="h-20 flex items-center gap-2 px-6 border-b border-border">
           <Link to="/" className="flex items-center gap-2">
-            <div className="h-8 w-8 rounded-lg bg-gradient-security flex items-center justify-center">
+            <div className="app-logo h-8 w-8 rounded-full flex items-center justify-center">
               <Shield className="h-4 w-4 text-primary-foreground" />
             </div>
-            <span className="font-semibold text-foreground">anycircumstances</span>
+            <span className="text-sm font-medium tracking-tight text-foreground">anycircumstances</span>
           </Link>
         </div>
         <SidebarContent />
@@ -227,7 +230,7 @@ export function AppLayout() {
           <button
             onClick={() => vaultLocked ? navigate('/app/check-in') : lockVault()}
             className={cn(
-              "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all",
+                "vault-status w-full flex items-center gap-3 px-3 py-2.5 rounded-full text-xs font-medium transition-all",
               vaultLocked
                 ? "bg-warning/10 text-warning hover:bg-warning/20"
                 : "bg-success/10 text-success hover:bg-success/20"
@@ -240,16 +243,16 @@ export function AppLayout() {
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-16 border-b border-border bg-card flex items-center justify-between px-4 lg:px-6 gap-4">
+        <header className="app-header h-20 border-b border-border bg-card flex items-center justify-between px-4 lg:px-8 gap-4">
           <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
             <SheetTrigger asChild className="lg:hidden">
-              <Button variant="ghost" size="icon">
-                <Menu className="h-5 w-5" />
+              <Button variant="ghost" size="icon" className="icon-button" aria-label="Open navigation menu">
+                <Menu aria-hidden="true" className="h-5 w-5" />
               </Button>
             </SheetTrigger>
             <SheetContent side="left" className="w-64 p-0">
               <div className="h-16 flex items-center gap-2 px-6 border-b border-border">
-                <div className="h-8 w-8 rounded-lg bg-gradient-security flex items-center justify-center">
+                <div className="app-logo h-8 w-8 rounded-full flex items-center justify-center">
                   <Shield className="h-4 w-4 text-primary-foreground" />
                 </div>
                 <span className="font-semibold text-foreground">anycircumstances</span>
@@ -278,14 +281,14 @@ export function AppLayout() {
               </Button>
             </Link>
 
-            <Button variant="ghost" size="icon" className="relative">
-              <Bell className="h-5 w-5" />
-              <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-destructive" />
+            <Button variant="ghost" size="icon" className="relative icon-button" aria-label="Notifications, unread items">
+              <Bell aria-hidden="true" className="h-5 w-5" />
+              <span aria-hidden="true" className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-destructive" />
             </Button>
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="rounded-full">
+                <Button variant="ghost" size="icon" className="rounded-full icon-button" aria-label="Open account menu">
                   <Avatar className="h-8 w-8">
                     <AvatarFallback className="bg-primary text-primary-foreground text-sm">
                       {initials}
@@ -313,7 +316,7 @@ export function AppLayout() {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto">
+        <main id="app-main-content" tabIndex={-1} className="app-main flex-1 overflow-y-auto">
           <Outlet />
         </main>
       </div>
