@@ -36,9 +36,13 @@ async function sendGraceReminders(conn, mail) {
       COALESCE(vs.reminders, 3) AS reminders,
       u.email AS owner_email
     FROM verification_settings vs
-    JOIN billing_profiles bp ON bp.user_id = vs.user_id AND bp.status = 'active'
     JOIN users u ON u.id = vs.user_id
     WHERE vs.next_due_at IS NOT NULL
+      AND EXISTS (
+        SELECT 1 FROM billing_entitlements be
+        WHERE be.user_id = vs.user_id AND be.status = 'active'
+          AND (be.current_period_end IS NULL OR be.current_period_end > UTC_TIMESTAMP(3))
+      )
       AND NOW() > vs.next_due_at
       AND NOW() <= DATE_ADD(vs.next_due_at, INTERVAL COALESCE(vs.grace_period_hours, 24) HOUR)
       AND u.email IS NOT NULL
@@ -200,11 +204,13 @@ const [overdue] = await conn.query(
         vs.next_due_at,
         vs.grace_period_hours
       FROM verification_settings vs
-      JOIN billing_profiles bp
-        ON bp.user_id = vs.user_id
-       AND bp.status = 'active'
       WHERE
         vs.next_due_at IS NOT NULL
+        AND EXISTS (
+          SELECT 1 FROM billing_entitlements be
+          WHERE be.user_id = vs.user_id AND be.status = 'active'
+            AND (be.current_period_end IS NULL OR be.current_period_end > UTC_TIMESTAMP(3))
+        )
         AND NOW() > DATE_ADD(vs.next_due_at, INTERVAL vs.grace_period_hours HOUR)
       `
     );

@@ -60,7 +60,7 @@ export function SignupPage() {
     if (!agreedToTerms) {
       toast({
         title: 'Terms required',
-        description: 'Please agree to the Terms of Service and Privacy Policy.',
+        description: 'Please confirm you are at least 13 and agree to the Terms of Service and Privacy Policy.',
         variant: 'destructive',
       });
       return;
@@ -73,7 +73,7 @@ export function SignupPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, ageConfirmed: true }),
       });
 
       let data: any = null;
@@ -171,6 +171,7 @@ navigate('/verify-email');
                 type="email"
                 placeholder="you@example.com"
                 value={email}
+                autoComplete="email"
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 disabled={loading}
@@ -185,6 +186,8 @@ navigate('/verify-email');
                   type={showPassword ? 'text' : 'password'}
                   placeholder="Create a strong password"
                   value={password}
+                  autoComplete="new-password"
+                  aria-describedby="password-requirements"
                   onChange={(e) => setPassword(e.target.value)}
                   required
                   disabled={loading}
@@ -194,12 +197,14 @@ navigate('/verify-email');
                   onClick={() => setShowPassword(!showPassword)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                   disabled={loading}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  aria-pressed={showPassword}
                 >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  {showPassword ? <EyeOff aria-hidden="true" className="h-4 w-4" /> : <Eye aria-hidden="true" className="h-4 w-4" />}
                 </button>
               </div>
 
-              <div className="grid grid-cols-2 gap-2 mt-3">
+              <div id="password-requirements" className="grid grid-cols-2 gap-2 mt-3">
                 {requirements.map((req) => (
                   <div
                     key={req.label}
@@ -221,12 +226,15 @@ navigate('/verify-email');
                 type="password"
                 placeholder="Confirm your password"
                 value={confirmPassword}
+                autoComplete="new-password"
+                aria-invalid={Boolean(confirmPassword && !passwordsMatch)}
+                aria-describedby={confirmPassword && !passwordsMatch ? "password-match-error" : undefined}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 required
                 disabled={loading}
               />
               {confirmPassword && !passwordsMatch && (
-                <p className="text-xs text-destructive">Passwords do not match</p>
+                <p id="password-match-error" role="alert" className="text-xs text-destructive">Passwords do not match</p>
               )}
             </div>
 
@@ -238,7 +246,7 @@ navigate('/verify-email');
                 disabled={loading}
               />
               <label htmlFor="terms" className="text-sm text-muted-foreground leading-tight">
-                I agree to the{' '}
+                I confirm that I am at least 13 years old and agree to the{' '}
                 <Link to="/terms" className="text-primary hover:underline">
                   Terms of Service
                 </Link>{' '}

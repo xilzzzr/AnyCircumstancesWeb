@@ -8,7 +8,8 @@ const express = require("express");
 const cookieParser = require("cookie-parser");
 const cors = require("cors");
 
-const { authRouter, stripeWebhookHandler } = require("./auth");
+const { authRouter, authPool, stripeWebhookHandler } = require("./auth");
+const { createAppleNotificationHandler } = require("./apple_subscriptions");
 const { filesRouter } = require("./files");
 
 const app = express();
@@ -110,6 +111,8 @@ app.use(
   })
 );
 app.use(cookieParser());
+
+app.post("/apple/app-store-notifications", createAppleNotificationHandler(authPool));
 
 app.get("/health", (req, res) => {
   res.setHeader("Cache-Control", "no-store");

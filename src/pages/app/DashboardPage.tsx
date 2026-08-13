@@ -397,14 +397,15 @@ export function DashboardPage() {
   }, [checkins]);
 
   return (
-    <div className="p-6 lg:p-8 space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
-        <p className="text-muted-foreground">Welcome back, {displayName}</p>
+    <div className="dashboard-editorial px-5 py-8 lg:px-10 lg:py-12">
+      <div className="dashboard-intro">
+        <div className="micro-label"><span className="status-dot" /> PERSONAL SECURITY SYSTEM · ONLINE</div>
+        <h1>Everything important,<br /><span>held in readiness.</span></h1>
+        <p>Welcome back, {displayName}. Your vault, verification schedule, and emergency network are standing by.</p>
       </div>
 
       {isFreeLimited && (
-        <Card className="border-primary/20 bg-primary/5">
+        <Card className="editorial-card free-plan-card">
           <CardContent className="py-4 text-sm">
             <div className="font-medium text-foreground">You’re on a Free plan</div>
             <div className="text-muted-foreground mt-1">
@@ -425,14 +426,14 @@ export function DashboardPage() {
         </Card>
       )}
 
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-        <Card className="card-hover">
+      <div className="editorial-grid">
+        <Card className="editorial-card verification-card">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Next Verification</CardTitle>
+            <CardTitle className="micro-label">NEXT VERIFICATION</CardTitle>
             <Clock className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-foreground">
+            <div className="editorial-value">
               {loading ? "Loading…" : nextVerificationText}
             </div>
             <p className="text-xs text-muted-foreground mt-1">Schedule: {loading ? "…" : scheduleText}</p>
@@ -452,13 +453,13 @@ export function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card className="card-hover">
+        <Card className="editorial-card storage-card">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Storage Used</CardTitle>
+            <CardTitle className="micro-label">VAULT CAPACITY</CardTitle>
             <HardDrive className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-foreground">
+            <div className="editorial-value">
               {loading ? "Loading…" : hasVaultUsed ? formatBytes(vaultUsedBytes as number) : "—"}
             </div>
 
@@ -475,13 +476,13 @@ export function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card className="card-hover">
+        <Card className="editorial-card contacts-card">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Emergency Contacts</CardTitle>
+            <CardTitle className="micro-label">TRUSTED NETWORK</CardTitle>
             <Users className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-foreground">
+            <div className="editorial-value">
               {loading ? "Loading…" : `${verifiedContacts} verified`}
             </div>
             <p className="text-xs text-muted-foreground mt-1">{loading ? "…" : `${contacts.length} total contacts`}</p>
@@ -493,13 +494,13 @@ export function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card className="card-hover">
+        <Card className="editorial-card package-card">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Emergency Package</CardTitle>
+            <CardTitle className="micro-label">EMERGENCY PACKAGE</CardTitle>
             <FileText className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-foreground">
+            <div className="editorial-value">
               {loading ? "Loading…" : `${emergencyFileCount} files`}
             </div>
             <p className="text-xs text-muted-foreground mt-1">Assigned across your contacts</p>
@@ -512,9 +513,9 @@ export function DashboardPage() {
         </Card>
       </div>
 
-      <Card>
+      <Card className="editorial-card activity-card">
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>Recent Activity</CardTitle>
+          <div><div className="micro-label">SYSTEM LOG</div><CardTitle className="mt-2">Recent activity</CardTitle></div>
           <Link to="/app/activity">
             <Button variant="ghost" size="sm" className="gap-1">
               View all <ArrowRight className="h-3 w-3" />

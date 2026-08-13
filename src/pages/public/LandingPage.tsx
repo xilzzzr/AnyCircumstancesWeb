@@ -12,6 +12,7 @@ import {
   KeyRound
 } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { HomeScenarioTeaser } from '@/components/scenarios/HomeScenarioTeaser';
 
 const features = [
   {
@@ -53,15 +54,15 @@ const trustBadges = [
 
 export function LandingPage() {
   return (
-    <div className="flex flex-col">
+    <div className="landing-editorial flex flex-col">
       {/* Hero Section */}
-      <section className="relative py-24 lg:py-32 overflow-hidden">
+      <section className="landing-hero relative py-24 lg:py-32 overflow-hidden">
         {/* Background gradient */}
         <div className="absolute inset-0 bg-gradient-hero" />
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,hsl(var(--primary)/0.15),transparent_50%)]" />
 
         <div className="container mx-auto px-4 relative">
-          <div className="max-w-3xl mx-auto text-center">
+          <div className="landing-hero-copy max-w-4xl mx-auto text-center">
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -153,8 +154,10 @@ export function LandingPage() {
         </div>
       </section>
 
+      <HomeScenarioTeaser />
+
       {/* Features Section */}
-      <section className="py-24 bg-background">
+      <section className="landing-features py-24 bg-background">
         <div className="container mx-auto px-4">
           <div className="text-center mb-16">
             <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-4">
@@ -177,7 +180,7 @@ export function LandingPage() {
   .
 </p>          </div>
 
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+          <div className="feature-editorial-grid grid md:grid-cols-2 lg:grid-cols-3 gap-8">
             {features.map((feature, index) => (
               <motion.div
                 key={feature.title}
@@ -203,7 +206,7 @@ export function LandingPage() {
       </section>
 
       {/* How it works brief */}
-      <section className="py-24 bg-muted/30">
+      <section className="landing-process py-24 bg-muted/30">
         <div className="container mx-auto px-4">
           <div className="max-w-4xl mx-auto">
             <div className="text-center mb-16">
@@ -278,7 +281,7 @@ export function LandingPage() {
       </section>
 
       {/* CTA Section */}
-      <section className="py-24 bg-gradient-hero relative overflow-hidden">
+      <section className="landing-cta py-24 bg-gradient-hero relative overflow-hidden">
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_left,hsl(var(--primary)/0.2),transparent_50%)]" />
 
         <div className="container mx-auto px-4 relative">

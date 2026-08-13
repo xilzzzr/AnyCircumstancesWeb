@@ -2,12 +2,14 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url><loc>https://anycircumstances.com/</loc></url>
   <url><loc>https://anycircumstances.com/how-it-works</loc></url>
+  <url><loc>https://anycircumstances.com/scenarios</loc></url>
   <url><loc>https://anycircumstances.com/pricing</loc></url>
   <url><loc>https://anycircumstances.com/security</loc></url>
   <url><loc>https://anycircumstances.com/faq</loc></url>
   <url><loc>https://anycircumstances.com/contact</loc></url>
   <url><loc>https://anycircumstances.com/terms</loc></url>
   <url><loc>https://anycircumstances.com/privacy</loc></url>
+  <url><loc>https://anycircumstances.com/accessibility</loc></url>
   <url><loc>https://anycircumstances.com/cookies</loc></url>
   <url><loc>https://anycircumstances.com/status</loc></url>
 </urlset>

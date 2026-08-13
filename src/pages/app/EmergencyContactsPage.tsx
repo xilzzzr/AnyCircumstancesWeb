@@ -706,11 +706,12 @@ export function EmergencyContactsPage() {
               ) : (
                 <div className="space-y-2 max-h-44 overflow-y-auto">
                   {vaultFiles.map((file) => (
-                    <label
+                    <label htmlFor={`new-contact-file-${file.key}`}
                       key={file.key}
                       className="flex items-center gap-3 p-3 rounded-lg border cursor-pointer hover:bg-muted/50 transition-colors"
                     >
                       <Checkbox
+                        id={`new-contact-file-${file.key}`}
                         checked={selectedFiles.includes(file.key)}
                         onCheckedChange={(checked) => {
                           setSelectedFiles(
@@ -733,8 +734,9 @@ export function EmergencyContactsPage() {
           </div>
 
           <div className="mt-2">
-            <label className="flex items-start gap-3 rounded-lg border p-3 cursor-pointer hover:bg-muted/50 transition-colors">
+            <label htmlFor="skip-contact-notification" className="flex items-start gap-3 rounded-lg border p-3 cursor-pointer hover:bg-muted/50 transition-colors">
               <Checkbox
+                id="skip-contact-notification"
                 checked={skipNotify}
                 onCheckedChange={(checked) => {
                   if (checked) { setSkipNotify(false); setShowSkipNotifyConfirm(true); }
@@ -872,11 +874,12 @@ export function EmergencyContactsPage() {
           ) : (
             <div className="space-y-3 max-h-64 overflow-y-auto">
               {vaultFiles.map((file) => (
-                <label
+                <label htmlFor={`assign-contact-file-${file.key}`}
                   key={file.key}
                   className="flex items-center gap-3 p-3 rounded-lg border cursor-pointer hover:bg-muted/50 transition-colors"
                 >
                   <Checkbox
+                    id={`assign-contact-file-${file.key}`}
                     checked={selectedFiles.includes(file.key)}
                     onCheckedChange={(checked) => {
                       setSelectedFiles(
@@ -928,4 +931,3 @@ export function EmergencyContactsPage() {
     </div>
   );
 }
-
