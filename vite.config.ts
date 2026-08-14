@@ -25,6 +25,16 @@ export default defineConfig(({ mode }) => ({
     ],
   },
   plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
+  build: {
+    rollupOptions: {
+      output: {
+        // Rollup otherwise emits many sub-kilobyte shared icon chunks when the
+        // same icon appears in multiple lazy routes. Merge only very small
+        // chunks while preserving the meaningful route boundaries above them.
+        experimentalMinChunkSize: 2000,
+      },
+    },
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

@@ -16,6 +16,7 @@ const {
   verifyTransaction,
 } = require("./apple_subscriptions");
 const { purgeVaultFiles, deleteUserRecords } = require("./account_lifecycle");
+const { createFixedWindowGate, positiveInt } = require("./security");
 const router = express.Router();
 
 function asyncHandler(fn) {
@@ -50,6 +51,9 @@ const {
 if (!DB_HOST || !DB_USER || !DB_NAME || !JWT_ACCESS_SECRET) {
   throw new Error("Missing required env vars: DB_HOST, DB_USER, DB_NAME, JWT_ACCESS_SECRET");
 }
+if (process.env.NODE_ENV === "production" && Buffer.byteLength(String(JWT_ACCESS_SECRET), "utf8") < 32) {
+  throw new Error("JWT_ACCESS_SECRET must be at least 32 bytes in production");
+}
 
 const dbPoolConfig = {
   connectTimeout: 10000,
@@ -74,13 +78,47 @@ const pool = mysql.createPool(dbPoolConfig);
 
 const accessTtlSeconds = ACCESS_TOKEN_TTL_SECONDS ? Number(ACCESS_TOKEN_TTL_SECONDS) : 900;
 const refreshTtlDays = REFRESH_TOKEN_TTL_DAYS ? Number(REFRESH_TOKEN_TTL_DAYS) : 30;
-const cookieSecure = String(COOKIE_SECURE || "").toLowerCase() === "true";
+const cookieSecure = process.env.NODE_ENV === "production" || String(COOKIE_SECURE || "").toLowerCase() === "true";
 const cookieDomain = COOKIE_DOMAIN || undefined;
 
 const publicApiBaseUrl = (PUBLIC_API_BASE_URL || "http://localhost:3002").replace(/\/+$/, "");
 const publicWebBaseUrl = (PUBLIC_WEB_BASE_URL || "https://anycircumstances.com").replace(/\/+$/, "");
+if (process.env.NODE_ENV === "production") {
+  for (const [name, value] of [
+    ["PUBLIC_API_BASE_URL", publicApiBaseUrl],
+    ["PUBLIC_WEB_BASE_URL", publicWebBaseUrl],
+    ["PUBLIC_APP_BASE_URL", String(process.env.PUBLIC_APP_BASE_URL || publicWebBaseUrl)],
+  ]) {
+    let url;
+    try { url = new URL(value); } catch {}
+    if (!url || url.protocol !== "https:") throw new Error(`${name} must be an HTTPS URL in production`);
+  }
+}
 
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
+// Equalizes the expensive password-check path when an email is not registered.
+const DUMMY_PASSWORD_HASH = "$2b$12$Bzp.v2dUrXUXjidOrU6Nre9/CR1KzXktUVuqYfy1m.WXOKuf7CV2K";
+const emergencyGlobalGate = createFixedWindowGate({
+  name: "emergency_dispatch_global",
+  windowMs: 60 * 60 * 1000,
+  limit: positiveInt(process.env.EMERGENCY_GLOBAL_LIMIT_PER_HOUR, 50),
+});
+const emergencyUserGate = createFixedWindowGate({
+  name: "emergency_dispatch_user",
+  windowMs: 60 * 60 * 1000,
+  limit: positiveInt(process.env.EMERGENCY_USER_LIMIT_PER_HOUR, 2),
+});
+
+function consumeEmergencyDispatchQuota(userId, res) {
+  const globalResult = emergencyGlobalGate("global");
+  const userResult = globalResult.allowed ? emergencyUserGate(`user:${String(userId)}`) : null;
+  const blocked = !globalResult.allowed ? globalResult : !userResult.allowed ? userResult : null;
+  if (!blocked) return true;
+  res.setHeader("Retry-After", String(blocked.retryAfter));
+  res.setHeader("Cache-Control", "no-store");
+  res.status(429).json({ ok: false, error: "emergency_rate_limited" });
+  return false;
+}
 
 function logError(context, err) {
   const meta = {
@@ -114,6 +152,11 @@ function addHours(d, hours) {
 function sha256Hex(input) {
   return crypto.createHash("sha256").update(String(input), "utf8").digest("hex");
 }
+function shareExpiresAt() {
+  const requested = Number(process.env.SHARE_LINK_TTL_DAYS || 30);
+  const days = Number.isInteger(requested) ? Math.max(1, Math.min(requested, 90)) : 30;
+  return new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+}
 function normalizeEmail(email) {
   return String(email || "").trim().toLowerCase();
 }
@@ -132,7 +175,7 @@ function genSixDigitCode() {
 }
 
 function signAccessToken(payload) {
-  return jwt.sign(payload, JWT_ACCESS_SECRET, { expiresIn: accessTtlSeconds });
+  return jwt.sign(payload, JWT_ACCESS_SECRET, { algorithm: "HS256", expiresIn: accessTtlSeconds });
 }
 
 function cookieOptions(maxAgeMs) {
@@ -152,8 +195,9 @@ function setAuthCookies(res, accessToken, refreshToken) {
 }
 
 function clearAuthCookies(res) {
-  res.clearCookie("access_token", { domain: cookieDomain, path: "/" });
-  res.clearCookie("refresh_token", { domain: cookieDomain, path: "/" });
+  const options = { httpOnly: true, secure: cookieSecure, sameSite: "lax", domain: cookieDomain, path: "/" };
+  res.clearCookie("access_token", options);
+  res.clearCookie("refresh_token", options);
 }
 
 let _mailer = null;
@@ -183,7 +227,7 @@ async function sendVerificationEmail(toEmail, code, verifyUrl) {
   const from = EMAIL_FROM || `anycircumstances <${SMTP_USER || "no-reply@localhost"}>`;
 
   if (!transporter) {
-    console.error("[MAILER] Missing SMTP env vars; skipping email send. Use verify_code_dev_only instead.");
+    console.error("[MAILER] Missing SMTP env vars; skipping verification email.");
     return { ok: false, skipped: true };
   }
 
@@ -244,12 +288,20 @@ async function getUserById(userId) {
   return rows[0] || null;
 }
 
+async function verifyCurrentPassword(userId, password) {
+  if (!password || Buffer.byteLength(String(password), "utf8") > 72) return false;
+  const [rows] = await pool.query("SELECT password_hash, status FROM users WHERE id = ? LIMIT 1", [String(userId)]);
+  const user = rows?.[0];
+  if (!user || user.status !== "active" || !user.password_hash) return false;
+  return bcrypt.compare(String(password), String(user.password_hash));
+}
+
 function getUserIdFromAccessCookie(req) {
   const access = req.cookies?.access_token ? String(req.cookies.access_token) : "";
   if (!access) return null;
 
   try {
-    const payload = jwt.verify(access, JWT_ACCESS_SECRET);
+    const payload = jwt.verify(access, JWT_ACCESS_SECRET, { algorithms: ["HS256"] });
     const userId = payload?.sub ? String(payload.sub) : null;
     return userId || null;
   } catch {
@@ -263,6 +315,7 @@ function requireUserId(req, res) {
     res.status(401).json({ ok: false, error: "not_authenticated" });
     return null;
   }
+  req.userId = userId;
   return userId;
 }
 
@@ -318,36 +371,32 @@ async function ensureBillingProfileConn(conn, userId) {
   );
 }
 
-async function createEmailVerificationCode(conn, userId) {
+async function createEmailVerificationCredentials(conn, userId) {
   await conn.query("DELETE FROM email_verification_tokens WHERE user_id = ? AND used_at IS NULL", [userId]);
 
   const expiresAt = addDays(nowUtc(), 2);
-
-  for (let i = 0; i < 10; i++) {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
     const code = genSixDigitCode();
-    const tokenHash = sha256Hex(code);
-
+    const linkToken = crypto.randomBytes(48).toString("base64url");
     try {
-      await conn.query("INSERT INTO email_verification_tokens (user_id, token_hash, expires_at) VALUES (?, ?, ?)", [
-        userId,
-        tokenHash,
-        expiresAt,
-      ]);
-      return code;
-    } catch (e) {
-      if (e && (e.code === "ER_DUP_ENTRY" || e.errno === 1062)) continue;
-      throw e;
+      await conn.query(
+        "INSERT INTO email_verification_tokens (user_id, token_hash, expires_at) VALUES (?, ?, ?), (?, ?, ?)",
+        [userId, sha256Hex(code), expiresAt, userId, sha256Hex(linkToken), expiresAt]
+      );
+      return { code, linkToken };
+    } catch (error) {
+      if (error?.code === "ER_DUP_ENTRY" || error?.errno === 1062) continue;
+      throw error;
     }
   }
-
-  throw new Error("Failed to generate unique verification code");
+  throw new Error("Failed to generate unique verification credentials");
 }
 
 async function consumeEmailVerificationForUser(conn, userId, code) {
   const tokenHash = sha256Hex(code);
 
   const [rows] = await conn.query(
-    "SELECT id, expires_at, used_at FROM email_verification_tokens WHERE user_id = ? AND token_hash = ? LIMIT 1",
+    "SELECT id, expires_at, used_at FROM email_verification_tokens WHERE user_id = ? AND token_hash = ? LIMIT 1 FOR UPDATE",
     [userId, tokenHash]
   );
 
@@ -356,7 +405,7 @@ async function consumeEmailVerificationForUser(conn, userId, code) {
   if (row.used_at) return { ok: false, reason: "already_used" };
   if (new Date(row.expires_at).getTime() < nowUtc().getTime()) return { ok: false, reason: "expired" };
 
-  await conn.query("UPDATE email_verification_tokens SET used_at = NOW() WHERE id = ?", [row.id]);
+  await conn.query("UPDATE email_verification_tokens SET used_at = NOW() WHERE user_id = ? AND used_at IS NULL", [userId]);
   await conn.query("UPDATE users SET email_verified_at = NOW() WHERE id = ? AND email_verified_at IS NULL", [userId]);
 
   return { ok: true };
@@ -366,7 +415,7 @@ async function consumeEmailVerificationByTokenOnly(conn, rawToken) {
   const tokenHash = sha256Hex(rawToken);
 
   const [rows] = await conn.query(
-    "SELECT id, user_id, expires_at, used_at FROM email_verification_tokens WHERE token_hash = ? LIMIT 1",
+    "SELECT id, user_id, expires_at, used_at FROM email_verification_tokens WHERE token_hash = ? LIMIT 1 FOR UPDATE",
     [tokenHash]
   );
 
@@ -375,7 +424,7 @@ async function consumeEmailVerificationByTokenOnly(conn, rawToken) {
   if (row.used_at) return { ok: false, reason: "already_used" };
   if (new Date(row.expires_at).getTime() < nowUtc().getTime()) return { ok: false, reason: "expired" };
 
-  await conn.query("UPDATE email_verification_tokens SET used_at = NOW() WHERE id = ?", [row.id]);
+  await conn.query("UPDATE email_verification_tokens SET used_at = NOW() WHERE user_id = ? AND used_at IS NULL", [row.user_id]);
   await conn.query("UPDATE users SET email_verified_at = NOW() WHERE id = ? AND email_verified_at IS NULL", [row.user_id]);
 
   return { ok: true };
@@ -403,13 +452,16 @@ async function revokeRefreshToken(conn, raw) {
 async function rotateRefreshToken(conn, raw) {
   const tokenHash = sha256Hex(raw);
   const [rows] = await conn.query(
-    "SELECT id, user_id, expires_at, revoked_at FROM refresh_tokens WHERE token_hash = ? LIMIT 1",
+    "SELECT id, user_id, expires_at, revoked_at FROM refresh_tokens WHERE token_hash = ? LIMIT 1 FOR UPDATE",
     [tokenHash]
   );
   const row = rows[0];
 
   if (!row) return { ok: false, reason: "invalid_refresh" };
-  if (row.revoked_at) return { ok: false, reason: "revoked_refresh" };
+  if (row.revoked_at) {
+    await conn.query("UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = ? AND revoked_at IS NULL", [row.user_id]);
+    return { ok: false, reason: "refresh_reuse_detected" };
+  }
   if (new Date(row.expires_at).getTime() < nowUtc().getTime()) return { ok: false, reason: "expired_refresh" };
 
   await conn.query("UPDATE refresh_tokens SET revoked_at = NOW() WHERE id = ? AND revoked_at IS NULL", [row.id]);
@@ -450,7 +502,7 @@ async function consumePasswordResetToken(conn, rawToken, newPassword) {
   const tokenHash = sha256Hex(rawToken);
 
   const [rows] = await conn.query(
-    "SELECT id, user_id, expires_at, used_at FROM password_reset_tokens WHERE token_hash = ? LIMIT 1",
+    "SELECT id, user_id, expires_at, used_at FROM password_reset_tokens WHERE token_hash = ? LIMIT 1 FOR UPDATE",
     [tokenHash]
   );
 
@@ -475,14 +527,17 @@ router.post(
     const password = String(req.body?.password || "");
     const ageConfirmed = req.body?.ageConfirmed === true;
 
-    if (!validateEmail(email)) return res.status(400).json({ ok: false, error: "invalid_email" });
+    if (!validateEmail(email) || email.length > 254) return res.status(400).json({ ok: false, error: "invalid_email" });
     if (!ageConfirmed) return res.status(400).json({ ok: false, error: "age_confirmation_required" });
-    if (password.length < 10) return res.status(400).json({ ok: false, error: "weak_password" });
-
-    const existing = await getUserByEmail(email);
-    if (existing) return res.status(409).json({ ok: false, error: "email_in_use" });
+    if (password.length < 10 || Buffer.byteLength(password, "utf8") > 72) {
+      return res.status(400).json({ ok: false, error: "weak_password" });
+    }
 
     const passwordHash = await bcrypt.hash(password, 12);
+    const existing = await getUserByEmail(email);
+    if (existing) {
+      return res.status(201).json({ ok: true, needs_email_verification: true });
+    }
 
     const conn = await pool.getConnection();
     let verifyCode = "";
@@ -500,8 +555,9 @@ router.post(
 
       await ensureBillingProfileConn(conn, userId);
 
-      verifyCode = await createEmailVerificationCode(conn, userId);
-      verifyUrl = `${publicApiBaseUrl}/auth/verify-email?token=${encodeURIComponent(verifyCode)}`;
+      const credentials = await createEmailVerificationCredentials(conn, userId);
+      verifyCode = credentials.code;
+      verifyUrl = `${publicApiBaseUrl}/auth/verify-email?token=${encodeURIComponent(credentials.linkToken)}`;
 
       await conn.commit();
     } catch (e) {
@@ -526,9 +582,6 @@ router.post(
     return res.status(201).json({
       ok: true,
       needs_email_verification: true,
-      email_sent: emailSent,
-      verify_code_dev_only: verifyCode,
-      verify_url_dev_only: verifyUrl,
     });
   })
 );
@@ -537,7 +590,7 @@ router.get(
   "/verify-email",
   asyncHandler(async (req, res) => {
     const token = String(req.query?.token || "");
-    if (!token || !isSixDigitCode(token)) return res.status(400).json({ ok: false, error: "invalid_code" });
+    if (!/^[A-Za-z0-9_-]{20,200}$/.test(token)) return res.status(400).json({ ok: false, error: "invalid_token" });
 
     const conn = await pool.getConnection();
     try {
@@ -569,7 +622,7 @@ router.post(
     const email = normalizeEmail(req.body?.email);
     const code = String(req.body?.code || "");
 
-    if (!validateEmail(email)) return res.status(400).json({ ok: false, error: "invalid_email" });
+    if (!validateEmail(email) || email.length > 254) return res.status(400).json({ ok: false, error: "invalid_email" });
     if (!isSixDigitCode(code)) return res.status(400).json({ ok: false, error: "invalid_code" });
 
     const user = await getUserByEmail(email);
@@ -613,16 +666,16 @@ router.post(
     const email = normalizeEmail(req.body?.email);
     const password = String(req.body?.password || "");
 
-    if (!validateEmail(email)) return res.status(400).json({ ok: false, error: "invalid_email" });
-    if (!password) return res.status(400).json({ ok: false, error: "missing_password" });
+    if (!validateEmail(email) || email.length > 254) return res.status(400).json({ ok: false, error: "invalid_email" });
+    if (!password || Buffer.byteLength(password, "utf8") > 72) {
+      return res.status(400).json({ ok: false, error: "invalid_credentials" });
+    }
 
     const user = await getUserByEmail(email);
-    if (!user) return res.status(401).json({ ok: false, error: "invalid_credentials" });
+    const passwordOk = await bcrypt.compare(password, user?.password_hash || DUMMY_PASSWORD_HASH);
+    if (!user || !passwordOk) return res.status(401).json({ ok: false, error: "invalid_credentials" });
     if (user.status !== "active") return res.status(403).json({ ok: false, error: "account_disabled" });
     if (!user.email_verified_at) return res.status(403).json({ ok: false, error: "email_not_verified" });
-
-    const ok = await bcrypt.compare(password, user.password_hash);
-    if (!ok) return res.status(401).json({ ok: false, error: "invalid_credentials" });
 
     const conn = await pool.getConnection();
     try {
@@ -717,12 +770,12 @@ router.post(
   "/resend-verification",
   asyncHandler(async (req, res) => {
     const email = normalizeEmail(req.body?.email);
-    if (!validateEmail(email)) return res.status(400).json({ ok: false, error: "invalid_email" });
+    if (!validateEmail(email) || email.length > 254) return res.status(400).json({ ok: false, error: "invalid_email" });
 
     const user = await getUserByEmail(email);
-    if (!user) return res.json({ ok: true, email_sent: true });
-    if (user.email_verified_at) return res.json({ ok: true, email_sent: true });
-    if (user.status !== "active") return res.json({ ok: true, email_sent: true });
+    if (!user) return res.json({ ok: true });
+    if (user.email_verified_at) return res.json({ ok: true });
+    if (user.status !== "active") return res.json({ ok: true });
 
     const conn = await pool.getConnection();
     let verifyCode = "";
@@ -731,8 +784,9 @@ router.post(
     try {
       await conn.beginTransaction();
 
-      verifyCode = await createEmailVerificationCode(conn, user.id);
-      verifyUrl = `${publicApiBaseUrl}/auth/verify-email?token=${encodeURIComponent(verifyCode)}`;
+      const credentials = await createEmailVerificationCredentials(conn, user.id);
+      verifyCode = credentials.code;
+      verifyUrl = `${publicApiBaseUrl}/auth/verify-email?token=${encodeURIComponent(credentials.linkToken)}`;
 
       await conn.commit();
     } catch (e) {
@@ -756,9 +810,6 @@ router.post(
 
     return res.json({
       ok: true,
-      email_sent: emailSent,
-      verify_code_dev_only: verifyCode,
-      verify_url_dev_only: verifyUrl,
     });
   })
 );
@@ -768,6 +819,9 @@ router.post(
   asyncHandler(async (req, res) => {
     const userId = requireUserId(req, res);
     if (!userId) return;
+    if (!(await verifyCurrentPassword(userId, req.body?.password))) {
+      return res.status(401).json({ ok: false, error: "reauthentication_failed" });
+    }
 
     const pin = String(req.body?.pin || "");
     if (!/^\d{4,6}$/.test(pin)) return res.status(400).json({ ok: false, error: "invalid_pin" });
@@ -784,6 +838,9 @@ router.post(
   asyncHandler(async (req, res) => {
     const userId = requireUserId(req, res);
     if (!userId) return;
+    if (!(await verifyCurrentPassword(userId, req.body?.password))) {
+      return res.status(401).json({ ok: false, error: "reauthentication_failed" });
+    }
 
     const pin = String(req.body?.pin || "");
     if (!/^\d{4,6}$/.test(pin)) return res.status(400).json({ ok: false, error: "invalid_pin" });
@@ -799,12 +856,12 @@ router.post(
   "/password-reset/request",
   asyncHandler(async (req, res) => {
     const email = normalizeEmail(req.body?.email);
-    if (!validateEmail(email)) return res.status(400).json({ ok: false, error: "invalid_email" });
+    if (!validateEmail(email) || email.length > 254) return res.status(400).json({ ok: false, error: "invalid_email" });
 
     const user = await getUserByEmail(email);
 
     if (!user || user.status !== "active" || !user.email_verified_at) {
-      return res.json({ ok: true, email_sent: true });
+      return res.json({ ok: true });
     }
 
     const conn = await pool.getConnection();
@@ -815,7 +872,7 @@ router.post(
       await conn.beginTransaction();
 
       rawToken = await createPasswordResetToken(conn, user.id);
-      resetUrl = `${publicWebBaseUrl}/reset-password?token=${encodeURIComponent(rawToken)}`;
+      resetUrl = `${publicWebBaseUrl}/reset-password#token=${encodeURIComponent(rawToken)}`;
 
       await conn.commit();
     } catch (e) {
@@ -839,9 +896,6 @@ router.post(
 
     return res.json({
       ok: true,
-      email_sent: emailSent,
-      reset_token_dev_only: rawToken,
-      reset_url_dev_only: resetUrl,
     });
   })
 );
@@ -856,7 +910,7 @@ router.post(
       return res.status(400).json({ ok: false, error: "invalid_token" });
     }
 
-    if (newPassword.length < 10) {
+    if (newPassword.length < 10 || Buffer.byteLength(newPassword, "utf8") > 72) {
       return res.status(400).json({ ok: false, error: "weak_password" });
     }
 
@@ -1065,6 +1119,7 @@ router.post(
     }
 
     if (!ok) return res.status(401).json({ ok: false, error: "invalid_pin" });
+    if (isPanic && !consumeEmergencyDispatchQuota(userId, res)) return;
 
     const row = await getVerificationSettingsRow(userId);
 
@@ -1300,6 +1355,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const userId = requireUserId(req, res);
     if (!userId) return;
+    if (!stripe) return res.status(503).json({ ok: false, error: "billing_unavailable" });
 
     await ensureBillingProfile(userId);
 
@@ -1313,15 +1369,13 @@ router.post(
     if (activeProviders.has("apple") && !activeProviders.has("stripe")) {
       return res.status(409).json({ ok: false, error: "subscription_managed_by_apple" });
     }
-
-    const storageGb = Number(req.body?.storageGb || 5);
-    const checkInFrequency = normalizeFrequency(String(req.body?.checkInFrequency || "monthly"));
-    const billingInterval = normalizeInterval(String(req.body?.billingInterval || "monthly"));
-    const addons = Array.isArray(req.body?.addons) ? req.body.addons.map(String) : [];
-
-    if (!isValidFrequency(checkInFrequency)) {
-      return res.status(400).json({ ok: false, error: "invalid_frequency" });
+    if (!activeProviders.has("stripe")) {
+      return res.status(409).json({ ok: false, error: "no_active_subscription" });
     }
+
+    const plan = validatePlanInput(req.body);
+    if (!plan) return res.status(400).json({ ok: false, error: "invalid_plan" });
+    const { storageGb, checkInFrequency, billingInterval, addons } = plan;
 
     const safeStorageGb = Math.max(5, Math.min(200, Math.round(storageGb / 5) * 5));
     const storagePrice = computeStoragePrice(safeStorageGb);
@@ -1329,6 +1383,67 @@ router.post(
 
     const monthlyTotal = storagePrice + frequencyPrice;
     const amountCents = Math.round((billingInterval === "annual" ? monthlyTotal * 10 : monthlyTotal) * 100);
+
+    const [rows] = await pool.query(
+      "SELECT stripe_subscription_id FROM billing_profiles WHERE user_id = ? LIMIT 1",
+      [String(userId)]
+    );
+    const subId = rows?.[0]?.stripe_subscription_id ? String(rows[0].stripe_subscription_id) : null;
+
+    if (!subId) return res.status(409).json({ ok: false, error: "missing_subscription" });
+
+    const sub = await stripe.subscriptions.retrieve(subId, { expand: ["items.data.price"] });
+    if (!sub || !["active", "trialing"].includes(String(sub.status || ""))) {
+      return res.status(409).json({ ok: false, error: "subscription_not_active" });
+    }
+    const item = sub?.items?.data?.[0];
+    const currentPrice = item?.price;
+    if (!item?.id || !currentPrice?.product) {
+      return res.status(409).json({ ok: false, error: "stripe_subscription_item_missing" });
+    }
+
+    const interval = billingInterval === "annual" ? "year" : "month";
+    const currency = String(currentPrice.currency || "usd");
+    const dynamicProductId = String(process.env.STRIPE_DYNAMIC_PRODUCT_ID || "");
+
+    // Stripe blocks creating new Prices on inactive Products.
+    // If the product was archived/inactivated, reactivate it so we can create the new Price.
+    const productId =
+      typeof currentPrice.product === "string"
+        ? currentPrice.product
+        : String(currentPrice.product?.id || "");
+
+    if (!productId) {
+      return res.status(500).json({ ok: false, error: "stripe_missing_product" });
+    }
+
+    try {
+      const prod = await stripe.products.retrieve(productId);
+      if (prod && prod.active === false) {
+        await stripe.products.update(productId, { active: true });
+      }
+    } catch (e) {
+      // fall through; Stripe will throw a clearer error if this is still invalid
+    }
+
+    const newPrice = await stripe.prices.create({
+      currency,
+      unit_amount: Number(amountCents),
+      recurring: { interval },
+      product: dynamicProductId || productId,
+    });
+
+    await stripe.subscriptions.update(subId, {
+      items: [{ id: item.id, price: newPrice.id }],
+      proration_behavior: "create_prorations",
+      metadata: {
+        ...(sub.metadata || {}),
+        user_id: String(userId),
+        storage_gb: String(safeStorageGb),
+        checkin_frequency: String(checkInFrequency),
+        billing_interval: String(billingInterval),
+      },
+    });
 
     await pool.query(
       `UPDATE billing_profiles
@@ -1345,68 +1460,14 @@ router.post(
         String(userId),
       ]
     );
-
-    await syncVerificationFromBilling(userId);
-
-    const [rows] = await pool.query(
-      "SELECT stripe_subscription_id FROM billing_profiles WHERE user_id = ? LIMIT 1",
-      [String(userId)]
+    await pool.query(
+      `UPDATE billing_entitlements
+       SET storage_limit_gb = ?, checkin_frequency = ?, billing_interval = ?
+       WHERE provider = 'stripe' AND external_subscription_id = ?`,
+      [Number(safeStorageGb), String(checkInFrequency), String(billingInterval), subId]
     );
-    const subId = rows?.[0]?.stripe_subscription_id ? String(rows[0].stripe_subscription_id) : null;
-
-    if (subId) {
-      await pool.query(
-        `UPDATE billing_entitlements
-         SET storage_limit_gb = ?, checkin_frequency = ?, billing_interval = ?
-         WHERE provider = 'stripe' AND external_subscription_id = ?`,
-        [Number(safeStorageGb), String(checkInFrequency), String(billingInterval), subId]
-      );
-      await refreshAggregateBillingStatus(pool, userId);
-    }
-
-    if (subId && typeof stripe !== "undefined" && stripe) {
-      const sub = await stripe.subscriptions.retrieve(subId, { expand: ["items.data.price"] });
-      const item = sub?.items?.data?.[0];
-      const currentPrice = item?.price;
-
-      if (item?.id && currentPrice?.product) {
-        const interval = billingInterval === "annual" ? "year" : "month";
-        const currency = String(currentPrice.currency || "usd");
-        const dynamicProductId = String(process.env.STRIPE_DYNAMIC_PRODUCT_ID || "");
-
-        // Stripe blocks creating new Prices on inactive Products.
-        // If the product was archived/inactivated, reactivate it so we can create the new Price.
-        const productId =
-          typeof currentPrice.product === "string"
-            ? currentPrice.product
-            : String(currentPrice.product?.id || "");
-
-        if (!productId) {
-          return res.status(500).json({ ok: false, error: "stripe_missing_product" });
-        }
-
-        try {
-          const prod = await stripe.products.retrieve(productId);
-          if (prod && prod.active === false) {
-            await stripe.products.update(productId, { active: true });
-          }
-        } catch (e) {
-          // fall through; Stripe will throw a clearer error if this is still invalid
-        }
-
-        const newPrice = await stripe.prices.create({
-          currency,
-          unit_amount: Number(amountCents),
-          recurring: { interval },
-          product: dynamicProductId || productId,
-        });
-
-        await stripe.subscriptions.update(subId, {
-          items: [{ id: item.id, price: newPrice.id }],
-          proration_behavior: "create_prorations",
-        });
-      }
-    }
+    await refreshAggregateBillingStatus(pool, userId);
+    await syncVerificationFromBilling(userId);
 
     return res.json({ ok: true });
   })
@@ -1524,15 +1585,27 @@ function normalizeInterval(interval) {
   return "monthly";
 }
 
+function validatePlanInput(body) {
+  const storageGb = Number(body?.storageGb);
+  const checkInFrequency = String(body?.checkInFrequency || "");
+  const billingInterval = String(body?.billingInterval || "");
+  const addons = body?.addons === undefined ? [] : body.addons;
+  if (!Number.isInteger(storageGb) || storageGb < 5 || storageGb > 200 || storageGb % 5 !== 0) return null;
+  if (!isValidFrequency(checkInFrequency)) return null;
+  if (billingInterval !== "monthly" && billingInterval !== "annual") return null;
+  if (!Array.isArray(addons) || addons.length !== 0) return null;
+  return { storageGb, checkInFrequency, billingInterval, addons: [] };
+}
+
 router.post(
   "/billing/quote",
   asyncHandler(async (req, res) => {
     const userId = requireUserId(req, res);
     if (!userId) return;
 
-    const storageGb = Number(req.body?.storageGb);
-    const checkInFrequency = normalizeFrequency(String(req.body?.checkInFrequency || "monthly"));
-    const billingInterval = normalizeInterval(String(req.body?.billingInterval || "monthly"));
+    const plan = validatePlanInput(req.body);
+    if (!plan) return res.status(400).json({ ok: false, error: "invalid_plan" });
+    const { storageGb, checkInFrequency, billingInterval } = plan;
 
     const safeStorageGb = Math.max(5, Math.min(200, Math.round(storageGb / 5) * 5));
     const storagePrice = computeStoragePrice(safeStorageGb);
@@ -1563,10 +1636,16 @@ router.post(
 
     await ensureBillingProfile(userId);
 
-    const storageGb = Number(req.body?.storageGb);
-    const checkInFrequency = normalizeFrequency(String(req.body?.checkInFrequency || "monthly"));
-    const billingInterval = normalizeInterval(String(req.body?.billingInterval || "monthly"));
-    const addons = Array.isArray(req.body?.addons) ? req.body.addons.map(String) : [];
+    const plan = validatePlanInput(req.body);
+    if (!plan) return res.status(400).json({ ok: false, error: "invalid_plan" });
+    const { storageGb, checkInFrequency, billingInterval, addons } = plan;
+
+    const [activeRows] = await pool.query(
+      `SELECT 1 FROM billing_entitlements WHERE user_id = ? AND status = 'active'
+       AND (current_period_end IS NULL OR current_period_end > UTC_TIMESTAMP(3)) LIMIT 1`,
+      [String(userId)]
+    );
+    if (activeRows.length) return res.status(409).json({ ok: false, error: "subscription_already_active" });
 
     const safeStorageGb = Math.max(5, Math.min(200, Math.round(storageGb / 5) * 5));
     const storagePrice = computeStoragePrice(safeStorageGb);
@@ -1730,7 +1809,7 @@ router.post(
     const transactionToken = String(transaction.appAccountToken || "").toLowerCase();
     const originalTransactionId = String(transaction.originalTransactionId || "");
     const alreadyOwnedElsewhere = await transactionBelongsToAnotherUser(pool, userId, originalTransactionId);
-    if (alreadyOwnedElsewhere || (transactionToken && transactionToken !== expectedToken.toLowerCase())) {
+    if (alreadyOwnedElsewhere || !transactionToken || transactionToken !== expectedToken.toLowerCase()) {
       return res.status(403).json({ ok: false, error: "apple_account_mismatch" });
     }
     const entitlement = await upsertAppleEntitlement(
@@ -1786,7 +1865,7 @@ async function dispatchEmergencyForUser(conn, userId, req) {
   const ownerEmail = urows?.[0]?.email ? String(urows[0].email) : "";
 
   const [contacts] = await conn.query(
-    "SELECT id, email, name, verified_at, public_key FROM emergency_contacts WHERE user_id = ?",
+    "SELECT id, email, name, verified_at, public_key FROM emergency_contacts WHERE user_id = ? AND verified_at IS NOT NULL",
     [String(userId)]
   );
 
@@ -1799,7 +1878,8 @@ async function dispatchEmergencyForUser(conn, userId, req) {
       SELECT a.contact_id, a.file_id
       FROM emergency_contact_file_assignments a
       JOIN emergency_contacts c ON c.id = a.contact_id
-      WHERE c.user_id = ?
+      JOIN files f ON f.id = a.file_id
+      WHERE c.user_id = ? AND f.user_id = c.user_id
     `,
     [String(userId)]
   );
@@ -1828,9 +1908,9 @@ async function dispatchEmergencyForUser(conn, userId, req) {
 
       await conn.query(
         "INSERT INTO contact_file_share_tokens (contact_id, file_id, token_hash, expires_at) VALUES (?, ?, ?, ?)",
-        [contactId, fileId, tokenHash, new Date(Date.now() + 1000*60*60*24*365*10)]
+        [contactId, fileId, tokenHash, shareExpiresAt()]
       );
-links.push(publicBase + "/share/" + token);
+links.push(publicBase + "/share#token=" + encodeURIComponent(token));
       linksCreated += 1;
     }
 
@@ -1899,6 +1979,7 @@ router.post(
 
     const ok = await bcrypt.compare(pin, panicHash);
     if (!ok) return res.status(401).json({ ok: false, error: "invalid_pin" });
+    if (!consumeEmergencyDispatchQuota(userId, res)) return;
 
     const transporter = getMailer();
     const from = EMAIL_FROM || `anycircumstances <${SMTP_USER || "no-reply@localhost"}>`;
@@ -1920,7 +2001,7 @@ router.post(
       ]);
 
       const [contacts] = await conn.query(
-        "SELECT id, email, name, verified_at, public_key FROM emergency_contacts WHERE user_id = ? ",
+        "SELECT id, email, name, verified_at, public_key FROM emergency_contacts WHERE user_id = ? AND verified_at IS NOT NULL",
         [String(userId)]
       );
 
@@ -1934,7 +2015,8 @@ router.post(
         SELECT a.contact_id, a.file_id
         FROM emergency_contact_file_assignments a
         JOIN emergency_contacts c ON c.id = a.contact_id
-        WHERE c.user_id = ?
+        JOIN files f ON f.id = a.file_id
+        WHERE c.user_id = ? AND f.user_id = c.user_id
         `,
         [String(userId)]
       );
@@ -1963,9 +2045,9 @@ router.post(
 
           await conn.query(
         "INSERT INTO contact_file_share_tokens (contact_id, file_id, token_hash, expires_at) VALUES (?, ?, ?, ?)",
-        [contactId, fileId, tokenHash, new Date(Date.now() + 1000*60*60*24*365*10)]
+        [contactId, fileId, tokenHash, shareExpiresAt()]
       );
-links.push(publicBase + "/share/" + token);
+links.push(publicBase + "/share#token=" + encodeURIComponent(token));
           linksCreated += 1;
         }
 
@@ -2034,7 +2116,7 @@ async function createEmergencyContactVerificationCode(conn, contactId) {
   const expiresAt = addDays(nowUtc(), 2);
 
   for (let i = 0; i < 10; i++) {
-    const code = genSixDigitCode();
+    const code = crypto.randomBytes(48).toString("base64url");
     const tokenHash = sha256Hex(code);
     try {
       await conn.query(
@@ -2066,7 +2148,6 @@ function renderEmergencyContactVerifyHtml(opts) {
   const ownerEmail = String(opts?.ownerEmail || "");
   const contactName = String(opts?.contactName || "");
 
-  let title = "Confirming…";
   let finalTitle = "Confirmed";
   let finalText = "You’re verified as an emergency contact.";
   let finalSub = ownerEmail ? `For ${ownerEmail}` : "";
@@ -2099,25 +2180,19 @@ function renderEmergencyContactVerifyHtml(opts) {
     .title{font-size:20px;font-weight:700;margin:0 0 6px 0}
     .sub{margin:0 0 16px 0;color:rgba(255,255,255,.72)}
     .row{display:flex;align-items:center;gap:12px;margin-top:18px}
-    .spinner{width:20px;height:20px;border-radius:999px;border:2px solid rgba(255,255,255,.22);border-top-color:#7c3aed;animation:spin 1s linear infinite}
     .check{width:22px;height:22px;border-radius:999px;background:rgba(34,197,94,.18);display:flex;align-items:center;justify-content:center}
     .check svg{width:14px;height:14px}
     .btn{display:inline-block;margin-top:16px;padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.08);color:#fff;text-decoration:none}
     .muted{color:rgba(255,255,255,.6);font-size:13px;margin-top:12px}
-    @keyframes spin{to{transform:rotate(360deg)}}
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="card">
       <div class="brand"><span class="dot"></span><span>anycircumstances</span></div>
-      <p class="title" id="t">${escapeHtml(title)}</p>
-      <p class="sub" id="s">${safeContact ? `For ${safeContact}` : `Please wait…`}</p>
-      <div class="row" id="loadingRow">
-        <div class="spinner"></div>
-        <div style="color:rgba(255,255,255,.8)">Verifying your email…</div>
-      </div>
-      <div id="final" style="display:none">
+      <p class="title">${safeFinalTitle}</p>
+      <p class="sub">${safeContact ? `For ${safeContact}` : safeFinalSub}</p>
+      <div>
         <div class="row">
           ${
             ok
@@ -2134,14 +2209,6 @@ function renderEmergencyContactVerifyHtml(opts) {
       </div>
     </div>
   </div>
-  <script>
-    setTimeout(function(){
-      document.getElementById('loadingRow').style.display = 'none';
-      document.getElementById('t').textContent = ${JSON.stringify(finalTitle)};
-      document.getElementById('s').textContent = ${JSON.stringify(finalSub || "")};
-      document.getElementById('final').style.display = 'block';
-    }, 2000);
-  </script>
 </body>
 </html>`;
 }
@@ -2150,7 +2217,7 @@ async function consumeEmergencyContactVerificationByToken(conn, code) {
   const tokenHash = sha256Hex(code);
 
   const [rows] = await conn.query(
-    "SELECT id, contact_id, expires_at, used_at FROM emergency_contact_verification_tokens WHERE token_hash = ? LIMIT 1",
+    "SELECT id, contact_id, expires_at, used_at FROM emergency_contact_verification_tokens WHERE token_hash = ? LIMIT 1 FOR UPDATE",
     [tokenHash]
   );
 
@@ -2217,6 +2284,23 @@ function toContactDto(row, assignedFiles) {
   };
 }
 
+function normalizeAssignedFileIds(input) {
+  if (!Array.isArray(input) || input.length > 100) return null;
+  const ids = Array.from(new Set(input.map((value) => String(value || "").trim())));
+  if (ids.some((id) => !id || id.length > 512)) return null;
+  return ids;
+}
+
+async function filesBelongToUser(conn, userId, fileIds) {
+  if (!fileIds.length) return true;
+  const placeholders = fileIds.map(() => "?").join(",");
+  const [rows] = await conn.query(
+    `SELECT id FROM files WHERE user_id = ? AND id IN (${placeholders})`,
+    [String(userId), ...fileIds]
+  );
+  return rows.length === fileIds.length;
+}
+
 router.get(
   "/emergency-contacts",
   asyncHandler(async (req, res) => {
@@ -2235,7 +2319,11 @@ router.get(
 if (ids.length > 0) {
   const placeholders = ids.map(() => "?").join(",");
   const [assignments] = await pool.query(
-    `SELECT contact_id, file_id FROM emergency_contact_file_assignments WHERE contact_id IN (${placeholders})`,
+    `SELECT a.contact_id, a.file_id
+     FROM emergency_contact_file_assignments a
+     JOIN emergency_contacts c ON c.id = a.contact_id
+     JOIN files f ON f.id = a.file_id AND f.user_id = c.user_id
+     WHERE a.contact_id IN (${placeholders})`,
     ids
   );      for (const a of assignments) {
         const key = String(a.contact_id);
@@ -2254,21 +2342,21 @@ router.post(
   asyncHandler(async (req, res) => {
     const userId = await requireActiveSubscription(req, res);
     if (!userId) return;
+    if (!(await verifyCurrentPassword(userId, req.body?.password))) {
+      return res.status(401).json({ ok: false, error: "reauthentication_failed" });
+    }
 
     const name = String(req.body?.name || "").trim();
     const email = normalizeEmail(req.body?.email);
     const relationship = String(req.body?.relationship || "").trim();
-    const fileIds = Array.isArray(req.body?.assignedFiles) ? req.body.assignedFiles : [];
+    const fileIds = normalizeAssignedFileIds(req.body?.assignedFiles || []);
 
     const notifyContact = req.body?.notifyContact !== false;
 
-    if (!name) return res.status(400).json({ ok: false, error: "missing_name" });
-    if (!validateEmail(email)) return res.status(400).json({ ok: false, error: "invalid_email" });
-
-    for (const f of fileIds) {
-      const s = String(f || "");
-      if (!s || s.length > 512) return res.status(400).json({ ok: false, error: "invalid_file_id" });
-    }
+    if (!name || name.length > 120) return res.status(400).json({ ok: false, error: "invalid_name" });
+    if (!validateEmail(email) || email.length > 254) return res.status(400).json({ ok: false, error: "invalid_email" });
+    if (relationship.length > 120) return res.status(400).json({ ok: false, error: "invalid_relationship" });
+    if (!fileIds) return res.status(400).json({ ok: false, error: "invalid_file_ids" });
 
     const conn = await pool.getConnection();
     let contactId = 0;
@@ -2278,6 +2366,11 @@ router.post(
 
     try {
       await conn.beginTransaction();
+
+      if (!(await filesBelongToUser(conn, userId, fileIds))) {
+        await conn.rollback();
+        return res.status(403).json({ ok: false, error: "file_not_owned" });
+      }
 
       const [urows] = await conn.query("SELECT email FROM users WHERE id = ? LIMIT 1", [String(userId)]);
       ownerEmail = urows?.[0]?.email ? String(urows[0].email) : "your account";
@@ -2337,8 +2430,6 @@ router.post(
         addedAt: new Date().toISOString(),
       },
       email_sent: emailSent,
-      verify_code_dev_only: verifyCode,
-      verify_url_dev_only: verifyUrl,
     });
   })
 );
@@ -2348,6 +2439,9 @@ router.patch(
   asyncHandler(async (req, res) => {
     const userId = await requireActiveSubscription(req, res);
     if (!userId) return;
+    if (!(await verifyCurrentPassword(userId, req.body?.password))) {
+      return res.status(401).json({ ok: false, error: "reauthentication_failed" });
+    }
 
     const contactId = String(req.params.id || "").trim();
     if (!/^\d+$/.test(contactId)) return res.status(400).json({ ok: false, error: "invalid_contact_id" });
@@ -2356,24 +2450,55 @@ router.patch(
     const emailRaw = req.body?.email;
     const relationship = String(req.body?.relationship || "").trim();
 
-    if (!name) return res.status(400).json({ ok: false, error: "missing_name" });
+    if (!name || name.length > 120) return res.status(400).json({ ok: false, error: "invalid_name" });
     const email = emailRaw !== undefined ? normalizeEmail(emailRaw) : null;
-    if (email !== null && !validateEmail(email)) return res.status(400).json({ ok: false, error: "invalid_email" });
+    if (email !== null && (!validateEmail(email) || email.length > 254)) return res.status(400).json({ ok: false, error: "invalid_email" });
+    if (relationship.length > 120) return res.status(400).json({ ok: false, error: "invalid_relationship" });
 
+    const conn = await pool.getConnection();
     try {
-      const [result] = await pool.query(
-        "UPDATE emergency_contacts SET name = ?, email = COALESCE(?, email), relationship = ? WHERE id = ? AND user_id = ? LIMIT 1",
-        [name, email, relationship || null, contactId, String(userId)]
+      await conn.beginTransaction();
+      const [rows] = await conn.query(
+        "SELECT id, email FROM emergency_contacts WHERE id = ? AND user_id = ? LIMIT 1 FOR UPDATE",
+        [contactId, String(userId)]
       );
+      if (!rows.length) {
+        await conn.rollback();
+        return res.status(404).json({ ok: false, error: "not_found" });
+      }
 
-      if (!result.affectedRows) return res.status(404).json({ ok: false, error: "not_found" });
+      const emailChanged = email !== null && email !== normalizeEmail(rows[0].email);
+      if (emailChanged) {
+        await conn.query(
+          `UPDATE emergency_contacts
+           SET name = ?, email = ?, relationship = ?, verified_at = NULL, public_key = NULL
+           WHERE id = ? AND user_id = ? LIMIT 1`,
+          [name, email, relationship || null, contactId, String(userId)]
+        );
+        await conn.query("DELETE FROM emergency_contact_verification_tokens WHERE contact_id = ?", [contactId]);
+        await conn.query("DELETE FROM contact_file_share_tokens WHERE contact_id = ?", [contactId]);
+        await conn.query(
+          "DELETE FROM file_key_envelopes WHERE recipient_type = 'contact' AND recipient_id = ?",
+          [contactId]
+        );
+      } else {
+        await conn.query(
+          `UPDATE emergency_contacts SET name = ?, email = COALESCE(?, email), relationship = ?
+           WHERE id = ? AND user_id = ? LIMIT 1`,
+          [name, email, relationship || null, contactId, String(userId)]
+        );
+      }
+      await conn.commit();
       return res.json({ ok: true });
     } catch (e) {
+      try { await conn.rollback(); } catch {}
       if (e && (e.code === "ER_DUP_ENTRY" || e.errno === 1062)) {
         return res.status(409).json({ ok: false, error: "contact_exists" });
       }
       logError("emergency-contacts:edit", e);
       return res.status(500).json({ ok: false, error: "server_error" });
+    } finally {
+      conn.release();
     }
   })
 );
@@ -2383,6 +2508,9 @@ router.delete(
   asyncHandler(async (req, res) => {
     const userId = await requireActiveSubscription(req, res);
     if (!userId) return;
+    if (!(await verifyCurrentPassword(userId, req.body?.password))) {
+      return res.status(401).json({ ok: false, error: "reauthentication_failed" });
+    }
 
     const contactId = String(req.params.id || "").trim();
     if (!/^\d+$/.test(contactId)) return res.status(400).json({ ok: false, error: "invalid_contact_id" });
@@ -2400,6 +2528,11 @@ router.delete(
         return res.status(404).json({ ok: false, error: "not_found" });
       }
 
+      await conn.query("DELETE FROM contact_file_share_tokens WHERE contact_id = ?", [contactId]);
+      await conn.query(
+        "DELETE FROM file_key_envelopes WHERE recipient_type = 'contact' AND recipient_id = ?",
+        [contactId]
+      );
       await conn.query("DELETE FROM emergency_contact_file_assignments WHERE contact_id = ?", [contactId]);
       await conn.query("DELETE FROM emergency_contact_verification_tokens WHERE contact_id = ?", [contactId]);
       await conn.query("DELETE FROM emergency_contacts WHERE id = ? AND user_id = ? LIMIT 1", [contactId, String(userId)]);
@@ -2423,15 +2556,15 @@ router.put(
   asyncHandler(async (req, res) => {
     const userId = await requireActiveSubscription(req, res);
     if (!userId) return;
+    if (!(await verifyCurrentPassword(userId, req.body?.password))) {
+      return res.status(401).json({ ok: false, error: "reauthentication_failed" });
+    }
 
     const contactId = String(req.params.id || "").trim();
     if (!/^\d+$/.test(contactId)) return res.status(400).json({ ok: false, error: "invalid_contact_id" });
 
-    const fileIds = Array.isArray(req.body?.fileIds) ? req.body.fileIds : [];
-    for (const f of fileIds) {
-      const s = String(f || "");
-      if (!s || s.length > 512) return res.status(400).json({ ok: false, error: "invalid_file_id" });
-    }
+    const fileIds = normalizeAssignedFileIds(req.body?.fileIds || []);
+    if (!fileIds) return res.status(400).json({ ok: false, error: "invalid_file_ids" });
 
     const conn = await pool.getConnection();
     try {
@@ -2446,6 +2579,14 @@ router.put(
         return res.status(404).json({ ok: false, error: "not_found" });
       }
 
+      if (!(await filesBelongToUser(conn, userId, fileIds))) {
+        await conn.rollback();
+        return res.status(403).json({ ok: false, error: "file_not_owned" });
+      }
+
+      // Assignment changes revoke every outstanding bearer link. New links are
+      // issued only by a later, authorized dispatch/share action.
+      await conn.query("DELETE FROM contact_file_share_tokens WHERE contact_id = ?", [contactId]);
       await conn.query("DELETE FROM emergency_contact_file_assignments WHERE contact_id = ?", [contactId]);
 
       if (fileIds.length > 0) {
@@ -2527,7 +2668,7 @@ router.post(
       emailSent = false;
     }
 
-    return res.json({ ok: true, email_sent: emailSent, verify_code_dev_only: verifyCode, verify_url_dev_only: verifyUrl });
+    return res.json({ ok: true, email_sent: emailSent });
   })
 );
 
@@ -2538,7 +2679,7 @@ router.get(
     const accept = String(req.headers?.accept || "");
     const wantsHtml = accept.includes("text/html");
 
-    if (!token || !isSixDigitCode(token)) {
+    if (!/^[A-Za-z0-9_-]{20,200}$/.test(token)) {
       if (wantsHtml) {
         const html = renderEmergencyContactVerifyHtml({ ok: false, reason: "invalid_code" });
         return res.status(400).set("Content-Type", "text/html; charset=utf-8").send(html);
@@ -2612,18 +2753,39 @@ router.post(
 
     const apnsEnv = currentApnsEnv();
 
+    const [existingRows] = await pool.query(
+      "SELECT user_id FROM user_device_tokens WHERE token = ? LIMIT 1",
+      [token.toLowerCase()]
+    );
+    if (existingRows?.[0]?.user_id && String(existingRows[0].user_id) !== String(userId)) {
+      return res.status(409).json({ ok: false, error: "device_token_already_registered" });
+    }
+    const [countRows] = await pool.query(
+      "SELECT COUNT(*) AS total FROM user_device_tokens WHERE user_id = ? AND invalidated_at IS NULL",
+      [String(userId)]
+    );
+    if (!existingRows.length && Number(countRows?.[0]?.total || 0) >= 10) {
+      return res.status(429).json({ ok: false, error: "device_limit_reached" });
+    }
+
     await pool.query(
       `
       INSERT INTO user_device_tokens (user_id, token, platform, apns_env, invalidated_at)
       VALUES (?, ?, 'ios', ?, NULL)
       ON DUPLICATE KEY UPDATE
-        user_id = VALUES(user_id),
         apns_env = VALUES(apns_env),
         invalidated_at = NULL,
         updated_at = CURRENT_TIMESTAMP
       `,
       [String(userId), token.toLowerCase(), apnsEnv]
     );
+
+    const [ownerRows] = await pool.query("SELECT user_id FROM user_device_tokens WHERE token = ? LIMIT 1", [
+      token.toLowerCase(),
+    ]);
+    if (!ownerRows?.[0]?.user_id || String(ownerRows[0].user_id) !== String(userId)) {
+      return res.status(409).json({ ok: false, error: "device_token_already_registered" });
+    }
 
     return res.json({ ok: true });
   })
@@ -2637,7 +2799,7 @@ router.get(
 
     let payload;
     try {
-      payload = jwt.verify(access, JWT_ACCESS_SECRET);
+      payload = jwt.verify(access, JWT_ACCESS_SECRET, { algorithms: ["HS256"] });
     } catch {
       return res.json({ ok: false });
     }
@@ -2645,7 +2807,10 @@ router.get(
     const userId = payload?.sub ? String(payload.sub) : "";
     if (!userId) return res.json({ ok: false });
 
-    return res.json({ ok: true, role: "user", userId });
+    const user = await getUserById(userId);
+    if (!user || user.status !== "active" || !user.email_verified_at) return res.json({ ok: false });
+
+    return res.json({ ok: true, role: "user", userId, user: { id: String(user.id), email: user.email } });
   })
 );
 
@@ -2656,6 +2821,9 @@ router.post(
     if (!userId) return;
     if (String(req.body?.confirmation || "") !== "DELETE MY FILES") {
       return res.status(400).json({ ok: false, error: "confirmation_required" });
+    }
+    if (!(await verifyCurrentPassword(userId, req.body?.password))) {
+      return res.status(401).json({ ok: false, error: "reauthentication_failed" });
     }
     const [rows] = await pool.query(
       `SELECT bp.stripe_subscription_id,
@@ -2688,6 +2856,9 @@ router.delete(
     if (String(req.body?.confirmation || "") !== "DELETE MY ACCOUNT") {
       return res.status(400).json({ ok: false, error: "confirmation_required" });
     }
+    if (!(await verifyCurrentPassword(userId, req.body?.password))) {
+      return res.status(401).json({ ok: false, error: "reauthentication_failed" });
+    }
     const [rows] = await pool.query("SELECT stripe_subscription_id FROM billing_profiles WHERE user_id = ? LIMIT 1", [String(userId)]);
     const stripeSubscriptionId = String(rows?.[0]?.stripe_subscription_id || "");
     if (stripeSubscriptionId && stripe) await stripe.subscriptions.cancel(stripeSubscriptionId);
@@ -2699,6 +2870,7 @@ router.delete(
 );
 
 async function stripeWebhookHandler(req, res) {
+  let recordedEventId = "";
   try {
     if (!stripe) return res.status(500).send("stripe_not_configured");
 
@@ -2718,8 +2890,12 @@ async function stripeWebhookHandler(req, res) {
     if (eventId) {
       try {
         await pool.query("INSERT INTO stripe_events (event_id) VALUES (?)", [eventId]);
-      } catch {
-        return res.status(200).json({ ok: true });
+        recordedEventId = eventId;
+      } catch (error) {
+        if (error?.code === "ER_DUP_ENTRY" || error?.errno === 1062) {
+          return res.status(200).json({ ok: true, duplicate: true });
+        }
+        throw error;
       }
     }
 
@@ -2756,7 +2932,14 @@ async function stripeWebhookHandler(req, res) {
 
     if (event.type === "customer.subscription.updated" || event.type === "customer.subscription.deleted") {
       const sub = event.data.object;
-      const userId = sub?.metadata?.user_id ? String(sub.metadata.user_id) : "";
+      let userId = sub?.metadata?.user_id ? String(sub.metadata.user_id) : "";
+      if (!userId && sub?.id) {
+        const [ownerRows] = await pool.query(
+          "SELECT user_id FROM billing_profiles WHERE stripe_subscription_id = ? LIMIT 1",
+          [String(sub.id)]
+        );
+        userId = ownerRows?.[0]?.user_id ? String(ownerRows[0].user_id) : "";
+      }
       const status = String(sub.status || "");
 
       let mapped = "past_due";
@@ -2807,6 +2990,9 @@ async function stripeWebhookHandler(req, res) {
 
     return res.status(200).json({ ok: true });
   } catch (e) {
+    if (recordedEventId) {
+      await pool.query("DELETE FROM stripe_events WHERE event_id = ?", [recordedEventId]).catch(() => null);
+    }
     logError("stripeWebhookHandler", e);
     return res.status(500).send("server_error");
   }

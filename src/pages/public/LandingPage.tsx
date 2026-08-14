@@ -17,8 +17,8 @@ import { HomeScenarioTeaser } from '@/components/scenarios/HomeScenarioTeaser';
 const features = [
   {
     icon: Lock,
-    title: 'End-to-End Encryption',
-    description: 'Your files are encrypted on your device before upload. We never see your data.',
+    title: 'Client-Side File Encryption',
+    description: 'Your files are encrypted on your device before upload, so storage receives ciphertext instead of the original file.',
   },
   {
     icon: Clock,
@@ -48,7 +48,7 @@ const features = [
 ];
 
 const trustBadges = [
-  'Zero-knowledge architecture',
+  'Client-side file encryption',
   '256-bit AES encryption',
 ];
 
@@ -90,13 +90,13 @@ export function LandingPage() {
               transition={{ duration: 0.5, delay: 0.2 }}
               className="text-lg md:text-xl text-vault-foreground/70 mb-8 max-w-2xl mx-auto"
             >
-              Store your important files with end-to-end encryption. Learn exactly how our{' '}
+              Store your important files with client-side encryption. Learn exactly how our{' '}
               <Link to="/how-it-works" className="underline underline-offset-4 hover:opacity-90">
                 emergency check-in system works
               </Link>
               , review our{' '}
               <Link to="/security" className="underline underline-offset-4 hover:opacity-90">
-                zero-knowledge security model
+                security and recovery model
               </Link>
               , or compare{' '}
               <Link to="/pricing" className="underline underline-offset-4 hover:opacity-90">
@@ -249,7 +249,7 @@ export function LandingPage() {
               </Link>
               {" · "}
               <Link to="/security" className="underline underline-offset-4 hover:opacity-90">
-                zero-knowledge security model
+                security and recovery model
               </Link>
               {" · "}
               <Link to="/pricing" className="underline underline-offset-4 hover:opacity-90">

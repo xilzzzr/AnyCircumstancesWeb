@@ -74,7 +74,7 @@ function renderAnyCircumstancesEmail({ title, bodyHtml, ctaText, ctaUrl, footerN
             <tr>
               <td style="padding:16px 24px;background:#f8fafc;">
                 <div style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#64748b;line-height:1.6;">
-                  AnyCircumstances • Zero-knowledge architecture • AES encryption
+                  AnyCircumstances • Client-side file encryption • AES encryption
                 </div>
               </td>
             </tr>

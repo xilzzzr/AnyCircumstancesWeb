@@ -65,10 +65,10 @@ type UploadingFile = {
 
 type PresignUploadResponse = {
   ok: boolean;
-  method?: "PUT";
+  method?: "POST";
   url?: string;
   key?: string;
-  headers?: Record<string, string>;
+  fields?: Record<string, string>;
   error?: string;
 };
 
@@ -87,11 +87,10 @@ function emitPaywall(title?: string, description?: string) {
   );
 }
 
-function xhrPutWithProgress(url: string, body: Blob, headers: Record<string, string>, onProgress: (pct: number) => void) {
+function xhrPostWithProgress(url: string, body: Blob, fields: Record<string, string>, onProgress: (pct: number) => void) {
   return new Promise<void>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open("PUT", url, true);
-    Object.entries(headers || {}).forEach(([k, v]) => xhr.setRequestHeader(k, v));
+    xhr.open("POST", url, true);
     xhr.upload.onprogress = (e) => {
       if (!e.lengthComputable) return;
       const pct = Math.min(99, Math.round((e.loaded / e.total) * 100));
@@ -102,7 +101,10 @@ function xhrPutWithProgress(url: string, body: Blob, headers: Record<string, str
       reject(new Error(`upload_failed_http_${xhr.status}`));
     };
     xhr.onerror = () => reject(new Error("upload_failed_network"));
-    xhr.send(body);
+    const form = new FormData();
+    Object.entries(fields || {}).forEach(([key, value]) => form.append(key, value));
+    form.append("file", body);
+    xhr.send(form);
   });
 }
 
@@ -230,6 +232,7 @@ export function UploadPage() {
           body: JSON.stringify({
             filename: uf.file.name,
             contentType: uf.file.type || "application/octet-stream",
+            sizeBytes: ciphertextBlob.size,
           }),
         });
 
@@ -258,10 +261,10 @@ export function UploadPage() {
 
         updateFile(uf.id, { status: "uploading", progress: 20, key: presign.key });
 
-        await xhrPutWithProgress(
+        await xhrPostWithProgress(
           presign.url,
           ciphertextBlob,
-          presign.headers || { "Content-Type": "application/octet-stream" },
+          presign.fields || {},
           (pct) => updateFile(uf.id, { progress: Math.max(20, pct) })
         );
 

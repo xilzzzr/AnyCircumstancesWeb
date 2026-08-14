@@ -13,9 +13,9 @@ import {
 const featureList = [
   {
     icon: Lock,
-    title: "End-to-End Encryption",
+    title: "Client-Side File Encryption",
     description:
-      "Files are encrypted locally on your device before upload. Only you control the keys, ensuring true zero-knowledge storage."
+      "Files are encrypted locally on your device before upload. The service stores ciphertext and protected recovery-key material for your emergency workflow."
   },
   {
     icon: Clock,
@@ -138,4 +138,3 @@ export function FeaturesPage() {
     </div>
   );
 }
-

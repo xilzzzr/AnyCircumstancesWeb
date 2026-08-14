@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
+import { Seo } from "@/components/seo/Seo";
 import { motion } from "framer-motion";
 import {
   Vault,
@@ -31,6 +32,7 @@ const fadeUp = {
 export function DigitalVaultPage() {
   return (
     <div className="flex flex-col">
+      <Seo title="Secure Digital Vault for Important Information | AnyCircumstances" description="Securely store important documents, recovery details, and emergency information, then control when trusted recipients can receive access." path="/digital-vault" />
       <section className="relative py-24 lg:py-32 overflow-hidden">
         <div className="absolute inset-0 bg-gradient-hero" />
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,hsl(var(--primary)/0.18),transparent_55%)]" />
@@ -53,8 +55,7 @@ export function DigitalVaultPage() {
               transition={{ duration: 0.55, delay: 0.05 }}
               className="text-4xl md:text-5xl lg:text-6xl font-bold text-vault-foreground mb-6 leading-tight"
             >
-              Put your “oh-no” files in a{" "}
-              <span className="gradient-text">vault</span>
+              A Secure Digital Vault for Important Information
               <span className="block mt-2 text-vault-foreground/80 text-xl md:text-2xl font-medium">
                 so future-you (or your people) aren’t stuck guessing.
               </span>
@@ -101,7 +102,7 @@ export function DigitalVaultPage() {
               className="mt-12 grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-3xl mx-auto"
             >
               {[
-                { icon: EyeOff, title: "Zero-knowledge", desc: "We can’t read your files." },
+                { icon: EyeOff, title: "Ciphertext storage", desc: "Original files are encrypted before upload." },
                 { icon: Lock, title: "Encrypted locally", desc: "Encrypted before upload." },
                 { icon: BadgeCheck, title: "Controlled access", desc: "Only your rules trigger delivery." },
               ].map((s) => (
@@ -122,6 +123,8 @@ export function DigitalVaultPage() {
           </div>
         </div>
       </section>
+
+      <section className="py-20 bg-background"><div className="container mx-auto max-w-5xl px-4"><h2 className="text-3xl md:text-4xl font-bold">What is a digital vault?</h2><p className="mt-5 max-w-4xl text-lg text-muted-foreground">A digital vault is protected storage for sensitive documents and instructions. A useful vault does more than hold files: it organizes information, limits access, protects recovery, and makes it clear how an authorized person can act when the owner is unavailable.</p><h2 className="mt-14 text-3xl md:text-4xl font-bold">Digital vault, password manager, or cloud storage?</h2><p className="mt-5 text-muted-foreground">Password managers specialize in credentials. Cloud drives specialize in everyday syncing and collaboration. AnyCircumstances is designed for encrypted files plus scheduled check-ins and controlled delivery to trusted contacts. Use each tool for the job it handles best, and avoid duplicating high-risk secrets unnecessarily.</p><div className="mt-10 rounded-2xl border bg-card p-7"><h2 className="text-2xl font-semibold">Planning an emergency file?</h2><p className="mt-3 text-muted-foreground">Use the <Link className="text-primary hover:underline" to="/emergency-information-vault">emergency information vault guide</Link>, follow the <Link className="text-primary hover:underline" to="/guides/emergency-information-checklist">family emergency checklist</Link>, or build a <Link className="text-primary hover:underline" to="/guides/digital-emergency-binder">digital emergency binder</Link>.</p></div></div></section>
 
       <section className="py-20 bg-background">
         <div className="container mx-auto px-4">

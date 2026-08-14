@@ -108,6 +108,7 @@ export function EmergencyContactsPage() {
   const [formName, setFormName] = useState("");
   const [formEmail, setFormEmail] = useState("");
   const [formRelationship, setFormRelationship] = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
 
   const { toast } = useToast();
@@ -122,6 +123,7 @@ export function EmergencyContactsPage() {
     setFormName("");
     setFormEmail("");
     setFormRelationship("");
+    setCurrentPassword("");
     setSelectedFiles([]);
     setSkipNotify(false);
   };
@@ -218,6 +220,7 @@ export function EmergencyContactsPage() {
           relationship: formRelationship,
           assignedFiles: selectedFiles,
           notifyContact: !skipNotify,
+          password: currentPassword,
         }),
       });
 
@@ -301,6 +304,7 @@ export function EmergencyContactsPage() {
           name: formName,
           email: formEmail,
           relationship: formRelationship,
+          password: currentPassword,
         }),
       });
 
@@ -368,6 +372,8 @@ export function EmergencyContactsPage() {
       const resp = await fetch(`/auth/emergency-contacts/${selectedContact.id}`, {
         method: "DELETE",
         credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: currentPassword }),
       });
 
       const data = await readJsonSafe(resp);
@@ -417,7 +423,7 @@ export function EmergencyContactsPage() {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ fileIds: selectedFiles }),
+        body: JSON.stringify({ fileIds: selectedFiles, password: currentPassword }),
       });
 
       const data = await readJsonSafe(resp);
@@ -503,6 +509,7 @@ export function EmergencyContactsPage() {
   };
 
   const openEditModal = (contact: EmergencyContact) => {
+    setCurrentPassword("");
     setSelectedContact(contact);
     setFormName(contact.name);
     setFormEmail(contact.email);
@@ -511,12 +518,14 @@ export function EmergencyContactsPage() {
   };
 
   const openFilesModal = (contact: EmergencyContact) => {
+    setCurrentPassword("");
     setSelectedContact(contact);
     setSelectedFiles(Array.isArray(contact.assignedFiles) ? contact.assignedFiles : []);
     setShowFilesModal(true);
   };
 
   const openDeleteModal = (contact: EmergencyContact) => {
+    setCurrentPassword("");
     setSelectedContact(contact);
     setShowDeleteModal(true);
   };
@@ -528,7 +537,7 @@ export function EmergencyContactsPage() {
           <h1 className="text-2xl font-bold text-foreground">Emergency Contacts</h1>
           <p className="text-muted-foreground">People who will receive your files if you miss check-ins</p>
         </div>
-        <Button onClick={() => setShowAddModal(true)} className="gap-2" disabled={initialLoading}>
+        <Button onClick={() => { setCurrentPassword(""); setShowAddModal(true); }} className="gap-2" disabled={initialLoading}>
           <UserPlus className="h-4 w-4" />
           Add contact
         </Button>
@@ -562,7 +571,7 @@ export function EmergencyContactsPage() {
             <p className="text-sm text-muted-foreground mb-4">
               Add trusted people who should receive your files
             </p>
-            <Button onClick={() => setShowAddModal(true)} className="gap-2">
+            <Button onClick={() => { setCurrentPassword(""); setShowAddModal(true); }} className="gap-2">
               <UserPlus className="h-4 w-4" />
               Add your first contact
             </Button>
@@ -756,6 +765,11 @@ export function EmergencyContactsPage() {
           </div>
 
 	
+          <div className="space-y-2">
+            <Label htmlFor="add-contact-password">Current account password</Label>
+            <Input id="add-contact-password" type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} autoComplete="current-password" disabled={loading} />
+          </div>
+
           <DialogFooter>
             <Button
               variant="outline"
@@ -767,7 +781,7 @@ export function EmergencyContactsPage() {
             >
               Cancel
             </Button>
-            <Button onClick={handleAddContact} disabled={loading}>
+            <Button onClick={handleAddContact} disabled={loading || !currentPassword}>
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Add contact"}
             </Button>
           </DialogFooter>
@@ -844,13 +858,17 @@ export function EmergencyContactsPage() {
                 disabled={loading}
               />
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-contact-password">Current account password</Label>
+              <Input id="edit-contact-password" type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} autoComplete="current-password" disabled={loading} />
+            </div>
           </div>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowEditModal(false)} disabled={loading}>
               Cancel
             </Button>
-            <Button onClick={handleEditContact} disabled={loading}>
+            <Button onClick={handleEditContact} disabled={loading || !currentPassword}>
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save changes"}
             </Button>
           </DialogFooter>
@@ -897,11 +915,16 @@ export function EmergencyContactsPage() {
             </div>
           )}
 
+          <div className="space-y-2">
+            <Label htmlFor="assign-files-password">Current account password</Label>
+            <Input id="assign-files-password" type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} autoComplete="current-password" disabled={loading} />
+          </div>
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowFilesModal(false)} disabled={loading}>
               Cancel
             </Button>
-            <Button onClick={handleUpdateFiles} disabled={loading}>
+            <Button onClick={handleUpdateFiles} disabled={loading || !currentPassword}>
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save assignments"}
             </Button>
           </DialogFooter>
@@ -918,11 +941,16 @@ export function EmergencyContactsPage() {
             </DialogDescription>
           </DialogHeader>
 
+          <div className="space-y-2">
+            <Label htmlFor="delete-contact-password">Current account password</Label>
+            <Input id="delete-contact-password" type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} autoComplete="current-password" disabled={loading} />
+          </div>
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowDeleteModal(false)} disabled={loading}>
               Cancel
             </Button>
-            <Button variant="destructive" onClick={handleDeleteContact} disabled={loading}>
+            <Button variant="destructive" onClick={handleDeleteContact} disabled={loading || !currentPassword}>
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Remove contact"}
             </Button>
           </DialogFooter>

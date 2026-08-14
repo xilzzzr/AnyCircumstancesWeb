@@ -1,88 +1,94 @@
-import React from "react";
-import { Toaster } from "@/components/ui/toaster";
-import { Toaster as Sonner } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { AuthProvider, useAuth } from "@/contexts/AuthContext";
-import { DevRoleToggle } from "@/components/ui/DevRoleToggle";
+import React, { lazy, Suspense, type ComponentType, type LazyExoticComponent } from "react";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { ScrollToTop } from "@/components/ScrollToTop";
+import { RouteSeo } from "@/components/seo/RouteSeo";
 
-import { VaultPassphraseProvider } from "./contexts/VaultPassphraseContext";
-import { PaywallProvider } from "@/contexts/PaywallContext";
-
-// Layouts
 import { PublicLayout } from "@/layouts/PublicLayout";
-import { AppLayout } from "@/layouts/AppLayout";
-import { AdminLayout } from "@/layouts/AdminLayout";
-
-// Public Pages
-import { LandingPage } from "@/pages/public/LandingPage";
-import { FeaturesPage } from "@/pages/public/FeaturesPage";
-import { HowItWorksPage } from "@/pages/public/HowItWorksPage";
-import { PricingPage } from "@/pages/public/PricingPage";
-import SecurityPage from "@/pages/public/SecurityPage";
-import FaqPage from "@/pages/public/FaqPage";
-import { PrivacyPage } from "@/pages/public/PrivacyPage";
-import { TermsPage } from "@/pages/public/TermsPage";
-import { DeadMansSwitchPage } from "@/pages/public/DeadMansSwitchPage";
-import { DigitalVaultPage } from "@/pages/public/DigitalVaultPage";
-import { AboutPage } from "@/pages/public/AboutPage";
-import { ContactPage } from "@/pages/public/ContactPage";
-import { ScenariosPage } from "@/pages/public/ScenariosPage";
-import { AccessibilityPage } from "@/pages/public/AccessibilityPage";
-
-// Auth Pages
-import { LoginPage } from "@/pages/auth/LoginPage";
-import { SignupPage } from "@/pages/auth/SignupPage";
-import { VerifyEmailPage } from "@/pages/auth/VerifyEmailPage";
-import { CreatePinPage } from "@/pages/auth/CreatePinPage";
-import { CreatePanicPinPage } from "@/pages/auth/CreatePanicPinPage";
-import { OnboardingPage } from "@/pages/auth/OnboardingPage";
-import { ForgotPasswordPage } from "@/pages/auth/ForgotPasswordPage";
-import { ResetPasswordPage } from "@/pages/auth/ResetPasswordPage";
-
-// App Pages
-import { DashboardPage } from "@/pages/app/DashboardPage";
-import { VaultPage } from "@/pages/app/VaultPage";
-import { UploadPage } from "@/pages/app/UploadPage";
-import { CheckInPage } from "@/pages/app/CheckInPage";
-import { VerificationSettingsPage } from "@/pages/app/VerificationSettingsPage";
-import { EmergencyContactsPage } from "@/pages/app/EmergencyContactsPage";
-import { ActivityPage } from "@/pages/app/ActivityPage";
-import { BillingPage } from "@/pages/app/BillingPage";
-import { AccountSettingsPage } from "@/pages/app/AccountSettingsPage";
-
-import PlanBuilderPage from "@/pages/app/PlanBuilderPage";
-import EditPlanPage from "@/pages/app/EditPlanPage";
-import { HelpPage } from "@/pages/app/HelpPage";
-import { IdeasPage } from "@/pages/app/IdeasPage";
-
-import SharePage from "@/pages/SharePage";
 import NotFound from "@/pages/NotFound";
 
-const queryClient = new QueryClient();
+const LandingPage = lazy(() => import("@/pages/public/LandingPage").then((module) => ({ default: module.LandingPage })));
+const DeadMansSwitchPage = lazy(() => import("@/pages/public/DeadMansSwitchPage").then((module) => ({ default: module.DeadMansSwitchPage })));
+const DigitalVaultPage = lazy(() => import("@/pages/public/DigitalVaultPage").then((module) => ({ default: module.DigitalVaultPage })));
+const EmergencyInformationVaultPage = lazy(() => import("@/pages/public/EmergencyInformationVaultPage").then((module) => ({ default: module.EmergencyInformationVaultPage })));
+const FeaturesPage = lazy(() => import("@/pages/public/FeaturesPage").then((module) => ({ default: module.FeaturesPage })));
+const HowItWorksPage = lazy(() => import("@/pages/public/HowItWorksPage").then((module) => ({ default: module.HowItWorksPage })));
+const PricingPage = lazy(() => import("@/pages/public/PricingPage").then((module) => ({ default: module.PricingPage })));
+const SecurityPage = lazy(() => import("@/pages/public/SecurityPage"));
+const FaqPage = lazy(() => import("@/pages/public/FaqPage"));
+const ScenariosPage = lazy(() => import("@/pages/public/ScenariosPage").then((module) => ({ default: module.ScenariosPage })));
+const GuidesIndexPage = lazy(() => import("@/pages/public/GuidePage").then((module) => ({ default: module.GuidesIndexPage })));
+const GuidePage = lazy(() => import("@/pages/public/GuidePage").then((module) => ({ default: module.GuidePage })));
 
-function AppRoutes() {
-  const { role } = useAuth();
+const AboutPage = lazy(() => import("@/routes/PublicInfoPages").then((module) => ({ default: module.AboutPage })));
+const ContactPage = lazy(() => import("@/routes/PublicInfoPages").then((module) => ({ default: module.ContactPage })));
+const AccessibilityPage = lazy(() => import("@/routes/PublicInfoPages").then((module) => ({ default: module.AccessibilityPage })));
+const PrivacyPage = lazy(() => import("@/routes/PublicInfoPages").then((module) => ({ default: module.PrivacyPage })));
+const TermsPage = lazy(() => import("@/routes/PublicInfoPages").then((module) => ({ default: module.TermsPage })));
 
+const LoginPage = lazy(() => import("@/routes/AuthPages").then((module) => ({ default: module.LoginPage })));
+const SignupPage = lazy(() => import("@/routes/AuthPages").then((module) => ({ default: module.SignupPage })));
+const VerifyEmailPage = lazy(() => import("@/routes/AuthPages").then((module) => ({ default: module.VerifyEmailPage })));
+const CreatePinPage = lazy(() => import("@/routes/AuthPages").then((module) => ({ default: module.CreatePinPage })));
+const CreatePanicPinPage = lazy(() => import("@/routes/AuthPages").then((module) => ({ default: module.CreatePanicPinPage })));
+const OnboardingPage = lazy(() => import("@/routes/AuthPages").then((module) => ({ default: module.OnboardingPage })));
+const ForgotPasswordPage = lazy(() => import("@/routes/AuthPages").then((module) => ({ default: module.ForgotPasswordPage })));
+const ResetPasswordPage = lazy(() => import("@/routes/AuthPages").then((module) => ({ default: module.ResetPasswordPage })));
+
+const PrivateRouteProviders = lazy(() => import("@/routes/PrivateRouteProviders"));
+const ProtectedAppLayout = lazy(() => import("@/routes/ProtectedAppLayout"));
+const DashboardPage = lazy(() => import("@/pages/app/DashboardPage").then((module) => ({ default: module.DashboardPage })));
+const VaultPage = lazy(() => import("@/pages/app/VaultPage").then((module) => ({ default: module.VaultPage })));
+const UploadPage = lazy(() => import("@/pages/app/UploadPage").then((module) => ({ default: module.UploadPage })));
+const CheckInPage = lazy(() => import("@/pages/app/CheckInPage").then((module) => ({ default: module.CheckInPage })));
+const VerificationSettingsPage = lazy(() => import("@/pages/app/VerificationSettingsPage").then((module) => ({ default: module.VerificationSettingsPage })));
+const EmergencyContactsPage = lazy(() => import("@/pages/app/EmergencyContactsPage").then((module) => ({ default: module.EmergencyContactsPage })));
+const BillingPage = lazy(() => import("@/pages/app/BillingPage").then((module) => ({ default: module.BillingPage })));
+const PlanBuilderPage = lazy(() => import("@/pages/app/PlanBuilderPage"));
+const EditPlanPage = lazy(() => import("@/pages/app/EditPlanPage"));
+const ActivityPage = lazy(() => import("@/routes/AppSecondaryPages").then((module) => ({ default: module.ActivityPage })));
+const AccountSettingsPage = lazy(() => import("@/routes/AppSecondaryPages").then((module) => ({ default: module.AccountSettingsPage })));
+const HelpPage = lazy(() => import("@/routes/AppSecondaryPages").then((module) => ({ default: module.HelpPage })));
+const IdeasPage = lazy(() => import("@/routes/AppSecondaryPages").then((module) => ({ default: module.IdeasPage })));
+const SharePage = lazy(() => import("@/pages/SharePage"));
+
+function RouteFallback({ application = false }: { application?: boolean }) {
+  return (
+    <div className={application ? "min-h-[50vh] p-6" : "container mx-auto min-h-[50vh] px-4 py-20"} role="status" aria-live="polite">
+      <div className="mx-auto max-w-3xl animate-pulse space-y-4" aria-hidden="true">
+        <div className="h-8 w-2/3 rounded bg-muted" />
+        <div className="h-4 w-full rounded bg-muted" />
+        <div className="h-4 w-5/6 rounded bg-muted" />
+      </div>
+      <span className="sr-only">Loading page</span>
+    </div>
+  );
+}
+
+function lazyElement(Page: LazyExoticComponent<ComponentType>, application = false) {
+  return <Suspense fallback={<RouteFallback application={application} />}><Page /></Suspense>;
+}
+
+export function AppRoutes() {
   return (
     <Routes>
       <Route element={<PublicLayout />}>
-        <Route path="/" element={<LandingPage />} />
-        <Route path="/features" element={<FeaturesPage />} />
-        <Route path="/how-it-works" element={<HowItWorksPage />} />
-        <Route path="/pricing" element={<PricingPage />} />
-        <Route path="/security" element={<SecurityPage />} />
-        <Route path="/faq" element={<FaqPage />} />
-        <Route path="/contact" element={<ContactPage />} />
-        <Route path="/scenarios" element={<ScenariosPage />} />
-        <Route path="/accessibility" element={<AccessibilityPage />} />
-        <Route path="/terms" element={<TermsPage />} />
-        <Route path="/privacy" element={<PrivacyPage />} />
-        <Route path="/about" element={<AboutPage />} />
-        <Route path="/dead-mans-switch" element={<DeadMansSwitchPage />} />
-        <Route path="/digital-vault" element={<DigitalVaultPage />} />
+        <Route path="/" element={lazyElement(LandingPage)} />
+        <Route path="/features" element={lazyElement(FeaturesPage)} />
+        <Route path="/how-it-works" element={lazyElement(HowItWorksPage)} />
+        <Route path="/pricing" element={lazyElement(PricingPage)} />
+        <Route path="/security" element={lazyElement(SecurityPage)} />
+        <Route path="/faq" element={lazyElement(FaqPage)} />
+        <Route path="/contact" element={lazyElement(ContactPage)} />
+        <Route path="/scenarios" element={lazyElement(ScenariosPage)} />
+        <Route path="/accessibility" element={lazyElement(AccessibilityPage)} />
+        <Route path="/terms" element={lazyElement(TermsPage)} />
+        <Route path="/privacy" element={lazyElement(PrivacyPage)} />
+        <Route path="/about" element={lazyElement(AboutPage)} />
+        <Route path="/dead-mans-switch" element={lazyElement(DeadMansSwitchPage)} />
+        <Route path="/digital-vault" element={lazyElement(DigitalVaultPage)} />
+        <Route path="/emergency-information-vault" element={lazyElement(EmergencyInformationVaultPage)} />
+        <Route path="/guides" element={lazyElement(GuidesIndexPage)} />
+        <Route path="/guides/:slug" element={lazyElement(GuidePage)} />
         <Route
           path="/cookies"
           element={
@@ -99,97 +105,35 @@ function AppRoutes() {
             </div>
           }
         />
-        <Route path="/share/:token" element={<SharePage />} />
+        <Route path="/share" element={lazyElement(SharePage)} />
+        <Route path="/share/:token" element={lazyElement(SharePage)} />
       </Route>
 
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/signup" element={<SignupPage />} />
-      <Route path="/verify-email" element={<VerifyEmailPage />} />
-      <Route path="/create-pin" element={<CreatePinPage />} />
-      <Route path="/create-panic-pin" element={<CreatePanicPinPage />} />
-      <Route path="/onboarding" element={<OnboardingPage />} />
-      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-      <Route path="/reset-password" element={<ResetPasswordPage />} />
+      <Route element={lazyElement(PrivateRouteProviders, true)}>
+        <Route path="/login" element={lazyElement(LoginPage)} />
+        <Route path="/signup" element={lazyElement(SignupPage)} />
+        <Route path="/verify-email" element={lazyElement(VerifyEmailPage)} />
+        <Route path="/create-pin" element={lazyElement(CreatePinPage)} />
+        <Route path="/create-panic-pin" element={lazyElement(CreatePanicPinPage)} />
+        <Route path="/onboarding" element={lazyElement(OnboardingPage)} />
+        <Route path="/forgot-password" element={lazyElement(ForgotPasswordPage)} />
+        <Route path="/reset-password" element={lazyElement(ResetPasswordPage)} />
 
-      <Route
-        path="/app"
-        element={role === "user" ? <AppLayout /> : <Navigate to="/login" />}
-      >
-        <Route index element={<DashboardPage />} />
-        <Route path="vault" element={<VaultPage />} />
-        <Route path="upload" element={<UploadPage />} />
-        <Route path="verification" element={<VerificationSettingsPage />} />
-        <Route path="check-in" element={<CheckInPage />} />
-        <Route path="emergency-contacts" element={<EmergencyContactsPage />} />
-        <Route path="billing" element={<BillingPage />} />
-        <Route path="activity" element={<ActivityPage />} />
-        <Route path="settings" element={<AccountSettingsPage />} />
-        <Route path="plan" element={<PlanBuilderPage />} />
-        <Route path="edit-plan" element={<EditPlanPage />} />
-        <Route path="ideas" element={<IdeasPage />} />
-        <Route path="help" element={<HelpPage />} />
-      </Route>
-
-      <Route
-        path="/admin"
-        element={role === "admin" ? <AdminLayout /> : <Navigate to="/login" />}
-      >
-        <Route
-          index
-          element={
-            <div className="p-8">
-              <h1 className="text-2xl font-bold">Admin Dashboard</h1>
-            </div>
-          }
-        />
-        <Route
-          path="users"
-          element={
-            <div className="p-8">
-              <h1 className="text-2xl font-bold">Users</h1>
-            </div>
-          }
-        />
-        <Route
-          path="billing"
-          element={
-            <div className="p-8">
-              <h1 className="text-2xl font-bold">Billing & Plans</h1>
-            </div>
-          }
-        />
-        <Route
-          path="campaigns"
-          element={
-            <div className="p-8">
-              <h1 className="text-2xl font-bold">Campaigns</h1>
-            </div>
-          }
-        />
-        <Route
-          path="audit"
-          element={
-            <div className="p-8">
-              <h1 className="text-2xl font-bold">Audit Log</h1>
-            </div>
-          }
-        />
-        <Route
-          path="health"
-          element={
-            <div className="p-8">
-              <h1 className="text-2xl font-bold">System Health</h1>
-            </div>
-          }
-        />
-        <Route
-          path="settings"
-          element={
-            <div className="p-8">
-              <h1 className="text-2xl font-bold">Admin Settings</h1>
-            </div>
-          }
-        />
+        <Route path="/app" element={lazyElement(ProtectedAppLayout, true)}>
+          <Route index element={lazyElement(DashboardPage, true)} />
+          <Route path="vault" element={lazyElement(VaultPage, true)} />
+          <Route path="upload" element={lazyElement(UploadPage, true)} />
+          <Route path="verification" element={lazyElement(VerificationSettingsPage, true)} />
+          <Route path="check-in" element={lazyElement(CheckInPage, true)} />
+          <Route path="emergency-contacts" element={lazyElement(EmergencyContactsPage, true)} />
+          <Route path="billing" element={lazyElement(BillingPage, true)} />
+          <Route path="activity" element={lazyElement(ActivityPage, true)} />
+          <Route path="settings" element={lazyElement(AccountSettingsPage, true)} />
+          <Route path="plan" element={lazyElement(PlanBuilderPage, true)} />
+          <Route path="edit-plan" element={lazyElement(EditPlanPage, true)} />
+          <Route path="ideas" element={lazyElement(IdeasPage, true)} />
+          <Route path="help" element={lazyElement(HelpPage, true)} />
+        </Route>
       </Route>
 
       <Route path="*" element={<NotFound />} />
@@ -197,23 +141,18 @@ function AppRoutes() {
   );
 }
 
+export const AppWithinRouter = () => (
+  <>
+    <ScrollToTop />
+    <RouteSeo />
+    <AppRoutes />
+  </>
+);
+
 const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <BrowserRouter>
-        <AuthProvider>
-          <PaywallProvider>
-            <VaultPassphraseProvider>
-              <ScrollToTop />
-              <AppRoutes />
-            </VaultPassphraseProvider>
-          </PaywallProvider>
-        </AuthProvider>
-      </BrowserRouter>
-      <Toaster />
-      <Sonner />
-    </TooltipProvider>
-  </QueryClientProvider>
+  <BrowserRouter>
+    <AppWithinRouter />
+  </BrowserRouter>
 );
 
 export default App;

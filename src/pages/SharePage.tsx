@@ -4,8 +4,8 @@ import { useParams } from "react-router-dom";
 
 type ShareLookup = {
   ok: boolean;
-  contact?: { id: number; email: string; verified_at?: string | null; has_public_key?: boolean };
-  file?: { id: string; owner_user_id: number; content_type: string; created_at: string };
+  contact?: { has_public_key?: boolean };
+  file?: { id: string; content_type: string };
   token?: { expires_at: string; used_at?: string | null };
   error?: string;
 };
@@ -56,7 +56,14 @@ async function readTextSafely(res: Response, max = 8000) {
 }
 
 export default function SharePage() {
-  const { token = "" } = useParams();
+  const { token: pathToken = "" } = useParams();
+  const [token] = useState(() => {
+    const fragmentToken = new URLSearchParams(window.location.hash.slice(1)).get("token") || "";
+    if (fragmentToken) {
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
+    return fragmentToken || pathToken;
+  });
 
   const [lookup, setLookup] = useState<ShareLookup | null>(null);
   const [status, setStatus] = useState<string>("Loading link…");
@@ -141,15 +148,6 @@ export default function SharePage() {
       setStatus("Saving public key…");
       await ensureContactPublicKey();
 
-      const dbPub = lookup?.contact?.public_key || "";
-      const localPub = localStorage.getItem("uac_contact_pub_spki_b64") || "";
-      if (dbPub && localPub && dbPub !== localPub) {
-        throw new Error(
-          "Key mismatch: this device does not have the private key that matches the public key saved for this contact. Use the original device/browser that generated the keys, or clear keys and regenerate, then have the owner re-create the envelope."
-        );
-      }
-
-
       setStatus("Contact keys generated and saved on this device.");
     } catch (e: any) {
       setStatus("Failed to generate/save keys.");
@@ -165,14 +163,6 @@ export default function SharePage() {
     try {
       setStatus("Preparing…");
       await ensureContactPublicKey();
-
-      const dbPub = lookup?.contact?.public_key || "";
-      const localPub = localStorage.getItem("uac_contact_pub_spki_b64") || "";
-      if (dbPub && localPub && dbPub !== localPub) {
-        throw new Error(
-          "key_mismatch: this browser/device does not have the private key that matches the public key saved for this contact. Use the original device/browser that generated the keys, or clear keys and regenerate, then have the owner re-create the envelope."
-        );
-      }
 
       setStatus("Loading private key…");
       const privB64 = localStorage.getItem("uac_contact_priv_pkcs8_b64") || "";
@@ -238,7 +228,7 @@ setStatus("Decrypting…");
 let plaintext: Uint8Array;
 
 try {
-  plaintext = await decryptUacBytes(aesKey, ciphertext);
+  plaintext = await decryptUacBytes(aesKey, ciphertext, meta);
 } catch (e: any) {
   if (!ivB64) throw new Error("missing_iv: envelope meta_json.iv_b64 is missing.");
   try {
@@ -265,7 +255,7 @@ return (
     <div className="min-h-screen bg-background text-foreground">
       <div className="mx-auto max-w-2xl px-6 py-10">
         <h1 className="text-2xl font-bold">Emergency File Access</h1>
-        <p className="mt-2 text-sm opacity-80 break-words">Token: {token}</p>
+        <p className="mt-2 text-sm opacity-80">Use this page to securely retrieve the file assigned to you.</p>
 
         <div className="mt-6 rounded-xl border p-5">
           <div className="text-sm">
@@ -280,9 +270,6 @@ return (
                 </div>
                 <div className="mt-1">
                   <span className="opacity-70">Type:</span> {contentType}
-                </div>
-                <div className="mt-1">
-                  <span className="opacity-70">Contact:</span> {lookup.contact?.email}
                 </div>
               </>
             )}

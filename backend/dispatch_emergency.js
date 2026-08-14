@@ -13,6 +13,12 @@ function sha256Hex(input) {
   return crypto.createHash("sha256").update(String(input)).digest("hex");
 }
 
+function shareExpiresAt() {
+  const requested = Number(process.env.SHARE_LINK_TTL_DAYS || 30);
+  const days = Number.isInteger(requested) ? Math.max(1, Math.min(requested, 90)) : 30;
+  return new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+}
+
 function publicAppBase() {
   return String(
     process.env.PUBLIC_APP_BASE_URL ||
@@ -231,7 +237,7 @@ const [overdue] = await conn.query(
       }
 
       const [contacts] = await conn.query(
-        "SELECT id, email, name, verified_at, public_key FROM emergency_contacts WHERE user_id = ? ",
+        "SELECT id, email, name, verified_at, public_key FROM emergency_contacts WHERE user_id = ? AND verified_at IS NOT NULL",
         [userId]
       );
       const [assignments] = await conn.query(
@@ -239,7 +245,8 @@ const [overdue] = await conn.query(
 	        SELECT a.contact_id, a.file_id
 	        FROM emergency_contact_file_assignments a
 	        JOIN emergency_contacts c ON c.id = a.contact_id
-	        WHERE c.user_id = ?
+	        JOIN files f ON f.id = a.file_id
+	        WHERE c.user_id = ? AND f.user_id = c.user_id
 	        `,
 	        [userId]
 	      );
@@ -276,9 +283,9 @@ const [overdue] = await conn.query(
 
           await conn.query(
         "INSERT INTO contact_file_share_tokens (contact_id, file_id, token_hash, expires_at) VALUES (?, ?, ?, ?)",
-        [contactId, fileId, tokenHash, new Date(Date.now() + 1000*60*60*24*365*10)]
+        [contactId, fileId, tokenHash, shareExpiresAt()]
       );
-links.push(publicAppBase() + "/share/" + token);
+links.push(publicAppBase() + "/share#token=" + encodeURIComponent(token));
           linksCreated += 1;
         }
 

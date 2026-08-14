@@ -1,0 +1,33 @@
+# Merge these handlers into the existing HTTPS site block after preserving any
+# production-specific logging, headers, TLS, and upstream settings. The backend
+# matcher reflects the route prefixes exposed by backend/server.js.
+anycircumstances.com, www.anycircumstances.com {
+	encode zstd gzip
+	root * /var/www/anycircumstances/dist
+
+	@backend path /auth /auth/* /files /files/* /apple /apple/* /health
+	handle @backend {
+		reverse_proxy 127.0.0.1:3002
+	}
+
+	# These routes are intentionally client-rendered. Limit the SPA fallback to
+	# exact authentication pages and the private/dynamic namespaces in App.tsx.
+	@client_spa path /login /signup /verify-email /create-pin /create-panic-pin /onboarding /forgot-password /reset-password /app /app/* /share /share/* /cookies /status
+	handle @client_spa {
+		try_files {path} /spa.html
+		file_server
+	}
+
+	# Public pages resolve to their prerendered <route>/index.html files. Assets
+	# and crawl files resolve normally. Anything else emits a real 404.
+	handle {
+		try_files {path} {path}/index.html =404
+		file_server
+	}
+
+	# file_server preserves the original 404 status inside handle_errors.
+	handle_errors 404 {
+		rewrite * /404.html
+		file_server
+	}
+}

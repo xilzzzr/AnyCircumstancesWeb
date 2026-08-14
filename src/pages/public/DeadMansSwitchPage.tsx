@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
+import { Seo } from "@/components/seo/Seo";
 import { motion } from "framer-motion";
 import {
   Skull,
@@ -32,6 +33,7 @@ const fadeUp = {
 export function DeadMansSwitchPage() {
   return (
     <div className="flex flex-col">
+      <Seo title="Digital Dead Man’s Switch for Files & Family | AnyCircumstances" description="Use scheduled check-ins to trigger secure delivery of encrypted documents and instructions to trusted contacts if you become unavailable." path="/dead-mans-switch" />
       <section className="relative py-24 lg:py-32 overflow-hidden">
         <div className="absolute inset-0 bg-gradient-hero" />
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,hsl(var(--primary)/0.18),transparent_55%)]" />
@@ -54,8 +56,7 @@ export function DeadMansSwitchPage() {
               transition={{ duration: 0.55, delay: 0.05 }}
               className="text-4xl md:text-5xl lg:text-6xl font-bold text-vault-foreground mb-6 leading-tight"
             >
-              If you stop checking in,{" "}
-              <span className="gradient-text">your files get delivered</span>
+              A Digital Dead Man’s Switch for Important Files
               <span className="block mt-2 text-vault-foreground/80 text-xl md:text-2xl font-medium">
                 automatically, securely, and only to the people you chose.
               </span>
@@ -103,7 +104,7 @@ export function DeadMansSwitchPage() {
               className="mt-12 flex flex-wrap justify-center gap-4"
             >
               {[
-                { icon: EyeOff, label: "Zero-knowledge encrypted files" },
+                { icon: EyeOff, label: "Client-side encrypted files" },
                 { icon: TimerReset, label: "Check-ins on your schedule" },
                 { icon: BellRing, label: "Automatic delivery on trigger" },
               ].map((b) => (
@@ -117,6 +118,22 @@ export function DeadMansSwitchPage() {
               ))}
             </motion.div>
           </div>
+        </div>
+      </section>
+
+      <section className="py-20 bg-background">
+        <div className="container mx-auto px-4 max-w-5xl">
+          <h2 className="text-3xl md:text-4xl font-bold">What is a dead man’s switch?</h2>
+          <p className="mt-5 text-lg text-muted-foreground max-w-4xl">A digital dead man’s switch is an automated system that asks you to check in on a schedule. If you miss the required check-ins and do not respond during the recovery period, the system follows instructions you prepared in advance—such as notifying trusted contacts and releasing selected encrypted files.</p>
+          <h2 className="mt-14 text-3xl md:text-4xl font-bold">Useful applications and important limits</h2>
+          <div className="mt-7 grid md:grid-cols-2 gap-6">
+            <div className="rounded-2xl border bg-card p-6"><h3 className="text-xl font-semibold">Family and important documents</h3><p className="mt-3 text-muted-foreground">Deliver an account map, insurance details, property instructions, or directions to legal originals. Start with the <Link className="text-primary hover:underline" to="/guides/emergency-information-checklist">emergency information checklist</Link>.</p></div>
+            <div className="rounded-2xl border bg-card p-6"><h3 className="text-xl font-semibold">Passwords and account recovery</h3><p className="mt-3 text-muted-foreground">Provide protected recovery instructions without leaving a plain-text password list exposed. Read <Link className="text-primary hover:underline" to="/guides/how-to-leave-passwords-to-family">how to leave account access to family</Link>.</p></div>
+            <div className="rounded-2xl border bg-card p-6"><h3 className="text-xl font-semibold">Cryptocurrency</h3><p className="mt-3 text-muted-foreground">Document wallets, custody, devices, and recovery paths carefully. A switch does not transfer legal ownership. Review <Link className="text-primary hover:underline" to="/guides/what-happens-to-crypto-when-you-die">what happens to crypto when an owner dies</Link>.</p></div>
+            <div className="rounded-2xl border bg-card p-6"><h3 className="text-xl font-semibold">Estate and business continuity</h3><p className="mt-3 text-muted-foreground">A switch can deliver information, but it is not a will, power of attorney, or business succession agreement. Compare a <Link className="text-primary hover:underline" to="/guides/dead-mans-switch-vs-digital-will">dead man’s switch and a digital will</Link>.</p></div>
+          </div>
+          <h2 className="mt-14 text-3xl md:text-4xl font-bold">Common failure cases</h2>
+          <ul className="mt-5 grid gap-3 text-muted-foreground md:grid-cols-2 list-disc pl-6"><li>A check-in schedule is too frequent for real life.</li><li>Reminder messages go to an old address or spam folder.</li><li>Recipients change roles but permissions are not updated.</li><li>Instructions depend on a missing device or second factor.</li><li>Files are outdated or lack enough context.</li><li>A technical release plan is mistaken for legal authority.</li></ul>
         </div>
       </section>
 
@@ -309,8 +326,8 @@ export function DeadMansSwitchPage() {
                       },
                       {
                         icon: EyeOff,
-                        t: "Zero-knowledge model",
-                        d: "We don’t have a magic “view file” button.",
+                        t: "Protected recovery design",
+                        d: "Encrypted recovery material supports delivery to the contacts you choose.",
                       },
                       {
                         icon: KeyRound,

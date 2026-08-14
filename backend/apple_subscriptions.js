@@ -13,6 +13,10 @@ const ACTIVE_NOTIFICATION_TYPES = new Set([
 ]);
 const INACTIVE_NOTIFICATION_TYPES = new Set(["EXPIRED", "REFUND", "REVOKE"]);
 
+function sandboxAllowed() {
+  return process.env.NODE_ENV !== "production" && String(process.env.ALLOW_APPLE_SANDBOX || "").toLowerCase() === "true";
+}
+
 function configuredProductIds() {
   return new Set(
     String(process.env.APPLE_SUBSCRIPTION_PRODUCT_IDS || "")
@@ -61,6 +65,11 @@ async function verifyNotification(signedPayload) {
   } catch (error) {
     productionError = error;
   }
+  if (!sandboxAllowed()) {
+    const error = new Error("invalid_apple_notification_signature");
+    error.cause = productionError;
+    throw error;
+  }
   try {
     return await buildVerifier(Environment.SANDBOX).verifyAndDecodeNotification(signedPayload);
   } catch (sandboxError) {
@@ -71,9 +80,12 @@ async function verifyNotification(signedPayload) {
 }
 
 async function verifyTransaction(signedTransactionInfo, environmentHint) {
-  const environments = String(environmentHint || "").toLowerCase() === "sandbox"
+  const wantsSandbox = String(environmentHint || "").toLowerCase() === "sandbox";
+  const environments = wantsSandbox && sandboxAllowed()
     ? [Environment.SANDBOX]
-    : [Environment.PRODUCTION, Environment.SANDBOX];
+    : sandboxAllowed()
+      ? [Environment.PRODUCTION, Environment.SANDBOX]
+      : [Environment.PRODUCTION];
   let lastError;
   for (const environment of environments) {
     try {
@@ -196,6 +208,7 @@ async function transactionBelongsToAnotherUser(pool, userId, originalTransaction
 
 function createAppleNotificationHandler(pool) {
   return async function appleNotificationHandler(req, res) {
+    let recordedUuid = "";
     try {
       const signedPayload = String(req.body?.signedPayload || "");
       if (!signedPayload) return res.status(400).json({ ok: false, error: "missing_signed_payload" });
@@ -207,6 +220,7 @@ function createAppleNotificationHandler(pool) {
             "INSERT INTO apple_notification_events (notification_uuid, notification_type, environment) VALUES (?, ?, ?)",
             [uuid, String(notification.notificationType || ""), String(notification.data?.environment || "")]
           );
+          recordedUuid = uuid;
         } catch (error) {
           if (error?.code === "ER_DUP_ENTRY") return res.status(200).json({ ok: true, duplicate: true });
           throw error;
@@ -222,8 +236,11 @@ function createAppleNotificationHandler(pool) {
       }
       return res.status(200).json({ ok: true });
     } catch (error) {
+      if (recordedUuid) {
+        await pool.query("DELETE FROM apple_notification_events WHERE notification_uuid = ?", [recordedUuid]).catch(() => null);
+      }
       console.error("[APPLE SUBSCRIPTION ERROR]", error?.stack || error);
-      return res.status(400).json({ ok: false, error: String(error?.message || "invalid_apple_notification") });
+      return res.status(400).json({ ok: false, error: "invalid_apple_notification" });
     }
   };
 }

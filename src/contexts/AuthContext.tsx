@@ -7,7 +7,7 @@ import React, {
   ReactNode,
 } from "react";
 
-export type UserRole = "user" | "admin" | "logged_out";
+export type UserRole = "user" | "logged_out";
 
 export type AuthUser = {
   id?: string | number;
@@ -21,7 +21,6 @@ interface AuthContextType {
   role: UserRole;
   loading: boolean;
   isAuthenticated: boolean;
-  isAdmin: boolean;
   vaultLocked: boolean;
   refreshSession: () => Promise<void>;
   login: (email: string, password: string) => Promise<boolean>;
@@ -69,11 +68,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const isAuthenticated = role !== "logged_out" && user !== null;
-  const isAdmin = role === "admin";
 
   const applySession = useCallback((d: any) => {
-    const nextRole: UserRole =
-      d?.role === "admin" ? "admin" : d?.role === "user" ? "user" : "logged_out";
+    const nextRole: UserRole = d?.role === "user" ? "user" : "logged_out";
 
     if (d?.ok && nextRole !== "logged_out") {
       setRoleState(nextRole);
@@ -183,7 +180,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         role,
         loading,
         isAuthenticated,
-        isAdmin,
         vaultLocked,
         refreshSession,
         login,

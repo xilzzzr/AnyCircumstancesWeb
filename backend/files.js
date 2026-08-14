@@ -3,8 +3,9 @@ const express = require("express");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 
-const { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
+const { S3Client, GetObjectCommand, DeleteObjectCommand, HeadObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+const { createPresignedPost } = require("@aws-sdk/s3-presigned-post");
 const { rateLimit } = require("express-rate-limit");
 
 const router = express.Router();
@@ -59,6 +60,16 @@ function sha256Hex(input) {
   return crypto.createHash("sha256").update(String(input)).digest("hex");
 }
 
+function isValidShareToken(token) {
+  return /^[a-f0-9]{64}$/i.test(String(token || ""));
+}
+
+function shareExpiresAt() {
+  const requested = Number(process.env.SHARE_LINK_TTL_DAYS || 30);
+  const days = Number.isInteger(requested) ? Math.max(1, Math.min(requested, 90)) : 30;
+  return new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+}
+
 function getPool() {
   const a = require("./auth");
   return a.authPool;
@@ -85,7 +96,7 @@ function requireUser(req, res, next) {
   if (!secret) return res.status(500).json({ ok: false, error: "server_misconfig" });
 
   try {
-    const payload = jwt.verify(access, secret);
+    const payload = jwt.verify(access, secret, { algorithms: ["HS256"] });
     const userId = payload?.sub ? String(payload.sub) : "";
     if (!userId) return res.status(401).json({ ok: false, error: "invalid_session" });
     req.userId = userId;
@@ -162,6 +173,11 @@ function normalizePublicKeyPem(input) {
   }
 }
 
+function isBoundedBase64(input, maxLength = 4096) {
+  const value = String(input || "").trim();
+  return value.length > 0 && value.length <= maxLength && /^[A-Za-z0-9+/_=-]+$/.test(value);
+}
+
 
 function getEscrowPublicKeyPem() {
   const privPem = getEscrowPrivateKeyPem();
@@ -196,8 +212,8 @@ router.post(
     const prefix = "users/" + req.userId + "/";
     if (!fileId.startsWith(prefix)) return res.status(403).json({ ok: false, error: "forbidden" });
 
-    if (!alg || alg.length > 32) return res.status(400).json({ ok: false, error: "invalid_alg" });
-    if (!encKeyB64 || encKeyB64.length > 20000) return res.status(400).json({ ok: false, error: "invalid_enc_key" });
+    if (alg !== "rsa-oaep-sha256") return res.status(400).json({ ok: false, error: "invalid_alg" });
+    if (!isBoundedBase64(encKeyB64)) return res.status(400).json({ ok: false, error: "invalid_enc_key" });
 
     const pool = getPool();
 
@@ -276,9 +292,14 @@ router.post(
 	const publicKey = String(req.body?.public_key || "").replace(/\\n/g, "\n").trim();
     if (!publicKey) return res.status(400).json({ ok: false, error: "missing_public_key" });
     if (publicKey.length > 20000) return res.status(400).json({ ok: false, error: "public_key_too_large" });
+    const normalized = normalizePublicKeyPem(publicKey);
+    if (!normalized) return res.status(400).json({ ok: false, error: "invalid_public_key" });
 
     const pool = getPool();
-    await pool.query("UPDATE users SET public_key = ? WHERE id = ? LIMIT 1", [publicKey, req.userId]);
+    const [rows] = await pool.query("SELECT public_key FROM users WHERE id = ? LIMIT 1", [req.userId]);
+    const existing = rows?.[0]?.public_key ? normalizePublicKeyPem(rows[0].public_key) : null;
+    if (existing && existing !== normalized) return res.status(409).json({ ok: false, error: "public_key_already_set" });
+    await pool.query("UPDATE users SET public_key = COALESCE(public_key, ?) WHERE id = ? LIMIT 1", [normalized, req.userId]);
 
     return res.json({ ok: true });
   })
@@ -311,35 +332,81 @@ router.post(
 
     const filename = safeFilename(req.body?.filename);
     const originalContentType = String(req.body?.contentType || "application/octet-stream").slice(0, 255);
+    const uploadSize = Number(req.body?.sizeBytes);
+    const maxUploadBytes = Number(process.env.MAX_UPLOAD_BYTES || 209715200);
+    if (!Number.isInteger(uploadSize) || uploadSize <= 0 || uploadSize > maxUploadBytes) {
+      return res.status(400).json({ ok: false, error: "invalid_upload_size" });
+    }
 
     const key = "users/" + req.userId + "/uploads/" + crypto.randomUUID();
     const uploadContentType = "application/octet-stream";
 
     const s3 = new S3Client({ region });
 
-    const cmd = new PutObjectCommand({
-      Bucket: bucket,
-      Key: key,
-      ContentType: uploadContentType,
-    });
-
-    const url = await getSignedUrl(s3, cmd, { expiresIn: 600 });
-
     const pool = getPool();
-    await pool.query("INSERT INTO files (id, user_id, bucket, content_type, size_bytes) VALUES (?, ?, ?, ?, NULL)", [
-      key,
-      req.userId,
-      bucket,
-      originalContentType,
-    ]);
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const [profileRows] = await conn.query(
+        "SELECT storage_limit_gb FROM billing_profiles WHERE user_id = ? LIMIT 1 FOR UPDATE",
+        [req.userId]
+      );
+      const [usageRows] = await conn.query(
+        "SELECT COALESCE(SUM(size_bytes), 0) AS used_bytes FROM files WHERE user_id = ?",
+        [req.userId]
+      );
+      const limitGb = Number(profileRows?.[0]?.storage_limit_gb || 0);
+      const usedBytes = Number(usageRows?.[0]?.used_bytes || 0);
+      const storageLimitBytes = Math.floor(limitGb * 1024 * 1024 * 1024);
+      if (!Number.isFinite(storageLimitBytes) || storageLimitBytes <= 0 || usedBytes + uploadSize > storageLimitBytes) {
+        await conn.rollback();
+        return res.status(413).json({ ok: false, error: "storage_limit_exceeded" });
+      }
+      await conn.query("INSERT INTO files (id, user_id, bucket, content_type, size_bytes) VALUES (?, ?, ?, ?, ?)", [
+        key,
+        req.userId,
+        bucket,
+        originalContentType,
+        uploadSize,
+      ]);
+      await conn.commit();
+    } catch (error) {
+      try { await conn.rollback(); } catch {}
+      throw error;
+    } finally {
+      conn.release();
+    }
+
+    let presigned;
+    try {
+      presigned = await createPresignedPost(s3, {
+        Bucket: bucket,
+        Key: key,
+        Expires: 600,
+        Fields: {
+          "Content-Type": uploadContentType,
+          "x-amz-server-side-encryption": "AES256",
+        },
+        Conditions: [
+          // S3 evaluates the multipart request size, which includes form-field overhead.
+          // The uploaded object's exact byte length is independently verified on confirm.
+          ["content-length-range", uploadSize, uploadSize + 64 * 1024],
+          ["eq", "$Content-Type", uploadContentType],
+          ["eq", "$x-amz-server-side-encryption", "AES256"],
+        ],
+      });
+    } catch (error) {
+      await pool.query("DELETE FROM files WHERE id = ? AND user_id = ? LIMIT 1", [key, req.userId]).catch(() => null);
+      throw error;
+    }
 
     return res.json({
       ok: true,
-      method: "PUT",
-      url,
+      method: "POST",
+      url: presigned.url,
       key,
       filename,
-      headers: { "Content-Type": uploadContentType },
+      fields: presigned.fields,
     });
   })
 );
@@ -408,14 +475,20 @@ if (sizeBytes > maxUploadBytes) {
 }
 
     const pool = getPool();
-    const [r] = await pool.query("UPDATE files SET size_bytes = ? WHERE id = ? AND user_id = ? LIMIT 1", [
-      sizeBytes,
+    const [rows] = await pool.query("SELECT bucket, size_bytes FROM files WHERE id = ? AND user_id = ? LIMIT 1", [
       key,
       req.userId,
     ]);
-
-    const changed = r && typeof r.affectedRows === "number" ? r.affectedRows : 0;
-    if (!changed) return res.status(404).json({ ok: false, error: "file_not_found" });
+    if (!rows?.length) return res.status(404).json({ ok: false, error: "file_not_found" });
+    const reservedSize = Number(rows[0].size_bytes);
+    const s3 = getS3();
+    const head = await s3.send(new HeadObjectCommand({ Bucket: String(rows[0].bucket), Key: key }));
+    const actualSize = Number(head.ContentLength);
+    if (!Number.isInteger(actualSize) || actualSize <= 0 || actualSize > maxUploadBytes || actualSize !== reservedSize || sizeBytes !== actualSize) {
+      await s3.send(new DeleteObjectCommand({ Bucket: String(rows[0].bucket), Key: key })).catch(() => null);
+      await pool.query("DELETE FROM files WHERE id = ? AND user_id = ? LIMIT 1", [key, req.userId]);
+      return res.status(400).json({ ok: false, error: "upload_size_mismatch" });
+    }
 
     return res.json({ ok: true });
   })
@@ -438,9 +511,13 @@ router.post(
     const prefix = "users/" + req.userId + "/";
     if (!key.startsWith(prefix)) return res.status(403).json({ ok: false, error: "forbidden" });
 
+    const pool = getPool();
+    const [rows] = await pool.query("SELECT bucket FROM files WHERE id = ? AND user_id = ? LIMIT 1", [key, req.userId]);
+    if (!rows?.length) return res.status(404).json({ ok: false, error: "file_not_found" });
+
     const s3 = new S3Client({ region });
 
-    const cmd = new GetObjectCommand({ Bucket: bucket, Key: key });
+    const cmd = new GetObjectCommand({ Bucket: String(rows[0].bucket || bucket), Key: key });
     const url = await getSignedUrl(s3, cmd, { expiresIn: 600 });
 
     return res.json({ ok: true, url });
@@ -464,8 +541,11 @@ router.post(
 
     if (!alg || alg.length > 32) return res.status(400).json({ ok: false, error: "invalid_alg" });
     if (!encKeyB64 || encKeyB64.length > 20000) return res.status(400).json({ ok: false, error: "invalid_enc_key" });
+    if (metaJson && metaJson.length > 20000) return res.status(400).json({ ok: false, error: "invalid_meta" });
 
     const pool = getPool();
+    const [fileRows] = await pool.query("SELECT 1 FROM files WHERE id = ? AND user_id = ? LIMIT 1", [fileId, req.userId]);
+    if (!fileRows?.length) return res.status(404).json({ ok: false, error: "file_not_found" });
     await pool.query(
       "INSERT INTO file_key_envelopes (file_id, recipient_type, recipient_id, alg, enc_key_b64, meta_json) VALUES (?, 'user', ?, ?, ?, ?) ON DUPLICATE KEY UPDATE alg=VALUES(alg), enc_key_b64=VALUES(enc_key_b64), meta_json=VALUES(meta_json)",
       [fileId, req.userId, alg, encKeyB64, metaJson]
@@ -531,6 +611,7 @@ router.post(
     ]);
     if (!crows || !crows.length) return res.status(404).json({ ok: false, error: "contact_not_found" });
     if (String(crows[0].user_id) !== String(req.userId)) return res.status(403).json({ ok: false, error: "forbidden" });
+    if (!crows[0].verified_at) return res.status(409).json({ ok: false, error: "contact_not_verified" });
 
     const [arows] = await pool.query(
       "SELECT 1 FROM emergency_contact_file_assignments WHERE contact_id = ? AND file_id = ? LIMIT 1",
@@ -540,17 +621,15 @@ router.post(
 
     const token = crypto.randomBytes(32).toString("hex");
     const tokenHash = sha256Hex(token);
-    const expiresAt = new Date("9999-12-31T23:59:59Z");
-
     await pool.query("INSERT INTO contact_file_share_tokens (contact_id, file_id, token_hash, expires_at) VALUES (?, ?, ?, ?)", [
       contactId,
       fileId,
       tokenHash,
-      new Date(Date.now() + 1000*60*60*24*365*10)
+      shareExpiresAt()
     ]);
 
     const publicBase = String(process.env.PUBLIC_APP_BASE_URL || "https://anycircumstances.com").replace(/\/+$/, "");
-    const link = publicBase + "/share/" + token;
+    const link = publicBase + "/share#token=" + encodeURIComponent(token);
 
     return res.json({
       ok: true,
@@ -564,13 +643,18 @@ router.post(
   "/share-lookup",
   asyncHandler(async (req, res) => {
     const token = String(req.body?.token || "");
-    if (!token) return res.status(400).json({ ok: false, error: "missing_token" });
+    if (!isValidShareToken(token)) return res.status(400).json({ ok: false, error: "invalid_token" });
 
     const tokenHash = sha256Hex(token);
     const pool = getPool();
 
     const [rows] = await pool.query(
-      "SELECT t.contact_id, t.file_id, t.expires_at, t.used_at, c.email, c.verified_at, c.public_key AS contact_public_key, f.user_id AS owner_user_id, f.content_type, f.created_at AS file_created_at FROM contact_file_share_tokens t JOIN emergency_contacts c ON c.id = t.contact_id JOIN files f ON f.id = t.file_id WHERE t.token_hash = ? LIMIT 1",
+      `SELECT t.contact_id, t.file_id, t.expires_at, t.used_at,
+              c.public_key AS contact_public_key, f.content_type
+       FROM contact_file_share_tokens t
+       JOIN emergency_contacts c ON c.id = t.contact_id
+       JOIN files f ON f.id = t.file_id AND f.user_id = c.user_id
+       WHERE t.token_hash = ? LIMIT 1`,
       [tokenHash]
     );
 
@@ -582,16 +666,11 @@ router.post(
     return res.json({
       ok: true,
       contact: {
-        id: Number(r.contact_id),
-        email: String(r.email),
-        verified_at: r.verified_at,
         has_public_key: Boolean(r.contact_public_key),
       },
       file: {
         id: String(r.file_id),
-        owner_user_id: Number(r.owner_user_id),
         content_type: String(r.content_type),
-        created_at: r.file_created_at,
       },
       token: {
         expires_at: r.expires_at,
@@ -607,9 +686,11 @@ router.post(
     const token = String(req.body?.token || "");
     const publicKey = String(req.body?.public_key || "").trim();
 
-    if (!token) return res.status(400).json({ ok: false, error: "missing_token" });
+    if (!isValidShareToken(token)) return res.status(400).json({ ok: false, error: "invalid_token" });
     if (!publicKey) return res.status(400).json({ ok: false, error: "missing_public_key" });
     if (publicKey.length > 20000) return res.status(400).json({ ok: false, error: "public_key_too_large" });
+    const normalizedPublicKey = normalizePublicKeyPem(publicKey);
+    if (!normalizedPublicKey) return res.status(400).json({ ok: false, error: "invalid_public_key" });
 
     const tokenHash = sha256Hex(token);
     const pool = getPool();
@@ -619,7 +700,11 @@ router.post(
       await conn.beginTransaction();
 
       const [trows] = await conn.query(
-        "SELECT id, contact_id, file_id, expires_at, used_at FROM contact_file_share_tokens WHERE token_hash = ? LIMIT 1 FOR UPDATE",
+        `SELECT t.id, t.contact_id, t.file_id, t.expires_at, t.used_at, c.public_key
+         FROM contact_file_share_tokens t
+         JOIN emergency_contacts c ON c.id = t.contact_id
+         JOIN files f ON f.id = t.file_id AND f.user_id = c.user_id
+         WHERE t.token_hash = ? LIMIT 1 FOR UPDATE`,
         [tokenHash]
       );
 
@@ -634,9 +719,15 @@ router.post(
         return res.status(410).json({ ok: false, error: "token_expired" });
       }
 
+      const existingContactKey = t.public_key ? normalizePublicKeyPem(t.public_key) : null;
+      if (existingContactKey && existingContactKey !== normalizedPublicKey) {
+        await conn.rollback();
+        return res.status(409).json({ ok: false, error: "contact_key_already_set" });
+      }
+
       await conn.query(
-        "UPDATE emergency_contacts SET public_key = ?, verified_at = COALESCE(verified_at, NOW()) WHERE id = ? LIMIT 1",
-        [publicKey, t.contact_id]
+        "UPDATE emergency_contacts SET public_key = COALESCE(public_key, ?), verified_at = COALESCE(verified_at, NOW()) WHERE id = ? LIMIT 1",
+        [normalizedPublicKey, t.contact_id]
       );
 
       const [erows] = await conn.query("SELECT alg, enc_key_b64 FROM file_key_escrows WHERE file_id = ? LIMIT 1", [t.file_id]);
@@ -654,7 +745,7 @@ router.post(
       const envelope = buildContactEnvelopeFromEscrow({
         escrowAlg: String(erows[0].alg || "rsa-oaep-sha256"),
         escrowEncKeyB64: String(erows[0].enc_key_b64),
-        contactPublicKeyPem: publicKey,
+        contactPublicKeyPem: normalizedPublicKey,
         escrowPrivateKeyPem: privPem,
       });
 
@@ -769,13 +860,17 @@ router.post(
   "/share-get-contact-envelope",
   asyncHandler(async (req, res) => {
     const token = String(req.body?.token || "");
-    if (!token) return res.status(400).json({ ok: false, error: "missing_token" });
+    if (!isValidShareToken(token)) return res.status(400).json({ ok: false, error: "invalid_token" });
 
     const tokenHash = sha256Hex(token);
     const pool = getPool();
 
     const [rows] = await pool.query(
-      "SELECT t.contact_id, t.file_id, t.expires_at FROM contact_file_share_tokens t WHERE t.token_hash = ? LIMIT 1",
+      `SELECT t.contact_id, t.file_id, t.expires_at
+       FROM contact_file_share_tokens t
+       JOIN emergency_contacts c ON c.id = t.contact_id
+       JOIN files f ON f.id = t.file_id AND f.user_id = c.user_id
+       WHERE t.token_hash = ? LIMIT 1`,
       [tokenHash]
     );
     if (!rows || !rows.length) return res.status(404).json({ ok: false, error: "invalid_token" });
@@ -890,13 +985,17 @@ router.post(
   "/share-presign-download",
   asyncHandler(async (req, res) => {
     const token = String(req.body?.token || "");
-    if (!token) return res.status(400).json({ ok: false, error: "missing_token" });
+    if (!isValidShareToken(token)) return res.status(400).json({ ok: false, error: "invalid_token" });
 
     const tokenHash = sha256Hex(token);
     const pool = getPool();
 
     const [trows] = await pool.query(
-      "SELECT t.contact_id, t.file_id, t.expires_at FROM contact_file_share_tokens t WHERE t.token_hash = ? LIMIT 1",
+      `SELECT t.contact_id, t.file_id, t.expires_at
+       FROM contact_file_share_tokens t
+       JOIN emergency_contacts c ON c.id = t.contact_id
+       JOIN files f ON f.id = t.file_id AND f.user_id = c.user_id
+       WHERE t.token_hash = ? LIMIT 1`,
       [tokenHash]
     );
     if (!trows || !trows.length) return res.status(404).json({ ok: false, error: "invalid_token" });
