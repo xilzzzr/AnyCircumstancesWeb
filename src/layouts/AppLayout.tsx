@@ -62,7 +62,7 @@ const sidebarItems = [
   { label: 'Emergency Contacts', href: '/app/emergency-contacts', icon: Users },
   { label: 'Billing', href: '/app/billing', icon: CreditCard },
   { label: 'Activity Logs', href: '/app/activity', icon: Activity },
-  { label: 'Ideas', href: '/scenarios', icon: Lightbulb },
+  { label: 'Ideas', href: '/app/ideas', icon: Lightbulb },
   { label: 'Settings', href: '/app/settings', icon: Settings },
   { label: 'Help', href: '/app/help', icon: HelpCircle },
 ];

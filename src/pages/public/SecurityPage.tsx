@@ -43,7 +43,7 @@ const SecurityPage = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="bg-background">
       {/* Hero Section */}
       
         <div className="mb-6 text-sm text-muted-foreground">
@@ -103,4 +103,3 @@ const SecurityPage = () => {
 };
 
 export default SecurityPage;
-
