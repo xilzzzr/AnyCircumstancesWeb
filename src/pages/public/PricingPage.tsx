@@ -136,7 +136,7 @@ export function PricingPage() {
   };
 
   return (
-    <div className="flex flex-col pb-48 lg:pb-0">
+    <div className="flex flex-col">
       <section className="py-16 lg:py-24 bg-gradient-hero">
         <div className="container mx-auto px-4">
 

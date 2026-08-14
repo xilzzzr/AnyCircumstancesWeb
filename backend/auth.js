@@ -1224,7 +1224,9 @@ router.get(
           const activeProviders = r.active_providers ? String(r.active_providers).split(",") : [];
           return {
           userId: String(r.user_id),
-          status: activeProviders.length ? "active" : (String(r.status) === "active" ? "paused" : String(r.status)),
+          // Opening plan management must never make a valid legacy Stripe profile
+          // appear cancelled while its entitlement row is being backfilled.
+          status: activeProviders.length ? "active" : String(r.status),
           billingInterval: String(r.billing_interval),
           amountCents: Number(r.amount_cents),
           currency: String(r.currency),
@@ -1697,7 +1699,7 @@ router.get(
     const row = rows?.[0] || null;
     return res.json({
       ok: true,
-      status: row?.active_providers ? "active" : (String(row?.status || "none") === "active" ? "paused" : (row?.status || "none")),
+      status: row?.active_providers ? "active" : (row?.status || "none"),
       currentPeriodEnd: row?.current_period_end || null,
       stripeSubscriptionId: row?.stripe_subscription_id || null,
       activeProviders: row?.active_providers ? String(row.active_providers).split(",") : [],

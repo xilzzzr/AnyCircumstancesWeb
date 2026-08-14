@@ -211,7 +211,7 @@ export default function EditPlanPage() {
       <Card>
         <CardHeader>
           <CardTitle>Edit your plan</CardTitle>
-          <CardDescription>Adjust storage, check-ins, and add-ons. We’ll update your subscription.</CardDescription>
+          <CardDescription>Adjust storage, check-ins, and add-ons. Your current plan stays active unless you save changes.</CardDescription>
         </CardHeader>
 
         <CardContent className="space-y-8">
@@ -346,9 +346,12 @@ export default function EditPlanPage() {
                 )}
               </div>
 
-              <Button onClick={updatePlan} disabled={loading} className="w-full">
-                {loading ? "Updating..." : "Update my plan"}
-              </Button>
+              <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                <Button variant="outline" onClick={() => navigate(returnTo)} disabled={loading}>Exit without saving</Button>
+                <Button onClick={updatePlan} disabled={loading}>
+                  {loading ? "Updating..." : "Update my plan"}
+                </Button>
+              </div>
             </>
           )}
         </CardContent>

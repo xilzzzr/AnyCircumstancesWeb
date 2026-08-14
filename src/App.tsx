@@ -55,6 +55,8 @@ import { AccountSettingsPage } from "@/pages/app/AccountSettingsPage";
 
 import PlanBuilderPage from "@/pages/app/PlanBuilderPage";
 import EditPlanPage from "@/pages/app/EditPlanPage";
+import { HelpPage } from "@/pages/app/HelpPage";
+import { IdeasPage } from "@/pages/app/IdeasPage";
 
 import SharePage from "@/pages/SharePage";
 import NotFound from "@/pages/NotFound";
@@ -124,6 +126,8 @@ function AppRoutes() {
         <Route path="settings" element={<AccountSettingsPage />} />
         <Route path="plan" element={<PlanBuilderPage />} />
         <Route path="edit-plan" element={<EditPlanPage />} />
+        <Route path="ideas" element={<IdeasPage />} />
+        <Route path="help" element={<HelpPage />} />
       </Route>
 
       <Route
