@@ -1,7 +1,8 @@
 
 // dispatch_emergency.js
-const path = require("path");
-require("dotenv").config({ path: path.join(__dirname, ".env"), override: true });
+const { initializeEnvironment } = require("./environment");
+
+initializeEnvironment();
 
 const crypto = require("crypto");
 const fs = require("fs");
