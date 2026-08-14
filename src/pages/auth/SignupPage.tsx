@@ -121,12 +121,7 @@ export function SignupPage() {
         return;
       }
 
-      if (data?.verify_url_dev_only) {
-  sessionStorage.setItem('dev_verify_url', String(data.verify_url_dev_only));
-}
-
 sessionStorage.setItem('pending_verify_email', email);
-sessionStorage.setItem('pending_verify_password', password);
 
 toast({
   title: 'Account created',
@@ -277,11 +272,11 @@ navigate('/verify-email');
             <Shield className="h-10 w-10 text-primary" />
           </div>
           <h2 className="text-2xl font-bold text-vault-foreground mb-4">
-            Zero-knowledge security
+            Client-side file encryption
           </h2>
           <p className="text-vault-foreground/70">
-            Your password never leaves your device. We use it to derive encryption keys locally,
-            ensuring only you can access your data.
+            Files are encrypted on your device before upload. Your separate vault passphrase
+            protects the private key stored on that device.
           </p>
         </div>
       </div>

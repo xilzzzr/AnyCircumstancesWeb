@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,8 +14,12 @@ const requirements = [
 ];
 
 export function ResetPasswordPage() {
-  const [params] = useSearchParams();
-  const token = useMemo(() => String(params.get('token') || ''), [params]);
+  const [token] = useState(() => {
+    const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+    const value = String(hash.get('token') || '');
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    return value;
+  });
 
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');

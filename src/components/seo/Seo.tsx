@@ -1,53 +1,63 @@
 import { useEffect } from "react";
 
-type SeoProps = {
+const SITE_URL = "https://anycircumstances.com";
+const DEFAULT_IMAGE = `${SITE_URL}/og-image.svg`;
+
+export type SeoProps = {
   title: string;
   description: string;
   path: string;
+  noindex?: boolean;
+  type?: "website" | "article";
+  schema?: Record<string, unknown> | Record<string, unknown>[];
 };
 
-export function Seo({ title, description, path }: SeoProps) {
+function upsertMeta(selector: string, attribute: "name" | "property", key: string, content: string) {
+  let tag = document.head.querySelector<HTMLMetaElement>(selector);
+  if (!tag) {
+    tag = document.createElement("meta");
+    tag.setAttribute(attribute, key);
+    document.head.appendChild(tag);
+  }
+  tag.content = content;
+}
+
+export function Seo({ title, description, path, noindex = false, type = "website", schema }: SeoProps) {
   useEffect(() => {
+    const normalizedPath = path === "/" ? "/" : path.replace(/\/$/, "");
+    const canonical = `${SITE_URL}${normalizedPath}`;
     document.title = title;
 
-    const ensureMeta = (name: string) => {
-      let tag = document.querySelector(`meta[name="${name}"]`) as HTMLMetaElement | null;
-      if (!tag) {
-        tag = document.createElement("meta");
-        tag.setAttribute("name", name);
-        document.head.appendChild(tag);
-      }
-      return tag;
-    };
+    upsertMeta('meta[name="description"]', "name", "description", description);
+    upsertMeta('meta[name="robots"]', "name", "robots", noindex ? "noindex, follow" : "index, follow, max-image-preview:large");
+    upsertMeta('meta[property="og:title"]', "property", "og:title", title);
+    upsertMeta('meta[property="og:description"]', "property", "og:description", description);
+    upsertMeta('meta[property="og:type"]', "property", "og:type", type);
+    upsertMeta('meta[property="og:url"]', "property", "og:url", canonical);
+    upsertMeta('meta[property="og:image"]', "property", "og:image", DEFAULT_IMAGE);
+    upsertMeta('meta[property="og:site_name"]', "property", "og:site_name", "AnyCircumstances");
+    upsertMeta('meta[name="twitter:card"]', "name", "twitter:card", "summary_large_image");
+    upsertMeta('meta[name="twitter:title"]', "name", "twitter:title", title);
+    upsertMeta('meta[name="twitter:description"]', "name", "twitter:description", description);
+    upsertMeta('meta[name="twitter:image"]', "name", "twitter:image", DEFAULT_IMAGE);
 
-const ensurePropertyMeta = (property: string) => {
-      let tag = document.querySelector(`meta[property="${property}"]`) as HTMLMetaElement | null;
-  if (!tag) {
-        tag = document.createElement("meta");
-        tag.setAttribute("property", property);
-        document.head.appendChild(tag);
-      }
-      return tag;
-    };
+    let canonicalTag = document.head.querySelector<HTMLLinkElement>('link[rel="canonical"]');
+    if (!canonicalTag) {
+      canonicalTag = document.createElement("link");
+      canonicalTag.rel = "canonical";
+      document.head.appendChild(canonicalTag);
+    }
+    canonicalTag.href = canonical;
 
-    const ensureCanonical = () => {
-      let tag = document.querySelector('link[rel="canonical"]') as HTMLLinkElement | null;
- if (!tag) {
-        tag = document.createElement("link");
-        tag.setAttribute("rel", "canonical");
-        document.head.appendChild(tag);
-      }
-return tag;
-    };
-
-  ensureMeta("description").setAttribute("content", description);
-    ensurePropertyMeta("og:title").setAttribute("content", title);
-    ensurePropertyMeta("og:description").setAttribute("content", description);
-    ensurePropertyMeta("og:type").setAttribute("content", "article");
-    ensurePropertyMeta("og:url").setAttribute("content", `https://anycircumstances.com$
-{path}`);
-    ensureCanonical().setAttribute("href", `https://anycircumstances.com${path}`);
-  }, [title, description, path]);
+    document.querySelectorAll('script[data-route-schema="true"]').forEach((node) => node.remove());
+    if (schema) {
+      const script = document.createElement("script");
+      script.type = "application/ld+json";
+      script.dataset.routeSchema = "true";
+      script.text = JSON.stringify(schema).replace(/</g, "\\u003c");
+      document.head.appendChild(script);
+    }
+  }, [description, noindex, path, schema, title, type]);
 
   return null;
 }

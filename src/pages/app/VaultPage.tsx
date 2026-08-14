@@ -37,7 +37,7 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { listVaultFiles, presignDownload, deleteVaultFile, type VaultFile } from "@/lib/uacFilesApi";
-import { formatBytes, formatDate } from "@/lib/mockApi";
+import { formatBytes, formatDate } from "@/lib/format";
 
 const getFileIcon = (type: string) => {
   if (type.startsWith("image/")) return Image;

@@ -9,7 +9,7 @@ const steps = [
     icon: Upload,
     title: 'Upload Your Files',
     description: 'Select the files you want to protect. They are encrypted right on your device using AES-256 encryption before being uploaded to our servers.',
-    detail: 'We never see your unencrypted data. The encryption keys stay with you.',
+    detail: 'The server stores ciphertext, with protected recovery-key material used for the emergency workflow.',
   },
   {
     number: '02',
@@ -124,9 +124,9 @@ export function HowItWorksPage() {
               Your Privacy is Paramount
             </h2>
             <p className="text-muted-foreground mb-8">
-              We use zero-knowledge architecture. Your files are encrypted before they leave 
-              your device, and we never have access to your encryption keys. Even our admins 
-              cannot view your data.
+              Your files are encrypted before they leave your device, and the service stores
+              ciphertext rather than the original file. Protected recovery-key material supports
+              the emergency delivery workflow you configure.
             </p>
             <Link to="/security">
               <Button variant="outline" className="gap-2">

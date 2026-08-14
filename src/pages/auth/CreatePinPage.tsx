@@ -4,12 +4,15 @@ import { Button } from '@/components/ui/button';
 import { Loader2, KeyRound, ArrowLeft } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 export function CreatePinPage() {
   const [pin, setPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
   const [step, setStep] = useState<'create' | 'confirm'>('create');
   const [loading, setLoading] = useState(false);
+  const [password, setPassword] = useState('');
 
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -49,7 +52,7 @@ export function CreatePinPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ pin }),
+        body: JSON.stringify({ pin, password }),
       });
 
       const data = await resp.json().catch(() => ({}));
@@ -73,6 +76,10 @@ export function CreatePinPage() {
             description: 'Your PIN must be 4 to 6 digits.',
             variant: 'destructive',
           });
+          return;
+        }
+        if (code === 'reauthentication_failed') {
+          toast({ title: 'Password required', description: 'Enter your current account password.', variant: 'destructive' });
           return;
         }
 
@@ -126,6 +133,10 @@ export function CreatePinPage() {
         </div>
 
         <div className="space-y-6">
+          <div className="space-y-2">
+            <Label htmlFor="pin-current-password">Current account password</Label>
+            <Input id="pin-current-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" disabled={loading} />
+          </div>
           <div className="flex justify-center">
             {step === 'create' ? (
               <InputOTP maxLength={6} value={pin} onChange={handlePinChange}>
@@ -159,7 +170,7 @@ export function CreatePinPage() {
           )}
 
           {step === 'confirm' && (
-            <Button className="w-full" disabled={confirmPin.length < 4 || loading} onClick={handleSubmit}>
+            <Button className="w-full" disabled={confirmPin.length < 4 || !password || loading} onClick={handleSubmit}>
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Set PIN'}
             </Button>
           )}

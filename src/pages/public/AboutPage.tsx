@@ -20,7 +20,7 @@ export function AboutPage() {
           </Link>
           , our{" "}
           <Link to="/security" className="underline underline-offset-4 hover:opacity-90">
-            zero-knowledge security model
+            security and recovery model
           </Link>
           , and{" "}
           <Link to="/how-it-works" className="underline underline-offset-4 hover:opacity-90">

@@ -8,6 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { useLocation, useNavigate } from "react-router-dom";
+import { safeInternalPath } from "@/lib/navigation";
 import { computePlanPrice, formatMoney } from "@/lib/pricing";
 import { Phone, MessageSquare, MapPin, Loader2 } from "lucide-react";
 
@@ -47,8 +48,7 @@ async function postJson(path: string, body: any): Promise<ApiResult> {
 function useReturnTo() {
   const loc = useLocation();
   const params = new URLSearchParams(loc.search);
-  const returnTo = params.get("returnTo");
-  return returnTo || "/app/billing";
+  return safeInternalPath(params.get("returnTo"), "/app/billing");
 }
 
 const ADDONS = [

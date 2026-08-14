@@ -8,6 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { useLocation } from "react-router-dom";
+import { safeInternalPath } from "@/lib/navigation";
 import { computePlanPrice, formatMoney } from "@/lib/pricing";
 import { Phone, MessageSquare, MapPin } from "lucide-react";
 
@@ -28,8 +29,7 @@ async function postJson(path: string, body: any): Promise<ApiResult> {
 function useReturnTo() {
   const loc = useLocation();
   const params = new URLSearchParams(loc.search);
-  const returnTo = params.get("returnTo");
-  return returnTo || "/app";
+  return safeInternalPath(params.get("returnTo"), "/app");
 }
 
 const ADDONS = [
@@ -121,7 +121,6 @@ export default function PlanBuilderPage() {
         return;
       }
 
-      localStorage.setItem("uac_return_to_after_checkout", returnTo);
       window.location.href = out.url;
     } finally {
       setLoading(false);
@@ -293,4 +292,3 @@ export default function PlanBuilderPage() {
     </div>
   );
 }
-

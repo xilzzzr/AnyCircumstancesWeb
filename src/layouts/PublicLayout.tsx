@@ -119,6 +119,8 @@ export function PublicLayout() {
             <div>
               <h4 className="font-medium text-foreground mb-4">Product</h4>
               <ul className="space-y-2 text-sm text-muted-foreground">
+                <li><Link to="/digital-vault" className="hover:text-foreground transition-colors">Secure digital vault</Link></li>
+                <li><Link to="/dead-mans-switch" className="hover:text-foreground transition-colors">Dead man’s switch</Link></li>
                 <li><Link to="/how-it-works" className="hover:text-foreground transition-colors">How it works</Link></li>
                 <li><Link to="/scenarios" className="hover:text-foreground transition-colors">Ideas & scenarios</Link></li>
                 <li><Link to="/pricing" className="hover:text-foreground transition-colors">Pricing</Link></li>
@@ -130,6 +132,8 @@ export function PublicLayout() {
             <div>
               <h4 className="font-medium text-foreground mb-4">Support</h4>
               <ul className="space-y-2 text-sm text-muted-foreground">
+                <li><Link to="/guides" className="hover:text-foreground transition-colors">Planning guides</Link></li>
+                <li><Link to="/emergency-information-vault" className="hover:text-foreground transition-colors">Emergency information vault</Link></li>
                 <li><Link to="/faq" className="hover:text-foreground transition-colors">FAQ</Link></li>
                 <li><Link to="/contact" className="hover:text-foreground transition-colors">Contact</Link></li>
               </ul>
@@ -148,7 +152,7 @@ export function PublicLayout() {
 
           <div className="mt-12 pt-8 border-t border-border flex flex-col md:flex-row justify-between items-center gap-4 text-sm text-muted-foreground">
             <p>&copy; {new Date().getFullYear()} anycircumstances. All rights reserved.</p>
-            <p>Your data is end-to-end encrypted</p>
+            <p>Your files are encrypted on your device before upload</p>
           </div>
         </div>
       </footer>

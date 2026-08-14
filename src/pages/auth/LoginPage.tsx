@@ -169,8 +169,8 @@ export function LoginPage() {
             Your data is always encrypted
           </h2>
           <p className="text-vault-foreground/70">
-            Files are encrypted on your device before upload. We never have access to your
-            encryption keys or unencrypted data.
+            Files are encrypted on your device before upload. The service stores ciphertext and
+            protected recovery-key material for emergency delivery.
           </p>
         </div>
       </div>
