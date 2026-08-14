@@ -48,13 +48,6 @@ const {
   STRIPE_SECRET_KEY,
 } = process.env;
 
-if (!DB_HOST || !DB_USER || !DB_NAME || !JWT_ACCESS_SECRET) {
-  throw new Error("Missing required env vars: DB_HOST, DB_USER, DB_NAME, JWT_ACCESS_SECRET");
-}
-if (process.env.NODE_ENV === "production" && Buffer.byteLength(String(JWT_ACCESS_SECRET), "utf8") < 32) {
-  throw new Error("JWT_ACCESS_SECRET must be at least 32 bytes in production");
-}
-
 const dbPoolConfig = {
   connectTimeout: 10000,
   host: DB_HOST,
