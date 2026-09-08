@@ -151,7 +151,7 @@ export function PricingPage() {
               animate={{ opacity: 1, y: 0 }}
               className="text-4xl md:text-5xl font-bold text-vault-foreground mb-6"
             >
-              Build Your Plan
+              Secure Digital Vault Pricing
             </motion.h1>
             <motion.p
               initial={{ opacity: 0, y: 20 }}
@@ -159,7 +159,7 @@ export function PricingPage() {
               transition={{ delay: 0.1 }}
               className="text-lg text-vault-foreground/70 mb-6"
             >
-              Only pay for what you need. Choose your storage, add features, and set your check-in frequency.
+              Choose the storage and check-in frequency that fit your plan. Monthly check-ins are included, with weekly and daily options available for people who want a shorter verification interval.
             </motion.p>
           </div>
         </div>

@@ -2,6 +2,7 @@ import { Outlet, Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Shield, Menu, X } from 'lucide-react';
 import { useState } from 'react';
+import { PublicPageCta } from '@/components/public/ContextualCta';
 
 const navLinks = [
   { label: 'Ideas', href: '/scenarios' },
@@ -44,16 +45,12 @@ export function PublicLayout() {
 
           {/* Desktop Auth Buttons */}
           <div className="hidden md:flex items-center gap-3">
-            <Link to="/login">
-              <Button variant="ghost" size="sm">
+            <Button asChild variant="ghost" size="sm"><Link to="/login">
                 Log in
-              </Button>
-            </Link>
-            <Link to="/signup">
-              <Button size="sm" className="shadow-md">
+              </Link></Button>
+            <Button asChild size="sm" className="shadow-md"><Link to="/signup">
                 Get started
-              </Button>
-            </Link>
+              </Link></Button>
           </div>
 
           {/* Mobile Menu Button */}
@@ -98,6 +95,7 @@ export function PublicLayout() {
       {/* Main Content */}
       <main id="main-content" tabIndex={-1} className="public-main flex-1">
         <Outlet />
+        <PublicPageCta />
       </main>
 
       {/* Footer */}

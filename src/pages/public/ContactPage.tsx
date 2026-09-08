@@ -1,14 +1,9 @@
 import { Mail } from "lucide-react";
-import { Seo } from "@/components/seo/Seo";
 
 export function ContactPage() {
   return (
     <div className="container mx-auto px-4 py-20 lg:py-32">
-      <Seo
-        title="Contact AnyCircumstances"
-        description="Contact the AnyCircumstances team for product and account support."
-        path="/contact"
-      />
+
       <div className="contact-panel max-w-3xl mx-auto text-center">
         <div className="micro-label justify-center"><span className="status-dot" /> SUPPORT CHANNEL</div>
         <h1 className="mt-6 text-4xl md:text-6xl">How can we help?</h1>

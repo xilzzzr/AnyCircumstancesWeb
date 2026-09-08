@@ -1,3 +1,5 @@
+import { breadcrumbSchema } from "@/components/seo/schema";
+
 const SITE_URL = "https://anycircumstances.com";
 
 export type PublicRouteSeo = {
@@ -13,23 +15,24 @@ const page = (path: string, title: string, description: string): PublicRouteSeo 
   title,
   description,
   type: "website",
-  schema: {
+  schema: [{
     "@context": "https://schema.org",
     "@type": "WebPage",
     name: title,
     description,
     url: `${SITE_URL}${path}`,
     isPartOf: { "@id": `${SITE_URL}/#website` },
-  },
+  }, ...(path === "/emergency-information-vault" || path === "/proof-of-life" ? [breadcrumbSchema([{ name: "Home", path: "/" }, { name: path === "/proof-of-life" ? "Proof of Life" : "Emergency Information Vault", path }])] : [])],
 });
 
 export const publicRoutes: PublicRouteSeo[] = [
   page("/", "Secure Emergency Digital Vault & Dead Man’s Switch | AnyCircumstances", "Store encrypted files, choose trusted recipients, and use scheduled check-ins to release important information if you become unavailable."),
-  page("/dead-mans-switch", "Digital Dead Man’s Switch for Files & Family | AnyCircumstances", "Use scheduled check-ins to trigger secure delivery of encrypted documents and instructions to trusted contacts if you become unavailable."),
-  page("/digital-vault", "Secure Digital Vault for Important Information | AnyCircumstances", "Securely store important documents, recovery details, and emergency information, then control when trusted recipients can receive access."),
-  page("/emergency-information-vault", "Emergency Information Vault for Your Family | AnyCircumstances", "Organize important documents, contacts, account instructions, insurance details, and emergency information for people you trust."),
+  page("/dead-mans-switch", "Dead Man's Switch Email for Encrypted Files | AnyCircumstances", "Set recurring check-ins, email reminders, a grace period, and trusted recipients. If you stop responding, AnyCircumstances can securely release assigned files."),
+  page("/digital-vault", "Secure Digital Vault for Important Documents | AnyCircumstances", "A personal digital vault for encrypted documents, emergency information, recovery instructions, and controlled delivery to trusted recipients."),
+  page("/emergency-information-vault", "Emergency Information Vault for Family | AnyCircumstances", "Organize important documents, contacts, account instructions, insurance information, recovery details, and emergency files for trusted recipients."),
   page("/features", "Encrypted Vault, Trusted Recipients & Check-Ins | AnyCircumstances", "Explore client-side file encryption, scheduled check-ins, trusted recipients, selective sharing, and secure emergency delivery."),
-  page("/how-it-works", "How Secure Emergency Information Delivery Works | AnyCircumstances", "See how to encrypt files, select trusted contacts, schedule check-ins, and prepare controlled emergency delivery."),
+  page("/how-it-works", "How AnyCircumstances Check-Ins & Emergency Delivery Work", "See the full flow: encrypted files, trusted recipients, scheduled check-ins, email reminders, a customizable grace period, and secure recipient delivery."),
+  page("/proof-of-life", "Proof of Life Protocol & Digital Check-Ins | AnyCircumstances", "Learn how recurring digital proof-of-life check-ins, PIN confirmation, reminders, and a grace period can control secure information release."),
   page("/pricing", "Secure Digital Vault Pricing | AnyCircumstances", "Compare AnyCircumstances plans for encrypted storage, trusted contacts, check-ins, and emergency file delivery."),
   page("/security", "Digital Vault Security & Encryption | AnyCircumstances", "Learn how AnyCircumstances encrypts files on your device, stores ciphertext, protects accounts, and handles controlled recovery."),
   page("/about", "About AnyCircumstances | Emergency Information Planning", "Learn why AnyCircumstances helps people prepare important encrypted information for trusted contacts."),

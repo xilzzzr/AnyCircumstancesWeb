@@ -6,7 +6,6 @@ import {
   Clock,
   Users,
   FileCheck,
-  KeyRound,
   Zap
 } from "lucide-react";
 
@@ -21,13 +20,13 @@ const featureList = [
     icon: Clock,
     title: "Automated Check-In System",
     description:
-      "Set daily, weekly, or monthly verification schedules. If you fail to check in, your emergency delivery sequence begins."
+      "Set daily, weekly, or monthly check-ins and configure email reminders. If a check-in is missed, the grace period begins before any recipient delivery occurs."
   },
   {
     icon: Users,
     title: "Trusted Emergency Contacts",
     description:
-      "Designate specific contacts who will receive access to your files if your verification schedule is missed."
+      "Add the people who should receive specific files if your release conditions are eventually met. Different files can be assigned according to who actually needs them."
   },
   {
     icon: FileCheck,
@@ -36,16 +35,10 @@ const featureList = [
       "Choose exactly which documents are included in your emergency release package."
   },
   {
-    icon: KeyRound,
-    title: "Secure Identity Verification",
-    description:
-      "Verify your status using a PIN or passkey to confirm you are safe and prevent unintended releases."
-  },
-  {
     icon: Zap,
-    title: "Instant Secure Delivery",
+    title: "Conditional Recipient Delivery",
     description:
-      "When triggered, your trusted contacts receive encrypted access links immediately."
+      "If the configured grace period expires without a successful check-in, designated recipients are emailed secure access to the files assigned to them."
   }
 ];
 
@@ -79,18 +72,14 @@ export function FeaturesPage() {
         </p>
 
         <div className="flex flex-col sm:flex-row gap-3 justify-center">
-          <Link to="/signup">
-            <Button className="gap-2">
+          <Button asChild className="gap-2"><Link to="/signup">
               Create your vault
               <ArrowRight className="h-4 w-4" />
-            </Button>
-          </Link>
+            </Link></Button>
 
-          <Link to="/pricing">
-            <Button variant="outline">
+          <Button asChild variant="outline"><Link to="/pricing">
               Compare pricing plans
-            </Button>
-          </Link>
+            </Link></Button>
         </div>
       </div>
 

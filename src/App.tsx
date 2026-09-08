@@ -12,6 +12,7 @@ const DigitalVaultPage = lazy(() => import("@/pages/public/DigitalVaultPage").th
 const EmergencyInformationVaultPage = lazy(() => import("@/pages/public/EmergencyInformationVaultPage").then((module) => ({ default: module.EmergencyInformationVaultPage })));
 const FeaturesPage = lazy(() => import("@/pages/public/FeaturesPage").then((module) => ({ default: module.FeaturesPage })));
 const HowItWorksPage = lazy(() => import("@/pages/public/HowItWorksPage").then((module) => ({ default: module.HowItWorksPage })));
+const ProofOfLifePage = lazy(() => import("@/pages/public/ProofOfLifePage").then((module) => ({ default: module.ProofOfLifePage })));
 const PricingPage = lazy(() => import("@/pages/public/PricingPage").then((module) => ({ default: module.PricingPage })));
 const SecurityPage = lazy(() => import("@/pages/public/SecurityPage"));
 const FaqPage = lazy(() => import("@/pages/public/FaqPage"));
@@ -75,6 +76,7 @@ export function AppRoutes() {
         <Route path="/" element={lazyElement(LandingPage)} />
         <Route path="/features" element={lazyElement(FeaturesPage)} />
         <Route path="/how-it-works" element={lazyElement(HowItWorksPage)} />
+        <Route path="/proof-of-life" element={lazyElement(ProofOfLifePage)} />
         <Route path="/pricing" element={lazyElement(PricingPage)} />
         <Route path="/security" element={lazyElement(SecurityPage)} />
         <Route path="/faq" element={lazyElement(FaqPage)} />

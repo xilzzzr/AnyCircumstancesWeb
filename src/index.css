@@ -440,3 +440,24 @@ input { min-height: 44px; border-radius: 12px !important; }
   .landing-hero { min-height: auto; }
   .landing-cta { margin-inline: 12px; }
 }
+
+/* Readable public articles, preserving the existing dark vault palette. */
+.public-site .guide-article h1 { line-height: 1.12 !important; }
+.public-site .guide-article h2,
+.public-site .public-content-section h2,
+.public-site .contextual-cta h2 { line-height: 1.22 !important; letter-spacing: -.025em !important; }
+.public-site .guide-article p,
+.public-site .guide-article li { line-height: 1.8; }
+.public-site .guide-article .guide-intro { line-height: 1.7; }
+.guide-article, .public-content-section, .contextual-cta { overflow-wrap: anywhere; }
+.comparison-scroll:focus-visible { outline: 2px solid currentColor; outline-offset: 4px; }
+.public-site .contextual-cta { background: radial-gradient(ellipse at top right, rgba(185,205,198,.12), transparent 65%), #0c0e0d; }
+.public-site .scenario-card .scenario-title a { color: inherit; }
+.public-site .scenario-card .scenario-title a:hover { color: #f4f5f2; }
+.public-site .scenario-card button.scenario-open { min-height: 44px; background: transparent; padding: 0; color: inherit; }
+@media (max-width: 639px) {
+  .public-site .landing-hero-copy h1 { font-size: clamp(36px, 9.5vw, 46px) !important; }
+  .public-site .landing-hero-copy > p { font-size: 16px !important; }
+  .public-site .landing-hero-copy .micro-label { white-space: normal; }
+  .contextual-cta a { width: 100%; }
+}

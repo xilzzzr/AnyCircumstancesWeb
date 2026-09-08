@@ -1,6 +1,8 @@
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Seo } from "@/components/seo/Seo";
+import content from "@/data/publicContent.json";
+import { ContextualCta } from "@/components/public/ContextualCta";
+import { ContentLinks, PublicContentSection } from "@/components/public/ArticleContent";
 import { motion } from "framer-motion";
 import {
   Skull,
@@ -33,7 +35,6 @@ const fadeUp = {
 export function DeadMansSwitchPage() {
   return (
     <div className="flex flex-col">
-      <Seo title="Digital Dead Man’s Switch for Files & Family | AnyCircumstances" description="Use scheduled check-ins to trigger secure delivery of encrypted documents and instructions to trusted contacts if you become unavailable." path="/dead-mans-switch" />
       <section className="relative py-24 lg:py-32 overflow-hidden">
         <div className="absolute inset-0 bg-gradient-hero" />
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,hsl(var(--primary)/0.18),transparent_55%)]" />
@@ -45,7 +46,7 @@ export function DeadMansSwitchPage() {
               <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 mb-6">
                 <Skull className="h-4 w-4 text-primary" />
                 <span className="text-sm font-medium text-primary">
-                  Dead man’s switch
+                  {content.switch.eyebrow}
                 </span>
               </div>
             </motion.div>
@@ -55,24 +56,14 @@ export function DeadMansSwitchPage() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.55, delay: 0.05 }}
               className="text-4xl md:text-5xl lg:text-6xl font-bold text-vault-foreground mb-6 leading-tight"
-            >
-              A Digital Dead Man’s Switch for Important Files
-              <span className="block mt-2 text-vault-foreground/80 text-xl md:text-2xl font-medium">
-                automatically, securely, and only to the people you chose.
-              </span>
-            </motion.h1>
+            >{content.switch.h1}</motion.h1>
 
             <motion.p
               initial={{ opacity: 0, y: 18 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.55, delay: 0.12 }}
               className="text-lg md:text-xl text-vault-foreground/70 mb-10 max-w-3xl mx-auto"
-            >
-              A dead man’s switch is an automated trigger: you prove you’re okay
-              on a schedule. Miss your check-ins, and emergency delivery starts.
-              It’s like “just in case”… but with fewer sticky notes and panicked
-              password guesses.
-            </motion.p>
+            >{content.switch.intro}</motion.p>
 
             <motion.div
               initial={{ opacity: 0, y: 18 }}
@@ -80,21 +71,17 @@ export function DeadMansSwitchPage() {
               transition={{ duration: 0.55, delay: 0.2 }}
               className="flex flex-col sm:flex-row gap-4 justify-center"
             >
-              <Link to="/signup">
-                <Button size="lg" className="w-full sm:w-auto gap-2 shadow-glow">
-                  Set up your switch
+              <Button asChild size="lg" className="w-full sm:w-auto gap-2 shadow-glow"><Link to="/signup">
+                  Set Up Your Switch
                   <ArrowRight className="h-4 w-4" />
-                </Button>
-              </Link>
-              <Link to="/how-it-works">
-                <Button
+                </Link></Button>
+              <Button asChild
                   size="lg"
                   variant="outline"
                   className="w-full sm:w-auto bg-transparent border-vault-foreground/30 text-vault-foreground hover:bg-vault-foreground/10"
-                >
-                  See the step-by-step flow
-                </Button>
-              </Link>
+                ><Link to="/how-it-works">
+                  See the Check-In Flow
+                </Link></Button>
             </motion.div>
 
             <motion.div
@@ -125,6 +112,11 @@ export function DeadMansSwitchPage() {
         <div className="container mx-auto px-4 max-w-5xl">
           <h2 className="text-3xl md:text-4xl font-bold">What is a dead man’s switch?</h2>
           <p className="mt-5 text-lg text-muted-foreground max-w-4xl">A digital dead man’s switch is an automated system that asks you to check in on a schedule. If you miss the required check-ins and do not respond during the recovery period, the system follows instructions you prepared in advance—such as notifying trusted contacts and releasing selected encrypted files.</p>
+        </div></section>
+      <PublicContentSection section={content.switch.sections[0]} />
+      <div className="container mx-auto max-w-5xl px-4 py-6"><ContentLinks links={content.switch.links} /><div className="mt-8"><ContextualCta variant="switch" /></div></div>
+      <PublicContentSection section={{ heading: content.switch.sections[1].heading, paragraphs: content.switch.sections[1].paragraphs }} />
+      <section className="py-14"><div className="container mx-auto max-w-5xl px-4">
           <h2 className="mt-14 text-3xl md:text-4xl font-bold">Useful applications and important limits</h2>
           <div className="mt-7 grid md:grid-cols-2 gap-6">
             <div className="rounded-2xl border bg-card p-6"><h3 className="text-xl font-semibold">Family and important documents</h3><p className="mt-3 text-muted-foreground">Deliver an account map, insurance details, property instructions, or directions to legal originals. Start with the <Link className="text-primary hover:underline" to="/guides/emergency-information-checklist">emergency information checklist</Link>.</p></div>
@@ -153,8 +145,8 @@ export function DeadMansSwitchPage() {
               {[
                 {
                   icon: FileKey2,
-                  title: "Crypto + recovery",
-                  desc: "If someone needs seed phrases or recovery codes, they’ll have them.",
+                  title: "Cryptocurrency recovery context",
+                  desc: "A dead man's switch can deliver encrypted instructions about where cryptocurrency is held, which devices matter, which exchange accounts exist, and what recovery steps a trusted person may need. It does not transfer legal ownership of cryptocurrency and should not be treated as a substitute for estate planning.",
                 },
                 {
                   icon: Users,
@@ -196,18 +188,16 @@ export function DeadMansSwitchPage() {
                   <h3 className="text-lg font-semibold text-foreground mb-2">
                     {c.title}
                   </h3>
-                  <p className="text-muted-foreground">{c.desc}</p>
+                  <p className="text-muted-foreground">{c.desc}</p>{c.title === "Cryptocurrency recovery context" && <ContentLinks links={content.switch.sections[1].links ?? []} />}
                 </motion.div>
               ))}
             </div>
 
             <div className="mt-12 text-center">
-              <Link to="/digital-vault">
-                <Button variant="outline" className="gap-2">
+              <Button asChild variant="outline" className="gap-2"><Link to="/digital-vault">
                   Learn about the digital vault
                   <ArrowRight className="h-4 w-4" />
-                </Button>
-              </Link>
+                </Link></Button>
             </div>
           </div>
         </div>
@@ -221,7 +211,7 @@ export function DeadMansSwitchPage() {
                 How the trigger works
               </h2>
               <p className="text-lg text-muted-foreground">
-                A simple schedule + a missed check-in = the start of delivery.
+                Missing a scheduled check-in DOES NOT immediately release files.
               </p>
             </motion.div>
 
@@ -242,7 +232,7 @@ export function DeadMansSwitchPage() {
                 {
                   step: "03",
                   icon: BellRing,
-                  title: "Missed check-in triggers delivery",
+                  title: "The grace period expires",
                   desc: "After your grace rules, contacts receive secure access.",
                 },
               ].map((s, idx) => (
@@ -283,12 +273,10 @@ export function DeadMansSwitchPage() {
                   </div>
                 </div>
               </div>
-              <Link to="/signup" className="w-full md:w-auto">
-                <Button className="w-full md:w-auto gap-2 shadow-glow">
+              <Button asChild className="w-full md:w-auto gap-2 shadow-glow"><Link to="/signup" className="w-full md:w-auto">
                   Set it up now
                   <ArrowRight className="h-4 w-4" />
-                </Button>
-              </Link>
+                </Link></Button>
             </motion.div>
           </div>
         </div>
@@ -348,12 +336,10 @@ export function DeadMansSwitchPage() {
                   </div>
 
                   <div className="mt-8">
-                    <Link to="/security">
-                      <Button variant="outline" className="gap-2">
+                    <Button asChild variant="outline" className="gap-2"><Link to="/security">
                         Read security details
                         <ArrowRight className="h-4 w-4" />
-                      </Button>
-                    </Link>
+                      </Link></Button>
                   </div>
                 </div>
 
@@ -382,12 +368,10 @@ export function DeadMansSwitchPage() {
                   </div>
 
                   <div className="mt-6">
-                    <Link to="/signup">
-                      <Button className="w-full gap-2 shadow-glow">
-                        Set up your switch
+                    <Button asChild className="w-full gap-2 shadow-glow"><Link to="/signup">
+                        Set Up Your Switch
                         <ArrowRight className="h-4 w-4" />
-                      </Button>
-                    </Link>
+                      </Link></Button>
                   </div>
 
                   <div className="mt-4 text-sm text-muted-foreground flex items-start gap-2">
@@ -403,47 +387,6 @@ export function DeadMansSwitchPage() {
         </div>
       </section>
 
-      <section className="py-24 bg-gradient-hero relative overflow-hidden">
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_left,hsl(var(--primary)/0.2),transparent_55%)]" />
-        <div className="container mx-auto px-4 relative">
-          <div className="max-w-2xl mx-auto text-center">
-            <h2 className="text-3xl md:text-4xl font-bold text-vault-foreground mb-4">
-              Set it once. Sleep better.
-            </h2>
-            <p className="text-lg text-vault-foreground/70 mb-8">
-              Start free. Add more storage anytime.
-            </p>
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Link to="/signup">
-                <Button size="lg" className="w-full sm:w-auto gap-2 shadow-glow">
-                  Set up your switch
-                  <ArrowRight className="h-4 w-4" />
-                </Button>
-              </Link>
-              <Link to="/pricing">
-                <Button
-                  size="lg"
-                  variant="outline"
-                  className="w-full sm:w-auto bg-transparent border-vault-foreground/30 text-vault-foreground hover:bg-vault-foreground/10"
-                >
-                  View pricing
-                </Button>
-              </Link>
-            </div>
-
-            <p className="mt-6 text-sm text-vault-foreground/60">
-              Want the storage side too? That’s the{" "}
-              <Link
-                to="/digital-vault"
-                className="underline underline-offset-4 hover:opacity-90"
-              >
-                secure digital vault
-              </Link>
-              .
-            </p>
-          </div>
-        </div>
-      </section>
     </div>
   );
 }
