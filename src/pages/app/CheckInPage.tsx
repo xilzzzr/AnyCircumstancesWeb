@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
+import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import {
   CheckCircle2,
@@ -104,6 +105,7 @@ export function CheckInPage() {
   const [history, setHistory] = useState<CheckinRow[]>([]);
 
   const { toast } = useToast();
+  const { logout } = useAuth();
   const navigate = useNavigate();
 
   const isOverdue = useMemo(() => {
@@ -187,12 +189,10 @@ export function CheckInPage() {
       await loadAll();
     } catch (e: any) {
       if (e?.status === 401) {
-        toast({
-          title: "Session expired",
-          description: "Please log in again.",
-          variant: "destructive"
-        });
-        navigate("/login");
+        setPin("");
+        const signOutReason = e?.payload?.error === "invalid_pin" ? "incorrect-check-in-pin" : "session-expired";
+        await logout();
+        navigate("/login", { replace: true, state: { signOutReason } });
         return;
       }
 
