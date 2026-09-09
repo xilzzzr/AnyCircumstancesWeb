@@ -8,6 +8,7 @@ const crypto = require("crypto");
 const fs = require("fs");
 const mysql = require("mysql2/promise");
 const nodemailer = require("nodemailer");
+const { emailSender, renderAnyCircumstancesEmail, renderEmergencyEmail } = require("./emails");
 const { sendPushToUser } = require("./push_notifications");
 
 function sha256Hex(input) {
@@ -81,15 +82,19 @@ const stepMs = Math.max(1, Math.floor(graceMs / reminders));
       );
       if (!ins || !ins.affectedRows) continue;
 
-      const subject = "Reminder: check-in required";
+      const subject = "AnyCircumstances: Reminder — check-in required";
       const link = publicAppBase() + "/app/verification";
-      const text =
-        "Your check-in is overdue but still within the grace period.\n\nCheck in here:\n" +
-        link +
-        "\n";
+      const rendered = renderAnyCircumstancesEmail({
+        title: "Your check-in is overdue",
+        preview: "Check in before your grace period ends.",
+        bodyText: "Your check-in is overdue but still within the grace period. Sign in and check in to confirm you are safe.",
+        ctaText: "Check in", ctaUrl: link,
+        info: { title: "Before your grace period ends", text: "If you do not check in, your emergency contacts may receive access to the information assigned to them." },
+        securityNotice: "Sign in to AnyCircumstances to review your check-in schedule."
+      });
 
       try {
-        await mail.transporter.sendMail({ from: mail.from, to: ownerEmail, subject, text });
+        await mail.transporter.sendMail({ from: mail.from, to: ownerEmail, subject, ...rendered });
         console.log("[dispatcher] reminder sent user_id=", userId, "idx=", idx);
 
         try {
@@ -129,7 +134,7 @@ function mailTransport() {
   const port = Number(process.env.SMTP_PORT || 0);
   const user = String(process.env.SMTP_USER || "").trim();
   const pass = String(process.env.SMTP_PASS || "").trim();
-  const from = String(process.env.MAIL_FROM || process.env.EMAIL_FROM || process.env.SMTP_FROM || user || "").trim();
+  const from = emailSender();
 
   if (!host || !port || !user || !pass || !from) return { ok: false };
 
@@ -290,31 +295,15 @@ links.push(publicAppBase() + "/share#token=" + encodeURIComponent(token));
           linksCreated += 1;
         }
 
-        const subject = "Emergency access link";
-        const intro = name ? `Hi ${name},` : "Hi,";
-        const bodyLines = [
-          intro,
-          "",
-          "This is an automated message because the account owner missed a required check-in.",
-          "If this is expected, you can ignore this email.",
-          "",
-          "Links:"
-        ].concat(links.map((l) => "- " + l));
-
-        if (missingSetup) {
-          bodyLines.push(
-            "",
-            "Note: Your emergency contact setup is incomplete (no public key on file).",
-            "You can still open the link to complete setup, but files may not decrypt unless the owner pre-shared access."
-          );
-        }
+        const subject = "AnyCircumstances: Emergency access link";
+        const rendered = renderEmergencyEmail({ name, links, missingSetup, scheduled: true });
 
         try {
           await mail.transporter.sendMail({
             from: mail.from,
             to: email,
             subject,
-            text: bodyLines.join("\n")
+            ...rendered
           });
 
           emailedContacts += 1;

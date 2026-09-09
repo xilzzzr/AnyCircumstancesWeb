@@ -28,6 +28,7 @@ const TermsPage = lazy(() => import("@/routes/PublicInfoPages").then((module) =>
 
 const LoginPage = lazy(() => import("@/routes/AuthPages").then((module) => ({ default: module.LoginPage })));
 const SignupPage = lazy(() => import("@/routes/AuthPages").then((module) => ({ default: module.SignupPage })));
+const EmailVerifiedPage = lazy(() => import("@/pages/auth/EmailVerifiedPage").then((module) => ({ default: module.EmailVerifiedPage })));
 const VerifyEmailPage = lazy(() => import("@/routes/AuthPages").then((module) => ({ default: module.VerifyEmailPage })));
 const CreatePinPage = lazy(() => import("@/routes/AuthPages").then((module) => ({ default: module.CreatePinPage })));
 const CreatePanicPinPage = lazy(() => import("@/routes/AuthPages").then((module) => ({ default: module.CreatePanicPinPage })));
@@ -114,6 +115,7 @@ export function AppRoutes() {
       <Route element={lazyElement(PrivateRouteProviders, true)}>
         <Route path="/login" element={lazyElement(LoginPage)} />
         <Route path="/signup" element={lazyElement(SignupPage)} />
+        <Route path="/email-verified" element={lazyElement(EmailVerifiedPage)} />
         <Route path="/verify-email" element={lazyElement(VerifyEmailPage)} />
         <Route path="/create-pin" element={lazyElement(CreatePinPage)} />
         <Route path="/create-panic-pin" element={lazyElement(CreatePanicPinPage)} />

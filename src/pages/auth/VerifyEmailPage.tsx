@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Mail, ArrowLeft, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
@@ -27,7 +29,7 @@ export function VerifyEmailPage() {
     if (!email) {
       toast({
         title: 'Missing email',
-        description: 'Go back to sign up and try again.',
+        description: 'Enter your account email address below.',
         variant: 'destructive',
       });
       return;
@@ -80,7 +82,7 @@ export function VerifyEmailPage() {
     if (!email) {
       toast({
         title: 'Missing email',
-        description: 'Go back to sign up and try again.',
+        description: 'Enter your account email address below.',
         variant: 'destructive',
       });
       return;
@@ -107,8 +109,8 @@ export function VerifyEmailPage() {
       }
 
       toast({
-        title: 'Code sent',
-        description: 'A new verification code has been sent to your email.',
+        title: 'Check your inbox',
+        description: 'If this address belongs to an account awaiting verification, a new email will arrive shortly.',
       });
     } catch {
       toast({
@@ -138,11 +140,15 @@ export function VerifyEmailPage() {
           </div>
           <h1 className="text-2xl font-bold text-foreground mb-2">Verify your email</h1>
           <p className="text-muted-foreground">
-            We&apos;ve sent a 6-digit code to{email ? ` ${email}` : ' your email'}. Enter it below to verify your account.
+            Enter your account email and the 6-digit code from your verification email. You can also request a new email below.
           </p>
         </div>
 
         <div className="space-y-6">
+          <div className="space-y-2">
+            <Label htmlFor="verification-email">Account email address</Label>
+            <Input id="verification-email" type="email" autoComplete="email" maxLength={254} required value={email} onChange={(event) => { setEmail(event.target.value); setCode(''); }} />
+          </div>
           <div className="flex justify-center">
             <InputOTP maxLength={6} value={code} onChange={setCode}>
               <InputOTPGroup>
@@ -162,14 +168,14 @@ export function VerifyEmailPage() {
 
           <div className="text-center">
             <p className="text-sm text-muted-foreground mb-2">Didn&apos;t receive the code?</p>
-            <Button variant="ghost" size="sm" disabled={resending} onClick={handleResend}>
-              {resending ? 'Sending...' : 'Resend code'}
+            <Button variant="ghost" size="sm" disabled={resending || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())} onClick={handleResend}>
+              {resending ? 'Sending...' : 'Send a new verification email'}
             </Button>
           </div>
 
           <div className="text-center pt-4 border-t border-border">
-            <Link to="/signup" className="text-sm text-primary hover:underline">
-              Use a different email
+            <Link to="/login" className="text-sm text-primary hover:underline">
+              Sign in
             </Link>
           </div>
         </div>

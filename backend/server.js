@@ -28,6 +28,10 @@ process.on("uncaughtException", (e) => console.error("[uncaughtException]", e));
 
 app.set("etag", false);
 
+// Includes middleware failures before the authentication router is reached.
+const { verificationBrowserErrors } = require("./email_verification_route");
+app.use(verificationBrowserErrors(process.env.PUBLIC_WEB_BASE_URL || "https://anycircumstances.com"));
+
 const webhookCircuitBreaker = createFixedWindowLimiter({
   name: "signed_webhook_global",
   windowMs: 60_000,
