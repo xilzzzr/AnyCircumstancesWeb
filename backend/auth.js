@@ -6,7 +6,7 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const nodemailer = require("nodemailer");
 const Stripe = require("stripe");
-const { escapeHtml, renderAnyCircumstancesEmail } = require("./emails");
+const { escapeHtml, emailSender, renderAnyCircumstancesEmail, renderEmergencyEmail } = require("./emails");
 const { currentApnsEnv } = require("./push_notifications");
 const {
   ensureAppleAccountToken,
@@ -17,6 +17,8 @@ const {
 } = require("./apple_subscriptions");
 const { purgeVaultFiles, deleteUserRecords } = require("./account_lifecycle");
 const { createFixedWindowGate, positiveInt } = require("./security");
+const { consumeEmailVerificationByTokenOnly } = require("./email_verification");
+const { createEmailVerificationHandler } = require("./email_verification_route");
 const router = express.Router();
 
 function asyncHandler(fn) {
@@ -44,7 +46,6 @@ const {
   SMTP_USER,
   SMTP_PASS,
   SMTP_SECURE,
-  EMAIL_FROM,
   STRIPE_SECRET_KEY,
 } = process.env;
 
@@ -217,53 +218,54 @@ function getMailer() {
 
 async function sendVerificationEmail(toEmail, code, verifyUrl) {
   const transporter = getMailer();
-  const from = EMAIL_FROM || `anycircumstances <${SMTP_USER || "no-reply@localhost"}>`;
+  const from = emailSender();
 
   if (!transporter) {
     console.error("[MAILER] Missing SMTP env vars; skipping verification email.");
     return { ok: false, skipped: true };
   }
 
-  const subject = "Your anycircumstances verification code";
-const rendered = renderAnyCircumstancesEmail({
-  title: "Verify your email",
-  bodyHtml:
-    `<p style="margin:0 0 12px;">Your verification code:</p>` +
-    `<div style="font-family:Arial,Helvetica,sans-serif;font-size:28px;font-weight:800;letter-spacing:2px;background:#f1f5f9;color:#0b1220;padding:12px 14px;border-radius:14px;display:inline-block;">${escapeHtml(code)}</div>` +
-    `<p style="margin:14px 0 0;">Or verify instantly using the button below.</p>`,
-  ctaText: "Verify email",
-  ctaUrl: verifyUrl,
-  footerNote: "If you didn’t request this, you can ignore this email."
-});
+  const subject = "Verify your AnyCircumstances email";
+  const rendered = renderAnyCircumstancesEmail({
+    title: "Verify your email",
+    preview: "Confirm your email address to finish setting up your account.",
+    bodyText: "Thanks for creating your AnyCircumstances account. Confirm your email address to finish setting up your account.",
+    verificationCode: code,
+    info: { title: "Valid for 48 hours", text: "For security, this link and code expire after 48 hours." },
+    ctaText: "Verify email",
+    ctaUrl: verifyUrl,
+    footerNote: "If you didn't create an AnyCircumstances account, you can safely ignore this email."
+  });
 
-const text = rendered.text;
-const html = rendered.html;
+  const text = rendered.text;
+  const html = rendered.html;
   await transporter.sendMail({ from, to: toEmail, subject, text, html });
   return { ok: true };
 }
 
 async function sendPasswordResetEmail(toEmail, resetUrl) {
   const transporter = getMailer();
-  const from = EMAIL_FROM || `anycircumstances <${SMTP_USER || "no-reply@localhost"}>`;
+  const from = emailSender();
 
   if (!transporter) {
     console.error("[MAILER] Missing SMTP env vars; skipping password reset email.");
     return { ok: false, skipped: true };
   }
 
-  const subject = "Reset your anycircumstances password";
-const rendered = renderAnyCircumstancesEmail({
-  title: "Reset your password",
-  bodyHtml:
-    `<p style="margin:0 0 12px;">We received a request to reset your password.</p>` +
-    `<p style="margin:0;">Use the button below to choose a new password.</p>`,
-  ctaText: "Reset password",
-  ctaUrl: resetUrl,
-  footerNote: "If you didn’t request this, you can ignore this email."
-});
+  const subject = "Reset your AnyCircumstances password";
+  const rendered = renderAnyCircumstancesEmail({
+    title: "Reset your password",
+    preview: "Choose a new password for your AnyCircumstances account.",
+    bodyHtml:
+      `<p style="margin:0 0 12px;">We received a request to reset the password for your AnyCircumstances account.</p>` +
+      `<p style="margin:0;">Use the button below to choose a new password.</p>`,
+    ctaText: "Reset password",
+    ctaUrl: resetUrl,
+    footerNote: "If you didn't request this, you can safely ignore this email. Your password will not change unless you use the link above."
+  });
 
-const text = rendered.text;
-const html = rendered.html;
+  const text = rendered.text;
+  const html = rendered.html;
   await transporter.sendMail({ from, to: toEmail, subject, text, html });
   return { ok: true };
 }
@@ -404,25 +406,6 @@ async function consumeEmailVerificationForUser(conn, userId, code) {
   return { ok: true };
 }
 
-async function consumeEmailVerificationByTokenOnly(conn, rawToken) {
-  const tokenHash = sha256Hex(rawToken);
-
-  const [rows] = await conn.query(
-    "SELECT id, user_id, expires_at, used_at FROM email_verification_tokens WHERE token_hash = ? LIMIT 1 FOR UPDATE",
-    [tokenHash]
-  );
-
-  const row = rows[0];
-  if (!row) return { ok: false, reason: "invalid_token" };
-  if (row.used_at) return { ok: false, reason: "already_used" };
-  if (new Date(row.expires_at).getTime() < nowUtc().getTime()) return { ok: false, reason: "expired" };
-
-  await conn.query("UPDATE email_verification_tokens SET used_at = NOW() WHERE user_id = ? AND used_at IS NULL", [row.user_id]);
-  await conn.query("UPDATE users SET email_verified_at = NOW() WHERE id = ? AND email_verified_at IS NULL", [row.user_id]);
-
-  return { ok: true };
-}
-
 async function issueRefreshToken(conn, userId) {
   const raw = crypto.randomBytes(48).toString("base64url");
   const tokenHash = sha256Hex(raw);
@@ -550,7 +533,7 @@ router.post(
 
       const credentials = await createEmailVerificationCredentials(conn, userId);
       verifyCode = credentials.code;
-      verifyUrl = `${publicApiBaseUrl}/auth/verify-email?token=${encodeURIComponent(credentials.linkToken)}`;
+      verifyUrl = `${publicApiBaseUrl}/auth/verify-email/browser?token=${encodeURIComponent(credentials.linkToken)}`;
 
       await conn.commit();
     } catch (e) {
@@ -580,33 +563,10 @@ router.post(
 );
 
 router.get(
-  "/verify-email",
-  asyncHandler(async (req, res) => {
-    const token = String(req.query?.token || "");
-    if (!/^[A-Za-z0-9_-]{20,200}$/.test(token)) return res.status(400).json({ ok: false, error: "invalid_token" });
-
-    const conn = await pool.getConnection();
-    try {
-      await conn.beginTransaction();
-
-      const out = await consumeEmailVerificationByTokenOnly(conn, token);
-      if (!out.ok) {
-        await conn.rollback();
-        return res.status(400).json({ ok: false, error: out.reason });
-      }
-
-      await conn.commit();
-      return res.json({ ok: true });
-    } catch (e) {
-      try {
-        await conn.rollback();
-      } catch {}
-      logError("verify-email", e);
-      return res.status(500).json({ ok: false, error: "server_error" });
-    } finally {
-      conn.release();
-    }
-  })
+  ["/verify-email", "/verify-email/browser"],
+  asyncHandler(createEmailVerificationHandler({
+    pool, consumeToken: consumeEmailVerificationByTokenOnly, publicWebBaseUrl, logError
+  }))
 );
 
 router.post(
@@ -779,7 +739,7 @@ router.post(
 
       const credentials = await createEmailVerificationCredentials(conn, user.id);
       verifyCode = credentials.code;
-      verifyUrl = `${publicApiBaseUrl}/auth/verify-email?token=${encodeURIComponent(credentials.linkToken)}`;
+      verifyUrl = `${publicApiBaseUrl}/auth/verify-email/browser?token=${encodeURIComponent(credentials.linkToken)}`;
 
       await conn.commit();
     } catch (e) {
@@ -1838,7 +1798,7 @@ router.post(
 
 async function dispatchEmergencyForUser(conn, userId, req) {
   const transporter = getMailer();
-  const from = EMAIL_FROM || `anycircumstances <${SMTP_USER || "no-reply@localhost"}>`;
+  const from = emailSender();
   if (!transporter) {
     return { ok: false, error: "mailer_not_configured", emailedContacts: 0, linksCreated: 0 };
   }
@@ -1907,39 +1867,8 @@ links.push(publicBase + "/share#token=" + encodeURIComponent(token));
       linksCreated += 1;
     }
 
-    const subject = "Emergency access link (manual trigger)";
-    const intro = name ? `Hi ${name},` : "Hi,";
-    const bodyLines = [
-      intro,
-      "",
-      "This is an automated message because the account owner triggered emergency access.",
-      ownerEmail ? `Account: ${ownerEmail}` : "",
-      "",
-      "Links:",
-    ].concat(links.map((l) => "- " + l));
-
-    if (missingSetup) {
-      bodyLines.push(
-        "",
-        "Note: Your emergency contact setup is incomplete (no public key on file).",
-        "You can still open the link to complete setup, but files may not decrypt unless the owner pre-shared access."
-      );
-    }
-
-const rendered = renderAnyCircumstancesEmail({
-  title: "Emergency access link",
-  bodyHtml:
-    `<p style="margin:0 0 12px 0;">This is an automated message because the account owner triggered emergency access.</p>` +
-    (ownerEmail ? `<p style="margin:0 0 12px 0;"><b>Account:</b> ${escapeHtml(ownerEmail)}</p>` : ``) +
-    `<p style="margin:0 0 8px 0;"><b>Links</b></p>` +
-    `<ul style="margin:0 0 12px 18px;padding:0;">` +
-    links.map((l) => `<li><a href="${l}">${escapeHtml(l)}</a></li>`).join("") +
-    `</ul>` +
-    (missingSetup ? `<p style="margin:12px 0 0 0;"><b>Note:</b> Setup is incomplete (no public key on file).</p>` : ``),
-  ctaText: "Open first link",
-  ctaUrl: links[0] || publicBase,
-  footerNote: "If you weren’t expecting this, you can ignore this email."
-});
+    const subject = "AnyCircumstances: Emergency access link (manual trigger)";
+    const rendered = renderEmergencyEmail({ name, ownerEmail, links, missingSetup });
 
 await transporter.sendMail({
   from,
@@ -1975,7 +1904,7 @@ router.post(
     if (!consumeEmergencyDispatchQuota(userId, res)) return;
 
     const transporter = getMailer();
-    const from = EMAIL_FROM || `anycircumstances <${SMTP_USER || "no-reply@localhost"}>`;
+    const from = emailSender();
     if (!transporter) return res.status(500).json({ ok: false, error: "mailer_not_configured" });
 
     const publicBase = String(process.env.PUBLIC_APP_BASE_URL || "https://anycircumstances.com").replace(/\/+$/, "");
@@ -2044,39 +1973,8 @@ links.push(publicBase + "/share#token=" + encodeURIComponent(token));
           linksCreated += 1;
         }
 
-        const subject = "Emergency access link (manual trigger)";
-        const intro = name ? `Hi ${name},` : "Hi,";
-        const bodyLines = [
-          intro,
-          "",
-          "This is an automated message because the account owner triggered emergency access.",
-          ownerEmail ? `Account: ${ownerEmail}` : "",
-          "",
-          "Links:",
-        ].concat(links.map((l) => "- " + l));
-
-        if (missingSetup) {
-          bodyLines.push(
-            "",
-            "Note: Your emergency contact setup is incomplete (no public key on file).",
-            "You can still open the link to complete setup, but files may not decrypt unless the owner pre-shared access."
-          );
-        }
-
-const rendered = renderAnyCircumstancesEmail({
-  title: "Emergency access link",
-  bodyHtml:
-    `<p style="margin:0 0 12px 0;">This is an automated message because the account owner triggered emergency access.</p>` +
-    (ownerEmail ? `<p style="margin:0 0 12px 0;"><b>Account:</b> ${escapeHtml(ownerEmail)}</p>` : ``) +
-    `<p style="margin:0 0 8px 0;"><b>Links</b></p>` +
-    `<ul style="margin:0 0 12px 18px;padding:0;">` +
-    links.map((l) => `<li><a href="${l}">${escapeHtml(l)}</a></li>`).join("") +
-    `</ul>` +
-    (missingSetup ? `<p style="margin:12px 0 0 0;"><b>Note:</b> Setup is incomplete (no public key on file).</p>` : ``),
-  ctaText: "Open first link",
-  ctaUrl: links[0] || publicBase,
-  footerNote: "If you weren’t expecting this, you can ignore this email."
-});
+        const subject = "AnyCircumstances: Emergency access link (manual trigger)";
+    const rendered = renderEmergencyEmail({ name, ownerEmail, links, missingSetup });
 
 await transporter.sendMail({
   from,
@@ -2230,7 +2128,7 @@ async function consumeEmergencyContactVerificationByToken(conn, code) {
 
 async function sendEmergencyContactInviteEmail(toEmail, contactName, ownerEmail, verifyUrl) {
   const transporter = getMailer();
-  const from = EMAIL_FROM || `anycircumstances <${SMTP_USER || "no-reply@localhost"}>`;
+  const from = emailSender();
 
   if (!transporter) {
     console.error("[MAILER] Missing SMTP env vars; skipping emergency contact invite email.");
@@ -2240,27 +2138,28 @@ async function sendEmergencyContactInviteEmail(toEmail, contactName, ownerEmail,
   const safeOwner = String(ownerEmail || "").trim() || "someone you know";
   const safeName = String(contactName || "").trim();
 
-  const subject = `Confirm you’re an emergency contact for ${safeOwner}`;
+  const subject = `AnyCircumstances: Confirm you’re an emergency contact for ${safeOwner}`;
 
   const introLine = safeName ? `Hi ${safeName},` : "Hi,";
-const rendered = renderAnyCircumstancesEmail({
-  title: "Confirm emergency contact",
-  bodyHtml:
-    `<p style="margin:0 0 12px 0">${escapeHtml(introLine)}</p>` +
-    `<p style="margin:0 0 12px 0"><b>${escapeHtml(safeOwner)}</b> added you as an emergency contact in <b>anycircumstances</b>.</p>` +
-    `<p style="margin:16px 0 8px 0"><b>What this means</b></p>` +
-    `<ul style="margin:0 0 16px 18px;padding:0">` +
-    `<li>You are not taking on any responsibility for them.</li>` +
-    `<li>If they miss scheduled check-ins and the grace period expires, you may receive a secure email with links to files they assigned to you.</li>` +
-    `<li>You do not need an account.</li>` +
-    `</ul>` +
-    `<p style="margin:0">Confirm using the button below.</p>`,
-  ctaText: "Confirm emergency contact",
-  ctaUrl: verifyUrl,
-  footerNote: "If you weren’t expecting this, you can ignore this email."
-});
-const text = rendered.text;
-const html = rendered.html;
+  const rendered = renderAnyCircumstancesEmail({
+    title: "Confirm emergency contact",
+    preview: "Someone you know has invited you to be an emergency contact.",
+    bodyHtml:
+      `<p style="margin:0 0 12px 0">${escapeHtml(introLine)}</p>` +
+      `<p style="margin:0 0 12px 0"><b>${escapeHtml(safeOwner)}</b> added you as an emergency contact in <b>AnyCircumstances</b>.</p>` +
+      `<h2 style="margin:16px 0 8px;font-size:18px;color:#d6e6df">What this means</h2>` +
+      `<ul style="margin:0 0 16px 18px;padding:0">` +
+      `<li>You are not taking on any responsibility for them.</li>` +
+      `<li>If they miss scheduled check-ins and the grace period expires, you may receive a secure email with links to files they assigned to you.</li>` +
+      `<li>You do not need an account.</li>` +
+      `</ul>` +
+      `<p style="margin:0">Confirm using the button below.</p>`,
+    ctaText: "Confirm emergency contact",
+    ctaUrl: verifyUrl,
+    footerNote: "If you weren’t expecting this, you can ignore this email."
+  });
+  const text = rendered.text;
+  const html = rendered.html;
   await transporter.sendMail({ from, to: toEmail, subject, text, html });
   return { ok: true };
 }

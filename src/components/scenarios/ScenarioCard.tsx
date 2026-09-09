@@ -6,12 +6,13 @@ export function ScenarioCard({ scenario, expanded, onToggle, compact = false }: 
   const detailId = `scenario-detail-${scenario.id}`;
   return (
     <article className={`scenario-card scenario-${scenario.tone} ${expanded ? "is-expanded" : ""}`}>
-      <button className="scenario-card-main" onClick={onToggle} aria-expanded={expanded} aria-controls={detailId}>
-        <span className="scenario-number">{scenario.eyebrow}</span>
-        <span className="scenario-title">{scenario.title}</span>
-        <span className="scenario-situation">{scenario.situation}</span>
-        <span className="scenario-open">{expanded ? "Close story" : "See how I’d set this up"}<ChevronDown aria-hidden="true" /></span>
-      </button>
+      <div className="scenario-card-main">
+        <p className="scenario-number">{scenario.category}</p>
+        <p className="mt-3 text-xs text-muted-foreground">{scenario.eyebrow}</p>
+        <h3 className="scenario-title"><Link to={`/scenarios#scenario-${scenario.id}`}>{scenario.title}</Link></h3>
+        <p className="scenario-situation">{scenario.situation}</p>
+        <button className="scenario-open" onClick={onToggle} aria-expanded={expanded} aria-controls={detailId}>{expanded ? "Close story" : "See how I’d set this up"}<ChevronDown aria-hidden="true" /></button>
+      </div>
       {expanded && (
         <div className="scenario-detail" id={detailId}>
           <div className="scenario-story"><span>What could go wrong</span><p>{scenario.risk}</p></div>

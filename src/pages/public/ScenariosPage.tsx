@@ -2,7 +2,6 @@ import { useMemo, useState } from "react";
 import { ArrowRight, RefreshCw } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Seo } from "@/components/seo/Seo";
 import { ScenarioCard } from "@/components/scenarios/ScenarioCard";
 import { categories, scenarios, type ScenarioCategory } from "@/data/scenarios";
 
@@ -38,7 +37,7 @@ export function ScenariosPage() {
 
   return (
     <div className="scenarios-page">
-      <Seo title="Ideas and scenarios | AnyCircumstances" description="Explore practical ways to prepare private information for the people who may one day need it." path="/scenarios" />
+
       <section className="scenarios-hero">
         <div className="container mx-auto px-4">
           <span className="micro-label"><span className="status-dot" /> SCENARIO EXPLORER</span>

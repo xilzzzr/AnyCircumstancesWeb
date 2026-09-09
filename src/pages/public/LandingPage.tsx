@@ -8,10 +8,10 @@ import {
   ArrowRight,
   CheckCircle2,
   Zap,
-  FileCheck,
-  KeyRound
+  FileCheck
 } from 'lucide-react';
 import { motion } from 'framer-motion';
+import content from '@/data/publicContent.json';
 import { HomeScenarioTeaser } from '@/components/scenarios/HomeScenarioTeaser';
 
 const features = [
@@ -23,7 +23,7 @@ const features = [
   {
     icon: Clock,
     title: 'Verification Schedule',
-    description: 'Choose daily, weekly, or monthly check-ins. Miss them, and your contacts are notified.',
+    description: 'Choose daily, weekly, or monthly check-ins. If you miss one, your configured grace period begins before any recipient delivery occurs.',
   },
   {
     icon: Users,
@@ -36,14 +36,9 @@ const features = [
     description: 'Choose which files are included in your emergency package. Full control.',
   },
   {
-    icon: KeyRound,
-    title: 'PIN or Passkey',
-    description: 'Verify yourself with a simple PIN or biometric passkey. Fast and secure.',
-  },
-  {
     icon: Zap,
-    title: 'Instant Delivery',
-    description: 'When triggered, your contacts receive a secure link immediately.',
+    title: 'Recipient Delivery',
+    description: 'If your grace period expires without a successful check-in, designated recipients are emailed a secure access link for the files assigned to them.',
   },
 ];
 
@@ -70,7 +65,7 @@ export function LandingPage() {
             >
               <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 mb-6">
                 <Shield className="h-4 w-4 text-primary" />
-                <span className="text-sm font-medium text-primary">Your data, your terms</span>
+                <span className="text-sm font-medium text-primary">{content.home.eyebrow}</span>
               </div>
             </motion.div>
 
@@ -79,31 +74,14 @@ export function LandingPage() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: 0.1 }}
               className="text-4xl md:text-5xl lg:text-6xl font-bold text-vault-foreground mb-6 leading-tight"
-            >
-              Secure emergency data delivery for{' '}
-              <span className="gradient-text">when you need it most</span>
-            </motion.h1>
+            >{content.home.h1}</motion.h1>
 
             <motion.p
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: 0.2 }}
               className="text-lg md:text-xl text-vault-foreground/70 mb-8 max-w-2xl mx-auto"
-            >
-              Store your important files with client-side encryption. Learn exactly how our{' '}
-              <Link to="/how-it-works" className="underline underline-offset-4 hover:opacity-90">
-                emergency check-in system works
-              </Link>
-              , review our{' '}
-              <Link to="/security" className="underline underline-offset-4 hover:opacity-90">
-                security and recovery model
-              </Link>
-              , or compare{' '}
-              <Link to="/pricing" className="underline underline-offset-4 hover:opacity-90">
-                secure vault pricing plans
-              </Link>
-              . If you stop checking in, your trusted contacts automatically receive secure access.
-            </motion.p>
+            >{content.home.intro}</motion.p>
 
             
 
@@ -116,21 +94,17 @@ export function LandingPage() {
               transition={{ duration: 0.5, delay: 0.3 }}
               className="flex flex-col sm:flex-row gap-4 justify-center"
             >
-              <Link to="/signup">
-                <Button size="lg" className="w-full sm:w-auto gap-2 shadow-glow">
-                  Get started free
+              <Button asChild size="lg" className="w-full sm:w-auto gap-2 shadow-glow"><Link to="/signup">
+                  Create Your Vault
                   <ArrowRight className="h-4 w-4" />
-                </Button>
-              </Link>
-              <Link to="/how-it-works">
-                <Button
+                </Link></Button>
+              <Button asChild
                   size="lg"
                   variant="outline"
                   className="w-full sm:w-auto bg-transparent border-vault-foreground/30 text-vault-foreground hover:bg-vault-foreground/10"
-                >
-                  See how it works
-                </Button>
-              </Link>
+                ><Link to="/how-it-works">
+                  See How It Works
+                </Link></Button>
             </motion.div>
 
             {/* Trust badges */}
@@ -154,6 +128,7 @@ export function LandingPage() {
         </div>
       </section>
 
+      <section className="container mx-auto max-w-6xl px-4 py-16"><h2 className="text-3xl font-semibold md:text-4xl">{content.home.heading}</h2><p className="mt-5 max-w-3xl text-lg text-muted-foreground">{content.home.sectionIntro}</p><div className="mt-8 grid gap-5 md:grid-cols-3">{content.home.cards.map(card => <article key={card.heading} className="rounded-2xl border bg-card p-6"><h3 className="text-xl font-semibold">{card.heading}</h3><p className="mt-4 leading-7 text-muted-foreground">{card.text}</p><Link className="mt-5 inline-block text-primary underline underline-offset-4" to={card.path}>{card.label}</Link></article>)}</div></section>
       <HomeScenarioTeaser />
 
       {/* Features Section */}
@@ -161,24 +136,9 @@ export function LandingPage() {
         <div className="container mx-auto px-4">
           <div className="text-center mb-16">
             <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-4">
-              Security without complexity
+              Security without unnecessary exposure
             </h2>
-<p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-  We've built the most secure way to ensure your important files reach the right people at the right time.
-  Explore the full{' '}
-  <Link to="/features" className="underline underline-offset-4 hover:opacity-90">
-    emergency vault feature set
-  </Link>
-  , see the full breakdown in{' '}
-  <Link to="/security" className="underline underline-offset-4 hover:opacity-90">
-    our security page
-  </Link>{' '}
-  and the step-by-step flow in{' '}
-  <Link to="/how-it-works" className="underline underline-offset-4 hover:opacity-90">
-    how emergency delivery works
-  </Link>
-  .
-</p>          </div>
+<p className="text-lg text-muted-foreground max-w-2xl mx-auto">Files are encrypted on your device before upload, and the service stores ciphertext instead of the original file. Review the security model, recovery design, and emergency-release workflow before deciding what information belongs in your vault.</p>          </div>
 
           <div className="feature-editorial-grid grid md:grid-cols-2 lg:grid-cols-3 gap-8">
             {features.map((feature, index) => (
@@ -264,66 +224,18 @@ export function LandingPage() {
 
 
             <div className="mt-12 text-center">
-              <Link to="/how-it-works">
-                <Button variant="outline" className="gap-2">
+              <Button asChild variant="outline" className="gap-2"><Link to="/how-it-works">
                   Learn more about how it works
                   <ArrowRight className="h-4 w-4" />
-                </Button>
-              </Link>
-<Link to="/features">
-  <Button size="lg" variant="outline">
+                </Link></Button>
+<Button asChild size="lg" variant="outline"><Link to="/features">
     Explore security features
-  </Button>
-</Link>
+  </Link></Button>
             </div>
           </div>
         </div>
       </section>
 
-      {/* CTA Section */}
-      <section className="landing-cta py-24 bg-gradient-hero relative overflow-hidden">
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_left,hsl(var(--primary)/0.2),transparent_50%)]" />
-
-        <div className="container mx-auto px-4 relative">
-          <div className="max-w-2xl mx-auto text-center">
-            <h2 className="text-3xl md:text-4xl font-bold text-vault-foreground mb-4">
-              Ready to secure your legacy?
-            </h2>
-            <p className="text-lg text-vault-foreground/70 mb-8">
-              Start with our free plan. No credit card required.
-            </p>
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Link to="/signup">
-                <Button size="lg" className="w-full sm:w-auto gap-2 shadow-glow">
-                  Create your vault
-                  <ArrowRight className="h-4 w-4" />
-                </Button>
-              </Link>
-              <Link to="/pricing">
-                <Button
-                  size="lg"
-                  variant="outline"
-                  className="w-full sm:w-auto bg-transparent border-vault-foreground/30 text-vault-foreground hover:bg-vault-foreground/10"
-                >
-                  View pricing
-                </Button>
-              </Link>
-            </div>
-
-            <p className="mt-6 text-sm text-vault-foreground/70">
-              Questions? Read the{' '}
-              <Link to="/faq" className="underline underline-offset-4 hover:opacity-90">
-                FAQ
-              </Link>{' '}
-              or review{' '}
-              <Link to="/security" className="underline underline-offset-4 hover:opacity-90">
-                how we secure your files
-              </Link>
-              .
-            </p>
-          </div>
-        </div>
-      </section>
     </div>
   );
 }

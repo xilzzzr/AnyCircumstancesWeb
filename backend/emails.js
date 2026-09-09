@@ -1,112 +1,60 @@
-// backend/emails.js
-
-function escapeHtml(s) {
-  return String(s || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
+// Email-safe counterparts of the site's charcoal, soft-white and sage visual system.
+// bodyHtml is trusted application markup: escape all interpolated user content.
+function escapeHtml(value) {
+  return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
 }
-
-function renderAnyCircumstancesEmail({ title, bodyHtml, ctaText, ctaUrl, footerNote }) {
-  const safeTitle = escapeHtml(title);
-  const safeCtaText = escapeHtml(ctaText);
-  const safeUrl = String(ctaUrl || "");
-
-  const html = `<!doctype html>
-<html>
-  <body style="margin:0;padding:0;background:#0f172a;">
-    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#0f172a;padding:32px 12px;">
-      <tr>
-        <td align="center">
-          <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="width:600px;max-width:600px;border-radius:18px;overflow:hidden;background:#0b1220;">
-            <tr>
-              <td style="padding:22px 24px;background:linear-gradient(135deg,#0b1220 0%,#16263b 55%,#0b1220 100%);">
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
-                  <tr>
-                    <td style="font-family:Arial,Helvetica,sans-serif;font-size:16px;color:#e5e7eb;font-weight:700;">
-                      anycircumstances
-                    </td>
-                    <td align="right" style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#9ca3af;">
-                      Secure emergency vault
-                    </td>
-                  </tr>
-                </table>
-              </td>
-            </tr>
-
-            <tr>
-              <td style="padding:26px 24px;background:#ffffff;">
-                <div style="font-family:Arial,Helvetica,sans-serif;font-size:22px;line-height:1.25;color:#0b1220;font-weight:800;margin:0 0 10px;">
-                  ${safeTitle}
-                </div>
-
-                <div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#334155;margin:0 0 18px;">
-                  ${bodyHtml || ""}
-                </div>
-
-                ${safeUrl && safeCtaText ? `
-                <table role="presentation" cellspacing="0" cellpadding="0" style="margin:18px 0 14px;">
-                  <tr>
-                    <td style="border-radius:12px;background:#2a9d8f;">
-                      <a href="${safeUrl}" style="display:inline-block;padding:12px 16px;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#ffffff;text-decoration:none;font-weight:700;">
-                        ${safeCtaText} →
-                      </a>
-                    </td>
-                  </tr>
-                </table>
-
-                <div style="font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.6;color:#64748b;margin-top:10px;">
-                  If the button doesn’t work, paste this into your browser:
-                  <div style="word-break:break-all;color:#0f172a;margin-top:6px;">${escapeHtml(safeUrl)}</div>
-                </div>
-                ` : ""}
-
-                <div style="height:1px;background:#e5e7eb;margin:22px 0;"></div>
-
-                <div style="font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.6;color:#64748b;">
-                  ${escapeHtml(footerNote || "If you didn’t request this, you can ignore this email.")}
-                </div>
-              </td>
-            </tr>
-
-            <tr>
-              <td style="padding:16px 24px;background:#f8fafc;">
-                <div style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#64748b;line-height:1.6;">
-                  AnyCircumstances • Client-side file encryption • AES encryption
-                </div>
-              </td>
-            </tr>
-
-          </table>
-        </td>
-      </tr>
-    </table>
-  </body>
-</html>`;
-
-  const text = [
-    title || "AnyCircumstances",
-    "",
-    (bodyHtml || "")
-      .replace(/<\/li>/g, "\n")
-      .replace(/<\/p>/g, "\n")
-      .replace(/<br\s*\/?>/g, "\n")
-      .replace(/<[^>]+>/g, "")
-      .trim(),
-    "",
-    ctaText && ctaUrl ? `${ctaText}: ${ctaUrl}` : "",
-    "",
-    footerNote || "If you didn’t request this, you can ignore this email."
-  ]
-    .filter(Boolean)
-    .join("\n");
-
+function emailUrl(value) {
+  if (!value) return '';
+  const url = new URL(String(value));
+  if (!['https:', 'http:'].includes(url.protocol)) throw new Error('Unsupported email link protocol');
+  return escapeHtml(url.href);
+}
+function emailSender(env = process.env) {
+  const configured = String(env.EMAIL_FROM || env.MAIL_FROM || env.SMTP_FROM || env.SMTP_USER || '').trim();
+  const address = configured.match(/<([^<>]+)>/)?.[1] || configured;
+  return address ? { name: 'AnyCircumstances', address } : undefined;
+}
+function htmlToText(html) {
+  return String(html || '').replace(/<a\b[^>]*href="([^"]+)"[^>]*>(.*?)<\/a>/gs, '$2 ($1)')
+    .replace(/<\/(?:p|li|h[1-6])>|<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#039;/g, "'").replace(/&amp;/g, '&').trim();
+}
+function emailButton(label, url) {
+  return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0"><tr><td bgcolor="#d6e6df" style="border-radius:24px"><a href="${emailUrl(url)}" style="display:inline-block;padding:14px 24px;border:1px solid #d6e6df;border-radius:24px;color:#111513;font-size:16px;font-weight:700;text-decoration:none">${escapeHtml(label)}</a></td></tr></table>`;
+}
+function renderAnyCircumstancesEmail({ title, heading = title, preview = heading, bodyHtml, bodyText, ctaText, ctaUrl, secondaryCta, verificationCode, info, securityNotice, footerNote }) {
+  const notice = securityNotice || footerNote;
+  const body = bodyHtml || `<p style="margin:0;white-space:pre-line">${escapeHtml(bodyText)}</p>`;
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(title)}</title></head>
+<body style="margin:0;padding:0;background:#050505;font-family:'DM Sans',Arial,Helvetica,sans-serif;color:#f4f5f2">
+<div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all">${escapeHtml(preview)}</div>
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" bgcolor="#050505"><tr><td align="center" style="padding:28px 12px">
+<!--[if mso]><table role="presentation" width="600"><tr><td><![endif]-->
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" bgcolor="#111513" style="max-width:600px;border:1px solid #39433e;border-radius:24px">
+<tr><td style="padding:28px 24px;border-bottom:1px solid #39433e;font-size:20px;font-weight:700;color:#d6e6df">AnyCircumstances</td></tr>
+<tr><td style="padding:32px 24px;font-size:16px;line-height:1.65;color:#e0e5e1;overflow-wrap:anywhere;word-break:break-word">
+<h1 style="margin:0 0 18px;font-size:28px;line-height:1.2;font-weight:600;color:#f4f5f2">${escapeHtml(heading)}</h1>
+${body}
+${ctaText && ctaUrl ? emailButton(ctaText, ctaUrl) : ''}
+${verificationCode ? `<p style="margin:20px 0 10px">Or enter this verification code:</p><div style="padding:18px;background:#24322b;border:1px solid #62796b;border-radius:16px;font-family:monospace;font-size:32px;letter-spacing:6px;text-align:center;color:#f4f5f2">${escapeHtml(verificationCode)}</div>` : ''}
+${info ? `<div style="margin-top:24px;padding:16px;border:1px solid #62796b;border-radius:16px"><h2 style="font-size:17px;margin:0 0 8px;color:#d6e6df">${escapeHtml(info.title || 'Please note')}</h2>${escapeHtml(info.text)}</div>` : ''}
+${ctaText && ctaUrl ? `<p style="margin:24px 0 8px;font-size:14px;color:#b8c5be">If the button above doesn't work, copy and paste this link into your browser:</p><a href="${emailUrl(ctaUrl)}" style="font-size:14px;color:#d6e6df;word-break:break-all;overflow-wrap:anywhere">${escapeHtml(ctaUrl)}</a>` : ''}
+${secondaryCta ? `<p><a href="${emailUrl(secondaryCta.url)}" style="color:#d6e6df">${escapeHtml(secondaryCta.label)}</a></p>` : ''}
+${notice ? `<p style="margin:28px 0 0;padding-top:20px;border-top:1px solid #39433e;font-size:14px;color:#b8c5be">${escapeHtml(notice)}</p>` : ''}
+</td></tr><tr><td style="padding:24px;border-top:1px solid #39433e;font-size:13px;line-height:1.7;color:#b8c5be"><strong>AnyCircumstances</strong><br>Your information, delivered when it matters.</td></tr></table>
+<!--[if mso]></td></tr></table><![endif]-->
+</td></tr></table></body></html>`;
+  const text = [heading, bodyText || htmlToText(body), ctaText && ctaUrl ? `${ctaText}: ${ctaUrl}` : '', verificationCode ? `Or enter this verification code: ${verificationCode}` : '', info ? `${info.title || 'Please note'}: ${info.text}` : '', secondaryCta ? `${secondaryCta.label}: ${secondaryCta.url}` : '', notice, 'AnyCircumstances', 'Your information, delivered when it matters.'].filter(Boolean).join('\n\n');
   return { html, text };
 }
-
-module.exports = {
-  escapeHtml,
-  renderAnyCircumstancesEmail
-};
+function renderEmergencyEmail({ name, ownerEmail, links, missingSetup, scheduled = false }) {
+  const context = scheduled ? 'The account owner missed a required check-in and their grace period has ended.' : 'The account owner triggered emergency access.';
+  return renderAnyCircumstancesEmail({
+    title: 'Emergency access', preview: 'Important information has been shared with you through AnyCircumstances.',
+    bodyHtml: `<p>${escapeHtml(name ? `Hi ${name},` : 'Hi,')}</p><h2 style="font-size:18px;color:#d6e6df">Why you received this</h2><p>${context}</p>${ownerEmail ? `<p><strong>Account:</strong> ${escapeHtml(ownerEmail)}</p>` : ''}<h2 style="font-size:18px;color:#d6e6df">Shared information</h2><p>Open each secure link to access the files assigned to you.</p><ol style="padding-left:24px">${links.map((url, i) => `<li style="margin-bottom:16px"><a href="${emailUrl(url)}" style="color:#d6e6df">Open shared file ${i + 1}</a><br><span style="font-size:13px;word-break:break-all">${escapeHtml(url)}</span></li>`).join('')}</ol>`,
+    ctaText: 'Open shared information', ctaUrl: links[0],
+    info: missingSetup ? { title: 'Contact setup required', text: 'Your emergency contact setup is incomplete. Open a link to complete setup. Files may not decrypt unless the account owner shared access with you in advance.' } : undefined,
+    securityNotice: 'These links provide access to private information. Keep them secure and do not forward this email. If this is unexpected, contact the account owner through a trusted channel.'
+  });
+}
+module.exports = { escapeHtml, emailSender, emailButton, renderAnyCircumstancesEmail, renderEmergencyEmail };
