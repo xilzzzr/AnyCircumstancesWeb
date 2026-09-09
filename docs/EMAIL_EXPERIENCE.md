@@ -61,3 +61,15 @@ Deploy the frontend and Caddy route update before or alongside the backend. Add 
 6. Invite and resend to a controlled emergency contact. Complete contact verification/setup. Exercise manual and panic-PIN delivery with synthetic files and verify every assigned-file link.
 7. With controlled test accounts, trigger an overdue grace reminder and automatic delivery after grace expiry. Check timing and setup-incomplete messaging; do not use real emergency contacts for this test.
 8. Confirm no content overflows on narrow screens, text and links remain readable, and keyboard focus is visible on the result/resend pages.
+
+## Design and setup follow-up
+
+Emails now use a dark sage gradient header, layered charcoal card, gradient code/info panels and a sage gradient action button. Every gradient has a solid-color fallback; dark color-scheme hints help supporting clients retain the design. Run `node scripts/preview-emails.mjs` to create synthetic HTML/text previews under `dist/email-previews`, including a desktop/phone-width preview viewer.
+
+The setup guide no longer pretends a step is complete when it is clicked. It links to existing plan, verification, contact and upload pages; the dashboard links back to the guide. `/verification` redirects to `/app/verification`, and the former `/app/billing/payment` destination redirects to billing. Add `/verification` to the production Caddy SPA matcher along with `/email-verified`.
+
+Protected app routes now wait for the session request before deciding to redirect to login. Verification settings have bounded loading, explicit error/retry recovery, a setup return link and inline save controls. Network errors no longer masquerade as free-plan restrictions.
+
+Removed `body > #root > div { min-height: 100vh; }`: it applied viewport height to utility siblings such as toast regions as well as page shells. Layout shells retain their own minimum heights. This fixes that source of excess document height without hiding content or suppressing scrolling. Live browser geometry still needs confirmation because no browser was connected in the development session.
+
+Follow-up checks: production build, 20 backend tests, targeted frontend lint, compiled setup-link checks (`NODE_ENV=production node scripts/check-setup.mjs`) and email-result checks passed. Confirm in deployment that the footer is the end of the document, toast notifications do not add document height, all four setup destinations open on mobile, and settings errors offer recovery.

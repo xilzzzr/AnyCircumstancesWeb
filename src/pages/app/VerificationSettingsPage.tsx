@@ -41,82 +41,50 @@ export function VerificationSettingsPage() {
   const [loadingInitial, setLoadingInitial] = useState(true);
 
   const [isPaid, setIsPaid] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const [attempt, setAttempt] = useState(0);
 
   const { toast } = useToast();
 
   useEffect(() => {
     let cancelled = false;
-
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 15000);
+    setLoadingInitial(true);
+    setLoadError("");
     (async () => {
       try {
+        const options = { credentials: "include" as const, signal: controller.signal };
         const [billingResp, settingsResp] = await Promise.all([
-          fetch("/auth/billing/status", { method: "GET", credentials: "include" }).catch(() => null),
-          fetch("/auth/verification-settings", { method: "GET", credentials: "include" }).catch(() => null),
+          fetch("/auth/billing/status", options),
+          fetch("/auth/verification-settings", options),
         ]);
-
+        const [billing, data] = await Promise.all([
+          billingResp.json() as Promise<BillingStatusResp>,
+          settingsResp.json() as Promise<SettingsResp>,
+        ]);
         if (cancelled) return;
-
-        if (billingResp) {
-          const billing = (await billingResp.json().catch(() => null)) as BillingStatusResp | null;
-          const s = String(billing?.status || "");
-          setIsPaid(s === "active" || s === "trialing");
-        } else {
-          setIsPaid(false);
-        }
-
-        if (!settingsResp) {
-          toast({
-            title: "Could not load settings",
-            description: "You are on a Free plan therefore some functionality is limited.",
-            variant: "destructive",
-          });
+        if (billingResp.status === 401 || settingsResp.status === 401) {
+          setLoadError("Your session has expired. Sign in again to view your settings.");
           return;
         }
-
-        const data = (await settingsResp.json().catch(() => null)) as SettingsResp | null;
-
-        if (!settingsResp.ok || !data?.ok) {
-          const code = data?.error || "load_failed";
-          if (code === "not_authenticated") {
-            toast({
-              title: "Session expired",
-              description: "Please log in again.",
-              variant: "destructive",
-            });
-          } else if (code === "payment_required") {
-            setIsPaid(false);
-          } else {
-            toast({
-              title: "Could not load settings",
-              description: "You are on a Free plan therefore some functionality is limited.",
-            });
-          }
-          return;
+        if (!billingResp.ok || !settingsResp.ok || !data?.ok || !data.settings) {
+          throw new Error("settings_unavailable");
         }
-
-        const s = data.settings;
-        if (s) {
-          setFrequency((s.frequency as Frequency) || "weekly");
-          setGracePeriod(Number(s.gracePeriodHours ?? 24));
-          setReminders(String(s.reminders ?? 3));
-        }
+        setIsPaid(billing.status === "active" || billing.status === "trialing");
+        const settings = data.settings;
+        setFrequency(settings.frequency || "weekly");
+        setGracePeriod(Number(settings.gracePeriodHours ?? 24));
+        setReminders(String(settings.reminders ?? 3));
       } catch {
-        if (!cancelled) {
-          toast({
-            title: "Limited dashboard on Free",
-            description: "You are on a Free plan therefore your verification controls are limited.",
-          });
-          setIsPaid(false);
-        }
+        if (!cancelled) setLoadError("We couldn't load your verification settings. Check your connection and try again.");
       } finally {
+        window.clearTimeout(timeout);
         if (!cancelled) setLoadingInitial(false);
       }
     })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [toast]);
+    return () => { cancelled = true; controller.abort(); window.clearTimeout(timeout); };
+  }, [attempt]);
 
   const handleSave = async () => {
     if (!isPaid) {
@@ -198,7 +166,7 @@ export function VerificationSettingsPage() {
 
   if (loadingInitial) {
     return (
-      <div className="p-6 lg:p-8 space-y-6 max-w-3xl">
+      <div className="mx-auto p-6 lg:p-8 space-y-6 max-w-3xl" role="status">
         <div className="flex items-center gap-2 text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
           Loading settings...
@@ -207,9 +175,23 @@ export function VerificationSettingsPage() {
     );
   }
 
+  if (loadError) return (
+    <section className="mx-auto max-w-3xl p-6 lg:p-8" aria-labelledby="settings-error-heading">
+      <Card className="editorial-card">
+        <CardHeader><CardTitle id="settings-error-heading">Verification settings</CardTitle><CardDescription role="alert">{loadError}</CardDescription></CardHeader>
+        <CardContent className="flex flex-wrap gap-3">
+          <Button onClick={() => setAttempt(value => value + 1)}>Try again</Button>
+          <Button asChild variant="outline"><Link to="/login">Sign in</Link></Button>
+          <Button asChild variant="ghost"><Link to="/onboarding">Back to setup</Link></Button>
+        </CardContent>
+      </Card>
+    </section>
+  );
+
   return (
-    <div className="p-6 lg:p-8 pb-24 space-y-6 max-w-3xl">
+    <div className="mx-auto p-6 lg:p-8 space-y-6 max-w-3xl">
       <div>
+        <Link to="/onboarding" className="mb-4 inline-block text-sm text-primary hover:underline">← Back to setup guide</Link>
         <h1 className="text-2xl font-bold text-foreground">Verification Settings</h1>
         <p className="text-muted-foreground">Configure your grace period and reminder notifications</p>
       </div>
@@ -345,7 +327,7 @@ export function VerificationSettingsPage() {
         </CardContent>
       </Card>
 
-      <div className="fixed bottom-0 left-0 right-0 p-4 bg-background/80 backdrop-blur-sm border-t z-40 lg:left-64">
+      <div className="border-t border-border pt-6">
         <div className="max-w-3xl mx-auto flex justify-center">
           {isPaid ? (
             <Button onClick={handleSave} disabled={saving} className="gap-2 shadow-lg">

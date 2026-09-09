@@ -1,5 +1,5 @@
 import React, { lazy, Suspense, type ComponentType, type LazyExoticComponent } from "react";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { ScrollToTop } from "@/components/ScrollToTop";
 import { RouteSeo } from "@/components/seo/RouteSeo";
 
@@ -113,6 +113,7 @@ export function AppRoutes() {
       </Route>
 
       <Route element={lazyElement(PrivateRouteProviders, true)}>
+        <Route path="/verification" element={<Navigate to="/app/verification" replace />} />
         <Route path="/login" element={lazyElement(LoginPage)} />
         <Route path="/signup" element={lazyElement(SignupPage)} />
         <Route path="/email-verified" element={lazyElement(EmailVerifiedPage)} />
@@ -130,6 +131,7 @@ export function AppRoutes() {
           <Route path="verification" element={lazyElement(VerificationSettingsPage, true)} />
           <Route path="check-in" element={lazyElement(CheckInPage, true)} />
           <Route path="emergency-contacts" element={lazyElement(EmergencyContactsPage, true)} />
+          <Route path="billing/payment" element={<Navigate to="/app/billing" replace />} />
           <Route path="billing" element={lazyElement(BillingPage, true)} />
           <Route path="activity" element={lazyElement(ActivityPage, true)} />
           <Route path="settings" element={lazyElement(AccountSettingsPage, true)} />

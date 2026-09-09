@@ -420,7 +420,7 @@
 .contact-email { display: inline-flex; align-items: center; gap: 10px; min-height: 42px; padding: 0 18px; border: 1px solid rgba(255,255,255,.08); border-radius: 999px; background: #f3f4ef; color: #111; font-size: 13px; font-weight: 500; }
 
 /* Authentication and standalone screens */
-body > #root > div { min-height: 100vh; }
+/* Page shells own their height. Toast/live-region siblings must not add a viewport. */
 input, textarea, button[role="combobox"] { background-color: rgba(255,255,255,.035) !important; border-color: rgba(255,255,255,.07) !important; }
 input { min-height: 44px; border-radius: 12px !important; }
 .min-h-screen > .bg-gradient-hero { background: radial-gradient(circle at 70% 30%, rgba(185,205,198,.16), transparent 32%), #080909; border-left: 1px solid rgba(255,255,255,.05); }

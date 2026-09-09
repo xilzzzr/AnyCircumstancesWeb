@@ -4,7 +4,7 @@ import { getPublicRouteSeo } from "@/seo/publicRoutes";
 
 export function RouteSeo() {
   const { pathname } = useLocation();
-  const privateRoute = pathname.startsWith("/app") || pathname.startsWith("/share") || ["/login", "/signup", "/verify-email", "/email-verified", "/create-pin", "/create-panic-pin", "/onboarding", "/forgot-password", "/reset-password", "/cookies", "/status"].includes(pathname);
+  const privateRoute = pathname.startsWith("/app") || pathname.startsWith("/share") || ["/login", "/signup", "/verification", "/verify-email", "/email-verified", "/create-pin", "/create-panic-pin", "/onboarding", "/forgot-password", "/reset-password", "/cookies", "/status"].includes(pathname);
   const page = getPublicRouteSeo(pathname);
 
   if (page) return <Seo title={page.title} description={page.description} path={page.path} type={page.type} schema={page.schema} />;
