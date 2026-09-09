@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,6 +14,14 @@ export function LoginPage() {
   const [loading, setLoading] = useState(false);
   const { setRole } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [noticeDismissed, setNoticeDismissed] = useState(false);
+  const signOutReason = location.state?.signOutReason;
+  const signOutNotice = signOutReason === 'incorrect-check-in-pin'
+    ? 'The PIN you entered is incorrect. You’ve been logged out. Please sign in again to retry your check-in.'
+    : signOutReason === 'session-expired'
+      ? 'Your session has expired. You’ve been logged out. Please sign in again.'
+      : null;
   const { toast } = useToast();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -99,6 +107,15 @@ export function LoginPage() {
             <h1 className="text-2xl font-bold text-foreground mb-2">Welcome back</h1>
             <p className="text-muted-foreground">Enter your credentials to access your vault</p>
           </div>
+
+          {signOutNotice && !noticeDismissed && (
+            <div role="alert" className="mb-6 rounded-lg border border-warning/50 bg-warning/10 p-4 text-foreground">
+              <p className="text-sm">{signOutNotice}</p>
+              <Button type="button" variant="ghost" size="sm" className="mt-2" onClick={() => setNoticeDismissed(true)}>
+                Dismiss
+              </Button>
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
