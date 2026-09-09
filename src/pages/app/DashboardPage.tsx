@@ -402,6 +402,7 @@ export function DashboardPage() {
         <div className="micro-label"><span className="status-dot" /> PERSONAL SECURITY SYSTEM · ONLINE</div>
         <h1>Everything important,<br /><span>held in readiness.</span></h1>
         <p>Welcome back, {displayName}. Your vault, verification schedule, and emergency network are standing by.</p>
+        <Link to="/onboarding" className="mt-4 inline-flex min-h-11 items-center text-sm text-primary hover:underline">Continue your setup →</Link>
       </div>
 
       {isFreeLimited && (

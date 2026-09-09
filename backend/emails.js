@@ -20,28 +20,31 @@ function htmlToText(html) {
     .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#039;/g, "'").replace(/&amp;/g, '&').trim();
 }
 function emailButton(label, url) {
-  return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0"><tr><td bgcolor="#d6e6df" style="border-radius:24px"><a href="${emailUrl(url)}" style="display:inline-block;padding:14px 24px;border:1px solid #d6e6df;border-radius:24px;color:#111513;font-size:16px;font-weight:700;text-decoration:none">${escapeHtml(label)}</a></td></tr></table>`;
+  return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0"><tr><td bgcolor="#bdd5c8" style="border-radius:24px;background-image:linear-gradient(115deg,#e0ece5 0%,#adc6b9 65%,#8fab9e 100%);box-shadow:0 6px 24px #050b08"><a href="${emailUrl(url)}" style="display:inline-block;padding:14px 24px;border:1px solid #bdd5c8;border-radius:24px;color:#111513;font-size:16px;font-weight:700;text-decoration:none">${escapeHtml(label)}</a></td></tr></table>`;
 }
 function renderAnyCircumstancesEmail({ title, heading = title, preview = heading, bodyHtml, bodyText, ctaText, ctaUrl, secondaryCta, verificationCode, info, securityNotice, footerNote }) {
   const notice = securityNotice || footerNote;
   const body = bodyHtml || `<p style="margin:0;white-space:pre-line">${escapeHtml(bodyText)}</p>`;
-  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(title)}</title></head>
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="dark"><meta name="supported-color-schemes" content="dark"><style>:root { color-scheme:dark; supported-color-schemes:dark; } @media (prefers-color-scheme:dark) { .email-card { background-color:#101613 !important; color:#e0e5e1 !important; } }</style><title>${escapeHtml(title)}</title></head>
 <body style="margin:0;padding:0;background:#050505;font-family:'DM Sans',Arial,Helvetica,sans-serif;color:#f4f5f2">
 <div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all">${escapeHtml(preview)}</div>
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0" bgcolor="#050505"><tr><td align="center" style="padding:28px 12px">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" bgcolor="#050505" style="background-color:#050505;background-image:radial-gradient(ellipse at 80% 0%,#1b2c24 0%,#050505 65%)"><tr><td align="center" style="padding:28px 12px">
 <!--[if mso]><table role="presentation" width="600"><tr><td><![endif]-->
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0" bgcolor="#111513" style="max-width:600px;border:1px solid #39433e;border-radius:24px">
-<tr><td style="padding:28px 24px;border-bottom:1px solid #39433e;font-size:20px;font-weight:700;color:#d6e6df">AnyCircumstances</td></tr>
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" class="email-card" bgcolor="#101613" style="max-width:600px;background-color:#101613;background-image:linear-gradient(150deg,#18221c 0%,#101613 45%,#0b100d 100%);border:1px solid #394b40;border-radius:24px;box-shadow:0 24px 64px #000000">
+<tr><td bgcolor="#17271f" style="padding:30px 24px;background-color:#17271f;background-image:linear-gradient(120deg,#283e31 0%,#14231b 58%,#0d1511 100%);border-radius:24px 24px 0 0;border-bottom:1px solid #40584a">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="font-size:20px;letter-spacing:-0.5px;font-weight:600;color:#eef4ef">AnyCircumstances</td><td width="38" align="right" aria-hidden="true"><span style="display:inline-block;width:32px;height:32px;line-height:32px;text-align:center;border:1px solid #819c8a;border-radius:50%;font-size:16px;color:#d6e6df">&#9675;</span></td></tr></table>
+<p style="margin:12px 0 0;font-size:10px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:#b3caba">Prepared for what matters</p>
+</td></tr>
 <tr><td style="padding:32px 24px;font-size:16px;line-height:1.65;color:#e0e5e1;overflow-wrap:anywhere;word-break:break-word">
-<h1 style="margin:0 0 18px;font-size:28px;line-height:1.2;font-weight:600;color:#f4f5f2">${escapeHtml(heading)}</h1>
+<h1 style="margin:0 0 18px;font-size:32px;line-height:1.15;letter-spacing:-0.8px;font-weight:500;color:#f4f5f2">${escapeHtml(heading)}</h1>
 ${body}
 ${ctaText && ctaUrl ? emailButton(ctaText, ctaUrl) : ''}
-${verificationCode ? `<p style="margin:20px 0 10px">Or enter this verification code:</p><div style="padding:18px;background:#24322b;border:1px solid #62796b;border-radius:16px;font-family:monospace;font-size:32px;letter-spacing:6px;text-align:center;color:#f4f5f2">${escapeHtml(verificationCode)}</div>` : ''}
-${info ? `<div style="margin-top:24px;padding:16px;border:1px solid #62796b;border-radius:16px"><h2 style="font-size:17px;margin:0 0 8px;color:#d6e6df">${escapeHtml(info.title || 'Please note')}</h2>${escapeHtml(info.text)}</div>` : ''}
+${verificationCode ? `<p style="margin:20px 0 10px">Or enter this verification code:</p><div style="padding:18px;background-color:#1d3026;background-image:linear-gradient(120deg,#2b4535 0%,#14261c 100%);border:1px solid #62796b;border-radius:16px;font-family:monospace;font-size:32px;letter-spacing:6px;text-align:center;color:#f4f5f2">${escapeHtml(verificationCode)}</div>` : ''}
+${info ? `<div style="margin-top:24px;padding:18px;background-color:#17231c;background-image:linear-gradient(120deg,#203127,#111b15);border:1px solid #405a49;border-radius:16px"><h2 style="font-size:17px;margin:0 0 8px;color:#d6e6df">${escapeHtml(info.title || 'Please note')}</h2>${escapeHtml(info.text)}</div>` : ''}
 ${ctaText && ctaUrl ? `<p style="margin:24px 0 8px;font-size:14px;color:#b8c5be">If the button above doesn't work, copy and paste this link into your browser:</p><a href="${emailUrl(ctaUrl)}" style="font-size:14px;color:#d6e6df;word-break:break-all;overflow-wrap:anywhere">${escapeHtml(ctaUrl)}</a>` : ''}
 ${secondaryCta ? `<p><a href="${emailUrl(secondaryCta.url)}" style="color:#d6e6df">${escapeHtml(secondaryCta.label)}</a></p>` : ''}
 ${notice ? `<p style="margin:28px 0 0;padding-top:20px;border-top:1px solid #39433e;font-size:14px;color:#b8c5be">${escapeHtml(notice)}</p>` : ''}
-</td></tr><tr><td style="padding:24px;border-top:1px solid #39433e;font-size:13px;line-height:1.7;color:#b8c5be"><strong>AnyCircumstances</strong><br>Your information, delivered when it matters.</td></tr></table>
+</td></tr><tr><td bgcolor="#0c120e" style="padding:24px;border-radius:0 0 24px 24px;background-color:#0c120e;border-top:1px solid #39433e;font-size:13px;line-height:1.7;color:#b8c5be"><strong>AnyCircumstances</strong><br>Your information, delivered when it matters.</td></tr></table>
 <!--[if mso]></td></tr></table><![endif]-->
 </td></tr></table></body></html>`;
   const text = [heading, bodyText || htmlToText(body), ctaText && ctaUrl ? `${ctaText}: ${ctaUrl}` : '', verificationCode ? `Or enter this verification code: ${verificationCode}` : '', info ? `${info.title || 'Please note'}: ${info.text}` : '', secondaryCta ? `${secondaryCta.label}: ${secondaryCta.url}` : '', notice, 'AnyCircumstances', 'Your information, delivered when it matters.'].filter(Boolean).join('\n\n');
