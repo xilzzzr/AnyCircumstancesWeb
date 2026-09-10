@@ -103,7 +103,7 @@ export function PricingPage() {
 
   const onCheckout = async () => {
     try {
-      const payload = {
+      const payload: Parameters<typeof createCheckoutSession>[0] = {
         storageGb,
         checkInFrequency: checkInFrequency as "monthly" | "weekly" | "daily",
         billingInterval: isAnnual ? "annual" : "monthly",

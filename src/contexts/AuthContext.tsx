@@ -1,3 +1,4 @@
+import { loadAuthSession } from "@/lib/authSession";
 import React, {
   createContext,
   useContext,
@@ -86,8 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshSession = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch("/auth/me", { credentials: "include" });
-      const d = await r.json().catch(() => ({}));
+      const d = await loadAuthSession();
       applySession(d);
     } catch {
       applySession({ ok: false });
@@ -112,13 +112,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const d = await r.json().catch(() => ({}));
         if (!r.ok || !d?.ok) return false;
 
-        applySession(d);
+        await refreshSession();
         return true;
       } catch {
         return false;
       }
     },
-    [applySession]
+    [refreshSession]
   );
 
   const logout = useCallback(async () => {

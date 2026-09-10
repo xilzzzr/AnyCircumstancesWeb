@@ -98,19 +98,8 @@ const globalLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 60,
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 10,
-  standardHeaders: true,
-  legacyHeaders: false,
-});
+const { createAuthLimiters } = require("./auth_limits");
+const { authLimiter, loginLimiter, loginAccountLimiter } = createAuthLimiters();
 
 const filesLimiter = rateLimit({
   windowMs: 5 * 60 * 1000,
@@ -152,12 +141,6 @@ const publicEmailGlobalLimiter = createFixedWindowLimiter({
   windowMs: 60 * 60 * 1000,
   limit: positiveInt(process.env.PUBLIC_EMAIL_GLOBAL_LIMIT_PER_HOUR, 300),
   key: () => "global",
-});
-const loginAccountLimiter = createFixedWindowLimiter({
-  name: "login_account",
-  windowMs: 15 * 60 * 1000,
-  limit: positiveInt(process.env.LOGIN_ACCOUNT_LIMIT_PER_15_MINUTES, 10),
-  key: (req) => stableHash(String(req.body?.email || "").trim().toLowerCase()),
 });
 const verificationAccountLimiter = createFixedWindowLimiter({
   name: "verification_account",

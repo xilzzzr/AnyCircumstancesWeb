@@ -284,6 +284,8 @@ router.get(
   })
 );
 
+require("./vault_keys").registerVaultKeyRoutes(router, requireUser, getPool, asyncHandler);
+
 router.post(
   "/set-user-public-key",
   requireUser,

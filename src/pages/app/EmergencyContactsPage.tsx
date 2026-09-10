@@ -133,7 +133,7 @@ export function EmergencyContactsPage() {
       const resp = await fetch("/auth/emergency-contacts", { credentials: "include" });
       const data = (await readJsonSafe(resp)) as ApiListResp | null;
 
-      if (!resp.ok || !data || (data as any).ok === false) {
+      if (!resp.ok || !data || data.ok !== true) {
         if (isPaymentRequired(resp, data)) {
           emitPaywall(
             "Emergency contacts are a paid feature",

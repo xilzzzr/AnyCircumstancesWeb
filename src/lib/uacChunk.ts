@@ -25,7 +25,7 @@ export async function decryptUacBytes(aesKey: CryptoKey, encBytes: Uint8Array, m
   const chunkSize = hdv.getUint32(5, true);
   const originalSize = Number(hdv.getBigUint64(9, true));
   const ivLen = header[17];
-  if (!chunkSize || !originalSize || !ivLen) throw new Error("decrypt_failed: bad_header");
+  if (header[4] !== 1 || !chunkSize || !Number.isSafeInteger(originalSize) || originalSize < 0 || ivLen !== 12 || originalSize > encBytes.length) throw new Error("decrypt_failed: bad_header");
 
   const out = new Uint8Array(originalSize);
   let outOff = 0;
@@ -40,6 +40,7 @@ export async function decryptUacBytes(aesKey: CryptoKey, encBytes: Uint8Array, m
     const ctLen = new DataView(encBytes.buffer, encBytes.byteOffset + off, 4).getUint32(0, true);
     off += 4;
 
+    if (ctLen !== Math.min(chunkSize, originalSize - outOff) + 16) throw new Error("decrypt_failed: bad_chunk_size");
     if (off + ctLen > encBytes.length) throw new Error("decrypt_failed: truncated_ciphertext");
     const ct = encBytes.slice(off, off + ctLen);
     off += ctLen;
@@ -56,5 +57,6 @@ export async function decryptUacBytes(aesKey: CryptoKey, encBytes: Uint8Array, m
     idx += 1;
   }
 
-  return out.slice(0, outOff);
+  if (outOff !== originalSize || off !== encBytes.length) throw new Error("decrypt_failed: incomplete_file");
+  return out;
 }

@@ -1,3 +1,4 @@
+import { dashboardPlanState, type DashboardPlanState } from "@/lib/dashboardPlan";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -133,11 +134,6 @@ function formatFrequencyLabel(freq: Frequency) {
   return "Monthly";
 }
 
-function isNetworkFetchError(e: any) {
-  const msg = String(e?.message || "");
-  return msg.toLowerCase().includes("failed to fetch") || e?.name === "TypeError";
-}
-
 function formatBytes(bytes: number) {
   if (!Number.isFinite(bytes) || bytes < 0) return "—";
   if (bytes < 1024) return `${Math.round(bytes)} B`;
@@ -158,13 +154,10 @@ export function DashboardPage() {
   const [checkins, setCheckins] = useState<CheckinRow[]>([]);
 
   const [vaultUsedBytes, setVaultUsedBytes] = useState<number | null>(null);
-  const [vaultLimitBytes, setVaultLimitBytes] = useState<number | null>(null);
 
-  const [isFreeLimited, _setIsFreeLimited] = useState(false);
-  const setIsFreeLimited = (v: boolean) => {
-    console.log("[Dashboard] setIsFreeLimited =", v, "at", new Error().stack);
-    _setIsFreeLimited(v);
-  };
+  const [planState, setPlanState] = useState<DashboardPlanState | null>(null);
+  const [billingError, setBillingError] = useState(false);
+  const [reload, setReload] = useState(0);
 
   const displayName = useMemo(() => {
     const name = (user as any)?.name ? String((user as any).name) : "";
@@ -192,6 +185,8 @@ export function DashboardPage() {
     return Number.isFinite(n) && n > 0 ? n : null;
   }, [billingSummary]);
 
+  const vaultLimitBytes = storageLimitGbFromSummary === null
+    ? null : Math.round(storageLimitGbFromSummary * 1024 * 1024 * 1024);
   const hasVaultLimit = vaultLimitBytes !== null && Number.isFinite(vaultLimitBytes) && vaultLimitBytes > 0;
   const hasVaultUsed = vaultUsedBytes !== null && Number.isFinite(vaultUsedBytes) && vaultUsedBytes >= 0;
 
@@ -216,16 +211,17 @@ export function DashboardPage() {
 
     async function load() {
       setLoading(true);
-      setIsFreeLimited(false);
+      setBillingError(false);
 
       try {
         try {
           const billing: BillingStatusResp = await fetchJson("/auth/billing/status");
-          const s = String(billing?.status || "");
-          const paid = s === "active" || s === "trialing";
-          if (!paid && alive) setIsFreeLimited(true);
+          if (!alive) return;
+          setPlanState(dashboardPlanState(billing));
         } catch (e: any) {
-          if (alive) setIsFreeLimited(true);
+          if (!alive) return;
+          setBillingError(true);
+          if (e?.status === 401 || e?.message === "not_authenticated") throw e;
         }
 
         try {
@@ -237,8 +233,6 @@ export function DashboardPage() {
           const code = String(e?.message || "");
           const http = (e as any)?.status;
           if (http === 401 || code === "not_authenticated") throw e;
-          if (http === 402 || code === "payment_required") setIsFreeLimited(true);
-          if (isNetworkFetchError(e)) setIsFreeLimited(true);
           setBillingSummary(null);
         }
 
@@ -252,20 +246,12 @@ export function DashboardPage() {
           }, 0);
           setVaultUsedBytes(used);
 
-          if (storageLimitGbFromSummary !== null) {
-            setVaultLimitBytes(Math.round(storageLimitGbFromSummary * 1024 * 1024 * 1024));
-          } else {
-            setVaultLimitBytes(null);
-          }
         } catch (e: any) {
           if (!alive) return;
           const code = String(e?.message || "");
           const http = (e as any)?.status;
           if (http === 401 || code === "not_authenticated") throw e;
-          if (http === 402 || code === "payment_required") setIsFreeLimited(true);
-          if (isNetworkFetchError(e)) setIsFreeLimited(true);
           setVaultUsedBytes(null);
-          setVaultLimitBytes(null);
         }
 
         try {
@@ -277,8 +263,6 @@ export function DashboardPage() {
           const code = String(e?.message || "");
           const http = (e as any)?.status;
           if (http === 401 || code === "not_authenticated") throw e;
-          if (http === 402 || code === "payment_required") setIsFreeLimited(true);
-          if (isNetworkFetchError(e)) setIsFreeLimited(true);
           setCheckins([]);
         }
 
@@ -291,8 +275,6 @@ export function DashboardPage() {
           const code = String(e?.message || "");
           const http = (e as any)?.status;
           if (http === 401 || code === "not_authenticated") throw e;
-          if (http === 402 || code === "payment_required") setIsFreeLimited(true);
-          if (isNetworkFetchError(e)) setIsFreeLimited(true);
           setSettings(null);
         }
 
@@ -305,8 +287,6 @@ export function DashboardPage() {
           const code = String(e?.message || "");
           const http = (e as any)?.status;
           if (http === 401 || code === "not_authenticated") throw e;
-          if (http === 402 || code === "payment_required") setIsFreeLimited(true);
-          if (isNetworkFetchError(e)) setIsFreeLimited(true);
           setStatus(null);
         }
 
@@ -319,8 +299,6 @@ export function DashboardPage() {
           const code = String(e?.message || "");
           const http = (e as any)?.status;
           if (http === 401 || code === "not_authenticated") throw e;
-          if (http === 402 || code === "payment_required") setIsFreeLimited(true);
-          if (isNetworkFetchError(e)) setIsFreeLimited(true);
           setContacts([]);
         }
       } catch (e: any) {
@@ -334,7 +312,7 @@ export function DashboardPage() {
             variant: "destructive",
           });
         } else {
-          setIsFreeLimited(true);
+          toast({ title: "Could not load dashboard", description: "Please try again.", variant: "destructive" });
         }
       } finally {
         if (alive) setLoading(false);
@@ -345,7 +323,7 @@ export function DashboardPage() {
     return () => {
       alive = false;
     };
-  }, [toast, storageLimitGbFromSummary]);
+  }, [toast, reload]);
 
   const nextVerificationText = useMemo(() => {
     if (!status || status.state === "not_configured" || !status.nextDueAt) return "Not set";
@@ -405,7 +383,27 @@ export function DashboardPage() {
         <Link to="/onboarding" className="mt-4 inline-flex min-h-11 items-center text-sm text-primary hover:underline">Continue your setup →</Link>
       </div>
 
-      {isFreeLimited && (
+      {billingError && (
+        <Card className="editorial-card">
+          <CardContent className="py-4 text-sm" role="status">
+            <p>We couldn’t verify your plan right now. Please try again.</p>
+            <Button className="mt-3" size="sm" variant="outline" disabled={loading} onClick={() => setReload((value) => value + 1)}>
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {!billingError && planState === "inactive" && (
+        <Card className="editorial-card">
+          <CardContent className="py-4 text-sm">
+            <p>Your subscription needs attention.</p>
+            <Link to="/app/billing" className="inline-block mt-3"><Button size="sm" variant="outline">View billing</Button></Link>
+          </CardContent>
+        </Card>
+      )}
+
+      {!billingError && planState === "free" && (
         <Card className="editorial-card free-plan-card">
           <CardContent className="py-4 text-sm">
             <div className="font-medium text-foreground">You’re on a Free plan</div>
