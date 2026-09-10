@@ -7,7 +7,7 @@ import { Upload, X, FileText, Check, Loader2, Shield, Lock, AlertTriangle } from
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { encryptFileToAesGcm, ensureServerHasUserPublicKey, ensureUserKeypair, wrapAesKeyForUser } from "@/lib/vaultCrypto";
+import { encryptFileToAesGcm, ensureUserKeypair, wrapAesKeyForUser } from "@/lib/vaultCrypto";
 
 async function saveEscrowForFile(fileId: string, rawAesKey: Uint8Array) {
   const pubRes = await fetch("/files/escrow-public-key", { credentials: "include" });
@@ -108,11 +108,6 @@ function xhrPostWithProgress(url: string, body: Blob, fields: Record<string, str
   });
 }
 
-const LS_PUB = "uac_user_pub_spki_b64";
-const LS_PRIV_ENC = "uac_user_priv_pkcs8_enc_b64";
-const LS_PRIV_SALT = "uac_user_priv_salt_b64";
-const LS_PRIV_IV = "uac_user_priv_iv_b64";
-
 export function UploadPage() {
   const [files, setFiles] = useState<UploadingFile[]>([]);
   const [dragOver, setDragOver] = useState(false);
@@ -129,20 +124,6 @@ export function UploadPage() {
   const updateFile = useCallback((id: string, patch: Partial<UploadingFile>) => {
     setFiles((prev) => prev.map((f) => (f.id === id ? { ...f, ...patch } : f)));
   }, []);
-
-  const resetVaultOnDevice = useCallback(() => {
-    try {
-      localStorage.removeItem(LS_PUB);
-      localStorage.removeItem(LS_PRIV_ENC);
-      localStorage.removeItem(LS_PRIV_SALT);
-      localStorage.removeItem(LS_PRIV_IV);
-    } catch {}
-    setPassphrase("");
-    toast({
-      title: "Vault reset on this device",
-      description: "Enter a new passphrase to generate fresh local vault keys.",
-    });
-  }, [toast]);
 
   const checkPaid = useCallback(async () => {
     if (isPaidCache === true) return true;
@@ -199,23 +180,12 @@ export function UploadPage() {
             setPassphraseOpen(true);
             toast({
               title: "Wrong passphrase",
-              description: "That passphrase can’t unlock your vault key on this device. Try again, or reset the vault on this device.",
+              description: "That passphrase can’t unlock your vault key. Enter the passphrase used when uploading.",
               variant: "destructive",
             });
             return;
           }
           throw e;
-        }
-
-        const okPub = await ensureServerHasUserPublicKey(pubSpkiB64);
-        if (!okPub) {
-          updateFile(uf.id, { status: "error", progress: 0, error: "public_key_not_saved" });
-          toast({
-            title: "Upload failed",
-            description: "Could not save your encryption public key.",
-            variant: "destructive",
-          });
-          return;
         }
 
         const enc = await encryptFileToAesGcm(uf.file);
@@ -391,7 +361,7 @@ export function UploadPage() {
               <Lock className="h-4 w-4" /> Vault passphrase
             </DialogTitle>
             <DialogDescription>
-              This passphrase encrypts your private vault key on your device. You’ll enter it once per session.
+              Your passphrase unlocks your encrypted vault key on any device. The encrypted key is backed up to your account.
             </DialogDescription>
           </DialogHeader>
 
@@ -406,15 +376,12 @@ export function UploadPage() {
           <div className="rounded-lg border border-border p-3 text-sm text-muted-foreground flex items-start gap-2">
             <AlertTriangle className="h-4 w-4 mt-0.5" />
             <div>
-              If you forgot the passphrase used on this device, you can reset the vault keys locally. This does not delete
-              server files, but you won’t be able to decrypt old files from this device unless you had the right passphrase.
+              Keep your vault passphrase in a password manager. For files uploaded before key syncing, unlock
+              the vault on the original device once to back up its key before clearing site data.
             </div>
           </div>
 
           <DialogFooter className="flex gap-2">
-            <Button variant="outline" onClick={resetVaultOnDevice}>
-              Reset vault on this device
-            </Button>
             <Button
               onClick={() => {
                 setPassphraseOpen(false);

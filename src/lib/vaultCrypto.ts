@@ -29,79 +29,130 @@ async function pbkdf2Key(passphrase: string, salt: Uint8Array, usages: KeyUsage[
   );
 }
 
-const LS_PUB = "uac_user_pub_spki_b64";
-const LS_PRIV_ENC = "uac_user_priv_pkcs8_enc_b64";
-const LS_PRIV_SALT = "uac_user_priv_salt_b64";
-const LS_PRIV_IV = "uac_user_priv_iv_b64";
+export type VaultKeyBundle = {
+  version: 1;
+  kdf: "PBKDF2-SHA256";
+  iterations: 200000;
+  private_key_format: "pkcs8";
+  public_key: string;
+  encrypted_private_key: string;
+  salt: string;
+  iv: string;
+};
 
-export async function ensureUserKeypair(passphrase: string) {
-  const pubB64 = localStorage.getItem(LS_PUB);
-  const privEncB64 = localStorage.getItem(LS_PRIV_ENC);
-  const saltB64 = localStorage.getItem(LS_PRIV_SALT);
-  const ivB64 = localStorage.getItem(LS_PRIV_IV);
-
-  if (pubB64 && privEncB64 && saltB64 && ivB64) {
-    try {
-      const pubBytes = bytesFromB64(pubB64);
-      const pubKey = await crypto.subtle.importKey(
-        "spki",
-        pubBytes,
-        { name: "RSA-OAEP", hash: "SHA-256" },
-        true,
-        ["encrypt"]
-      );
-
-      const salt = bytesFromB64(saltB64);
-      const iv = bytesFromB64(ivB64);
-      const wrapKey = await pbkdf2Key(passphrase, salt, ["decrypt"]);
-
-      const privPkcs8Buf = await crypto.subtle.decrypt(
-        { name: "AES-GCM", iv },
-        wrapKey,
-        bytesFromB64(privEncB64)
-      );
-      const privPkcs8 = new Uint8Array(privPkcs8Buf);
-
-      const privKey = await crypto.subtle.importKey(
-        "pkcs8",
-        privPkcs8,
-        { name: "RSA-OAEP", hash: "SHA-256" },
-        false,
-        ["decrypt"]
-      );
-
-      return { pubKey, privKey, pubSpkiB64: pubB64 };
-    } catch {
-      throw new Error("bad_passphrase");
-    }
-  }
-
-  const kp = await crypto.subtle.generateKey(
-    {
-      name: "RSA-OAEP",
-      modulusLength: 2048,
-      publicExponent: new Uint8Array([1, 0, 1]),
-      hash: "SHA-256",
-    },
-    true,
-    ["encrypt", "decrypt"]
-  );
-
-  const spki = new Uint8Array(await crypto.subtle.exportKey("spki", kp.publicKey));
-  const pkcs8 = new Uint8Array(await crypto.subtle.exportKey("pkcs8", kp.privateKey));
-
+export async function createVaultKeyBundle(passphrase: string): Promise<VaultKeyBundle> {
+  const kp = await crypto.subtle.generateKey({ name: "RSA-OAEP", modulusLength: 2048,
+    publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["encrypt", "decrypt"]);
   const salt = randomBytes(16);
   const iv = randomBytes(12);
   const wrapKey = await pbkdf2Key(passphrase, salt, ["encrypt"]);
-  const encPriv = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, wrapKey, pkcs8));
+  const privateBytes = await crypto.subtle.exportKey("pkcs8", kp.privateKey);
+  const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, wrapKey, privateBytes);
+  return { version: 1, kdf: "PBKDF2-SHA256", iterations: 200000, private_key_format: "pkcs8",
+    public_key: b64FromBytes(new Uint8Array(await crypto.subtle.exportKey("spki", kp.publicKey))),
+    encrypted_private_key: b64FromBytes(new Uint8Array(encrypted)), salt: b64FromBytes(salt), iv: b64FromBytes(iv) };
+}
 
-  const spkiB64New = b64FromBytes(spki);
-  localStorage.setItem(LS_PUB, spkiB64New);
-  localStorage.setItem(LS_PRIV_SALT, b64FromBytes(salt));
-  localStorage.setItem(LS_PRIV_IV, b64FromBytes(iv));
-  localStorage.setItem(LS_PRIV_ENC, b64FromBytes(encPriv));
+export async function unlockVaultKeyBundle(bundle: VaultKeyBundle, passphrase: string) {
+  if (bundle.version !== 1 || bundle.kdf !== "PBKDF2-SHA256" || bundle.iterations !== 200000 || bundle.private_key_format !== "pkcs8") {
+    throw new Error("unsupported_vault_key");
+  }
+  try {
+    const pubKey = await crypto.subtle.importKey("spki", bytesFromB64(bundle.public_key), { name: "RSA-OAEP", hash: "SHA-256" }, true, ["encrypt"]);
+    const wrapKey = await pbkdf2Key(passphrase, bytesFromB64(bundle.salt), ["decrypt"]);
+    const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: bytesFromB64(bundle.iv) }, wrapKey, bytesFromB64(bundle.encrypted_private_key));
+    const privKey = await crypto.subtle.importKey("pkcs8", plain, { name: "RSA-OAEP", hash: "SHA-256" }, false, ["decrypt"]);
+    // Detect a mismatched public/private pair before it can encrypt new files.
+    const challenge = randomBytes(32);
+    const wrapped = await crypto.subtle.encrypt({ name: "RSA-OAEP" }, pubKey, challenge);
+    const opened = new Uint8Array(await crypto.subtle.decrypt({ name: "RSA-OAEP" }, privKey, wrapped));
+    if (!opened.every((byte, i) => byte === challenge[i])) throw new Error("key_mismatch");
+    return { pubKey, privKey, pubSpkiB64: bundle.public_key };
+  } catch { throw new Error("bad_passphrase"); }
+}
 
-  return { pubKey: kp.publicKey, privKey: kp.privateKey, pubSpkiB64: spkiB64New };
+function legacyVaultKey(): VaultKeyBundle | null {
+  try {
+    const public_key = localStorage.getItem("uac_user_pub_spki_b64");
+    const encrypted_private_key = localStorage.getItem("uac_user_priv_pkcs8_enc_b64");
+    const salt = localStorage.getItem("uac_user_priv_salt_b64");
+    const iv = localStorage.getItem("uac_user_priv_iv_b64");
+    return public_key && encrypted_private_key && salt && iv ? {
+      version: 1, kdf: "PBKDF2-SHA256", iterations: 200000, private_key_format: "pkcs8",
+      public_key, encrypted_private_key, salt, iv,
+    } : null;
+  } catch { return null; }
+}
+
+async function vaultKeyRequest(path: string, body?: unknown) {
+  const response = await fetch(path, { credentials: "include", ...(body ? {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  } : {}) });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.ok) throw new Error(data.error || "vault_key_sync_failed");
+  return data;
+}
+
+const cleanPublicKey = (value: string) => value.replace(/-----[^-]+-----/g, "").replace(/\s/g, "");
+async function canUnwrap(privKey: CryptoKey, wrapped: string) {
+  try { await crypto.subtle.decrypt({ name: "RSA-OAEP" }, privKey, bytesFromB64(wrapped)); return true; }
+  catch { return false; }
+}
+
+async function resolveUserKeypair(passphrase: string, createIfMissing: boolean, wrappedFileKey?: string) {
+  const state = await vaultKeyRequest("/files/vault-keys");
+  const bundles: VaultKeyBundle[] = state.keys;
+  if (!Array.isArray(bundles)) throw new Error("vault_key_sync_failed");
+  const legacy = legacyVaultKey();
+  if (legacy && !bundles.some((bundle) => bundle.public_key === legacy.public_key)) {
+    // Old storage was not account-scoped. Only migrate keys proven to belong to this account.
+    let belongs = cleanPublicKey(state.public_key || "") === legacy.public_key;
+    let localKeys: Awaited<ReturnType<typeof unlockVaultKeyBundle>> | null = null;
+    try { localKeys = await unlockVaultKeyBundle(legacy, passphrase); } catch { /* Try synced keys below. */ }
+    if (!belongs && localKeys && state.has_files) {
+      if (wrappedFileKey) belongs = await canUnwrap(localKeys.privKey, wrappedFileKey);
+      else {
+        const list = await vaultKeyRequest("/files/list");
+        for (const file of list.files || []) {
+          const envelope = await vaultKeyRequest("/files/get-user-envelope", { file_id: file.key });
+          if (await canUnwrap(localKeys.privKey, envelope.enc_key_b64)) { belongs = true; break; }
+        }
+      }
+    }
+    if (belongs && localKeys) {
+      await vaultKeyRequest("/files/vault-keys", { bundle: legacy, initialize: false });
+      bundles.push(legacy);
+    } else if (belongs) throw new Error("bad_passphrase");
+  }
+  if (!bundles.length) {
+    if (!createIfMissing || state.public_key || state.has_files) throw new Error("missing_vault_key");
+    if (passphrase.length < 8) throw new Error("passphrase_too_short");
+    const bundle = await createVaultKeyBundle(passphrase);
+    try {
+      await vaultKeyRequest("/files/vault-keys", { bundle, initialize: true });
+      bundles.push(bundle);
+    } catch (error) {
+      if (!(error instanceof Error) || error.message !== "vault_key_already_exists") throw error;
+      const current = await vaultKeyRequest("/files/vault-keys");
+      bundles.push(...current.keys);
+    }
+  }
+  let unlocked = false;
+  for (const bundle of bundles) {
+    let keypair;
+    try { keypair = await unlockVaultKeyBundle(bundle, passphrase); } catch { continue; }
+    unlocked = true;
+    if (!wrappedFileKey || await canUnwrap(keypair.privKey, wrappedFileKey)) return keypair;
+  }
+  throw new Error(unlocked ? "missing_file_key" : "bad_passphrase");
+}
+
+// Serialize uploads within one page; server initialization also handles other devices/tabs.
+let keyQueue: Promise<unknown> = Promise.resolve();
+export function ensureUserKeypair(passphrase: string, createIfMissing = true, wrappedFileKey?: string) {
+  const result = keyQueue.then(() => resolveUserKeypair(passphrase, createIfMissing, wrappedFileKey));
+  keyQueue = result.then(() => undefined, () => undefined);
+  return result;
 }
 
 function u32le(n: number) {
@@ -187,18 +238,4 @@ export async function encryptFileToAesGcm(file: File) {
 export async function wrapAesKeyForUser(pubKey: CryptoKey, rawAes: Uint8Array) {
   const wrapped = new Uint8Array(await crypto.subtle.encrypt({ name: "RSA-OAEP" }, pubKey, rawAes));
   return b64FromBytes(wrapped);
-}
-
-export async function ensureServerHasUserPublicKey(pubSpkiB64: string) {
-  const me = await fetch("/files/me-public-key", { credentials: "include" }).then((r) => r.json()).catch(() => null);
-  if (me && me.ok && me.public_key) return true;
-
-  const resp = await fetch("/files/set-user-public-key", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
-    body: JSON.stringify({ public_key: pubSpkiB64 }),
-  });
-  const j = await resp.json().catch(() => ({}));
-  return !!(resp.ok && j.ok);
 }

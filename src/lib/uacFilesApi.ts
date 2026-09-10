@@ -88,3 +88,14 @@ export async function deleteVaultFile(key: string): Promise<void> {
     body: JSON.stringify({ key }),
   });
 }
+
+export function getUserEnvelope(fileId: string) {
+  return apiJson<{
+    ok: boolean;
+    enc_key_b64: string;
+    meta_json: { original_name?: string; original_content_type?: string; iv_b64?: string } | null;
+  }>("/files/get-user-envelope", {
+    method: "POST",
+    body: JSON.stringify({ file_id: fileId }),
+  });
+}

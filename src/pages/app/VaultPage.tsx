@@ -1,3 +1,5 @@
+import { ensureUserKeypair } from "@/lib/vaultCrypto";
+import { decryptVaultFile } from "@/lib/vaultDownload";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -36,7 +38,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { listVaultFiles, presignDownload, deleteVaultFile, type VaultFile } from "@/lib/uacFilesApi";
+import { listVaultFiles, deleteVaultFile, type VaultFile } from "@/lib/uacFilesApi";
 import { formatBytes, formatDate } from "@/lib/format";
 
 const getFileIcon = (type: string) => {
@@ -73,6 +75,10 @@ function isPaymentRequired(resp: { status: number }, data: any) {
 }
 
 export function VaultPage() {
+  const [syncKey, setSyncKey] = useState(false);
+  const [downloadFile, setDownloadFile] = useState<VaultFile | null>(null);
+  const [passphrase, setPassphrase] = useState("");
+  const [downloading, setDownloading] = useState(false);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [unlockModal, setUnlockModal] = useState(false);
@@ -132,18 +138,33 @@ export function VaultPage() {
       return;
     }
 
-    try {
-      const url = await presignDownload(fileKey);
-      if (!url) throw new Error("no_url");
+    const file = files.find((item) => item.key === fileKey);
+    if (file) setDownloadFile(file);
+  };
 
+  const handleDecryptDownload = async () => {
+    if ((!downloadFile && !syncKey) || !passphrase.trim() || downloading) return;
+    setDownloading(true);
+    try {
+      if (syncKey) {
+        await ensureUserKeypair(passphrase.trim());
+        setSyncKey(false);
+        setPassphrase("");
+        toast({ title: "Vault key backed up", description: "Sign in on another device and use this vault passphrase to access your files." });
+        return;
+      }
+      const { blob, name } = await decryptVaultFile(downloadFile!, passphrase);
+      const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.rel = "noreferrer";
+      a.download = name;
       document.body.appendChild(a);
       a.click();
       a.remove();
-
-      toast({ title: "Download started", description: "Decrypting + downloading your file." });
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      setDownloadFile(null);
+      setPassphrase("");
+      toast({ title: "Download started", description: "Your file has been decrypted." });
     } catch (e: any) {
       const code = String(e?.message || "server_error");
       if (code === "payment_required" || code === "http_402") {
@@ -155,10 +176,20 @@ export function VaultPage() {
       }
 
       toast({
-        title: "Download failed",
-        description: code,
+        title: syncKey ? "Key backup failed" : "Download failed",
+        description: code === "bad_passphrase"
+          ? "Incorrect vault passphrase. Enter the passphrase you used when uploading."
+          : code === "missing_vault_key"
+          ? "This older vault key has not been backed up yet. Open the vault on the original device and enter its passphrase to enable access on other devices."
+          : code === "missing_file_key"
+          ? "Unlock this file on the device it was uploaded from once to back up its key, or try the original upload passphrase."
+          : e?.name === "OperationError"
+          ? "This file could not be decrypted with this device’s vault key, or the file is damaged."
+          : code,
         variant: "destructive",
       });
+    } finally {
+      setDownloading(false);
     }
   };
 
@@ -252,6 +283,7 @@ const handleDelete = async (fileKey: string) => {
             {loading ? "Loading..." : `${files.length} encrypted file${files.length === 1 ? "" : "s"}`}
           </p>
         </div>
+        <Button variant="outline" onClick={() => setSyncKey(true)}>Enable cross-device access</Button>
         <Link to="/app/upload">
           <Button className="gap-2">
             <Upload className="h-4 w-4" /> Upload files
@@ -342,6 +374,25 @@ const handleDelete = async (fileKey: string) => {
           );
         })}
       </div>
+
+      <Dialog open={!!downloadFile || syncKey} onOpenChange={(open) => {
+        if (!open && !downloading) { setDownloadFile(null); setSyncKey(false); setPassphrase(""); }
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{syncKey ? "Back up your vault key" : "Decrypt and download"}</DialogTitle>
+            <DialogDescription>Enter the vault passphrase you used when uploading. Your encrypted key will be backed up for use on your other devices. This passphrase is separate from your login password and PIN.</DialogDescription>
+          </DialogHeader>
+          <Input type="password" aria-label="Vault passphrase" placeholder="Vault passphrase"
+            value={passphrase} onChange={(e) => setPassphrase(e.target.value)} disabled={downloading}
+            onKeyDown={(e) => { if (e.key === "Enter") handleDecryptDownload(); }} />
+          <DialogFooter>
+            <Button onClick={handleDecryptDownload} disabled={downloading || !passphrase.trim()}>
+              {downloading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />{syncKey ? "Backing up…" : "Decrypting…"}</> : syncKey ? "Back up key" : "Download"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={unlockModal} onOpenChange={setUnlockModal}>
         <DialogContent>

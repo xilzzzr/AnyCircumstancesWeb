@@ -102,7 +102,7 @@ export default function EditPlanPage() {
         if (!alive) return;
 
         const status = String(data?.billing?.status || "");
-        const isPaid = status === "active" || status === "trial";
+        const isPaid = status === "active" || status === "trial" || status === "trialing";
         if (!isPaid) {
           toast({
             title: "No active plan to edit",
@@ -123,6 +123,7 @@ export default function EditPlanPage() {
         setIsAnnual(interval === "annual");
         setSelectedAddons(addons);
       } catch (e: any) {
+        if (!alive) return;
         toast({
           title: "Could not load your current plan",
           description: String(e?.message || "server_error"),

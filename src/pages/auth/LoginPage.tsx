@@ -12,7 +12,7 @@ export function LoginPage() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const { setRole } = useAuth();
+  const { refreshSession } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [noticeDismissed, setNoticeDismissed] = useState(false);
@@ -46,6 +46,15 @@ export function LoginPage() {
       if (!resp.ok || !data?.ok) {
         const code = data?.error || 'login_failed';
 
+        if (resp.status === 429) {
+          const seconds = Number(resp.headers.get('Retry-After'));
+          const wait = Number.isFinite(seconds) && seconds > 0
+            ? `Try again in ${Math.ceil(seconds / 60)} minute(s).`
+            : 'Please wait a few minutes and try again.';
+          toast({ title: 'Too many login attempts', description: wait });
+          return;
+        }
+
         if (code === 'email_not_verified') {
           toast({
             title: 'Verify your email',
@@ -77,7 +86,7 @@ export function LoginPage() {
         return;
       }
 
-      setRole('user');
+      await refreshSession();
       toast({
         title: 'Welcome back',
         description: 'You have successfully logged in.',
