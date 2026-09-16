@@ -14,12 +14,13 @@ test('layout escapes data and preserves critical actions in both alternatives', 
   assert.doesNotMatch(out.html, /<img|<script/);
   assert.throws(() => renderAnyCircumstancesEmail({ ctaText: 'Unsafe', ctaUrl: 'javascript:alert(1)' }));
 });
-test('emergency templates retain every link and setup instructions, escaping recipient data', () => {
+test('emergency templates retain every link and explain access without key setup, escaping recipient data', () => {
   for (const scheduled of [true, false]) {
     const links = ['https://example.com/share#token=one', 'https://example.com/share#token=two'];
     const out = renderEmergencyEmail({ name: '<script>alert(1)</script>', ownerEmail: 'owner@example.com', links, missingSetup: true, scheduled });
     for (const link of links) { assert.ok(out.html.includes(link)); assert.ok(out.text.includes(link)); }
-    assert.match(out.text, /Files may not decrypt/);
+    assert.match(out.text, /No contact key setup is required/);
+    assert.doesNotMatch(out.text, /Contact setup required|Files may not decrypt/);
     assert.doesNotMatch(out.html, /<script>/);
     assert.match(out.html, /Shared information/);
   }

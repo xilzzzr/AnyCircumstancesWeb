@@ -50,13 +50,13 @@ ${notice ? `<p style="margin:28px 0 0;padding-top:20px;border-top:1px solid #394
   const text = [heading, bodyText || htmlToText(body), ctaText && ctaUrl ? `${ctaText}: ${ctaUrl}` : '', verificationCode ? `Or enter this verification code: ${verificationCode}` : '', info ? `${info.title || 'Please note'}: ${info.text}` : '', secondaryCta ? `${secondaryCta.label}: ${secondaryCta.url}` : '', notice, 'AnyCircumstances', 'Your information, delivered when it matters.'].filter(Boolean).join('\n\n');
   return { html, text };
 }
-function renderEmergencyEmail({ name, ownerEmail, links, missingSetup, scheduled = false }) {
+function renderEmergencyEmail({ name, ownerEmail, links, scheduled = false }) {
   const context = scheduled ? 'The account owner missed a required check-in and their grace period has ended.' : 'The account owner triggered emergency access.';
   return renderAnyCircumstancesEmail({
     title: 'Emergency access', preview: 'Important information has been shared with you through AnyCircumstances.',
     bodyHtml: `<p>${escapeHtml(name ? `Hi ${name},` : 'Hi,')}</p><h2 style="font-size:18px;color:#d6e6df">Why you received this</h2><p>${context}</p>${ownerEmail ? `<p><strong>Account:</strong> ${escapeHtml(ownerEmail)}</p>` : ''}<h2 style="font-size:18px;color:#d6e6df">Shared information</h2><p>Open each secure link to access the files assigned to you.</p><ol style="padding-left:24px">${links.map((url, i) => `<li style="margin-bottom:16px"><a href="${emailUrl(url)}" style="color:#d6e6df">Open shared file ${i + 1}</a><br><span style="font-size:13px;word-break:break-all">${escapeHtml(url)}</span></li>`).join('')}</ol>`,
     ctaText: 'Open shared information', ctaUrl: links[0],
-    info: missingSetup ? { title: 'Contact setup required', text: 'Your emergency contact setup is incomplete. Open a link to complete setup. Files may not decrypt unless the account owner shared access with you in advance.' } : undefined,
+    info: { title: 'Secure file access', text: 'Open a link and select Download + decrypt. No contact key setup is required.' },
     securityNotice: 'These links provide access to private information. Keep them secure and do not forward this email. If this is unexpected, contact the account owner through a trusted channel.'
   });
 }
