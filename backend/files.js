@@ -652,7 +652,7 @@ router.post(
 
     const [rows] = await pool.query(
       `SELECT t.contact_id, t.file_id, t.expires_at, t.used_at,
-              c.public_key AS contact_public_key, f.content_type
+              f.content_type
        FROM contact_file_share_tokens t
        JOIN emergency_contacts c ON c.id = t.contact_id
        JOIN files f ON f.id = t.file_id AND f.user_id = c.user_id
@@ -667,9 +667,6 @@ router.post(
 
     return res.json({
       ok: true,
-      contact: {
-        has_public_key: Boolean(r.contact_public_key),
-      },
       file: {
         id: String(r.file_id),
         content_type: String(r.content_type),
@@ -682,6 +679,9 @@ router.post(
   })
 );
 
+// Legacy recipient key-registration endpoint.
+// New emergency access uses ephemeral per-download keys.
+// Remove after old clients are no longer supported.
 router.post(
   "/share-set-contact-public-key",
   asyncHandler(async (req, res) => {
@@ -732,47 +732,7 @@ router.post(
         [normalizedPublicKey, t.contact_id]
       );
 
-      const [erows] = await conn.query("SELECT alg, enc_key_b64 FROM file_key_escrows WHERE file_id = ? LIMIT 1", [t.file_id]);
-      if (!erows || !erows.length || !erows[0].enc_key_b64) {
-        await conn.rollback();
-        return res.status(500).json({ ok: false, error: "missing_file_escrow" });
-      }
-
-      const privPem = getEscrowPrivateKeyPemOrNull();
-      if (!privPem) {
-        await conn.rollback();
-        return res.status(500).json({ ok: false, error: "escrow_private_key_missing" });
-      }
-
-      const envelope = buildContactEnvelopeFromEscrow({
-        escrowAlg: String(erows[0].alg || "rsa-oaep-sha256"),
-        escrowEncKeyB64: String(erows[0].enc_key_b64),
-        contactPublicKeyPem: normalizedPublicKey,
-        escrowPrivateKeyPem: privPem,
-      });
-
-const [ownerRows] = await conn.query("SELECT user_id FROM files WHERE id = ? LIMIT 1", [t.file_id]);
-const ownerUserId = ownerRows && ownerRows.length ? String(ownerRows[0].user_id) : "";
-if (!ownerUserId) {
-  await conn.rollback();
-  return res.status(500).json({ ok: false, error: "missing_file_owner" });
-}
-
-const [metaRows] = await conn.query(
-  "SELECT meta_json FROM file_key_envelopes WHERE file_id = ? AND recipient_type = 'user' AND recipient_id = ? LIMIT 1",
-  [t.file_id, ownerUserId]
-);
-
-const metaJson = metaRows && metaRows.length && metaRows[0].meta_json ? String(metaRows[0].meta_json) : null;
-if (!metaJson) {
-  await conn.rollback();
-  return res.status(500).json({ ok: false, error: "missing_envelope_meta" });
-}
-
-await conn.query(
-  "INSERT INTO file_key_envelopes (file_id, recipient_type, recipient_id, alg, enc_key_b64, meta_json) VALUES (?, 'contact', ?, ?, ?, ?) ON DUPLICATE KEY UPDATE alg=VALUES(alg), enc_key_b64=VALUES(enc_key_b64), meta_json=VALUES(meta_json)",
-  [t.file_id, t.contact_id, envelope.alg, envelope.enc_key_b64, metaJson]
-);
+      // Keep legacy registration, but never create permanent contact envelopes.
 
       await conn.query("UPDATE contact_file_share_tokens SET used_at = COALESCE(used_at, NOW()) WHERE id = ? LIMIT 1", [t.id]);
 
@@ -849,10 +809,8 @@ router.post(
     );
     if (!arows || !arows.length) return res.status(400).json({ ok: false, error: "file_not_assigned_to_contact" });
 
-    await pool.query(
-      "INSERT INTO file_key_envelopes (file_id, recipient_type, recipient_id, alg, enc_key_b64, meta_json) VALUES (?, 'contact', ?, ?, ?, ?) ON DUPLICATE KEY UPDATE alg=VALUES(alg), enc_key_b64=VALUES(enc_key_b64), meta_json=VALUES(meta_json)",
-      [fileId, contactId, alg, encKeyB64, metaJson]
-    );
+    // Legacy compatibility acknowledgement; emergency envelopes are now ephemeral.
+    // Existing contact envelopes remain untouched.
 
     return res.json({ ok: true });
   })
@@ -861,125 +819,76 @@ router.post(
 router.post(
   "/share-get-contact-envelope",
   asyncHandler(async (req, res) => {
+    // The unexpired bearer token authorizes re-wrapping to this request's key.
+    res.set("Cache-Control", "no-store");
     const token = String(req.body?.token || "");
     if (!isValidShareToken(token)) return res.status(400).json({ ok: false, error: "invalid_token" });
 
-    const tokenHash = sha256Hex(token);
-    const pool = getPool();
+    const publicKey = String(req.body?.public_key || "").trim();
+    if (!publicKey) return res.status(400).json({ ok: false, error: "missing_public_key" });
+    if (publicKey.length > 20000) return res.status(400).json({ ok: false, error: "public_key_too_large" });
+    const normalizedPublicKey = normalizePublicKeyPem(publicKey);
+    if (!normalizedPublicKey || crypto.createPublicKey(normalizedPublicKey).asymmetricKeyType !== "rsa") {
+      return res.status(400).json({ ok: false, error: "invalid_public_key" });
+    }
 
+    const pool = getPool();
     const [rows] = await pool.query(
       `SELECT t.contact_id, t.file_id, t.expires_at
        FROM contact_file_share_tokens t
        JOIN emergency_contacts c ON c.id = t.contact_id
        JOIN files f ON f.id = t.file_id AND f.user_id = c.user_id
        WHERE t.token_hash = ? LIMIT 1`,
-      [tokenHash]
+      [sha256Hex(token)]
     );
-    if (!rows || !rows.length) return res.status(404).json({ ok: false, error: "invalid_token" });
+    if (!rows?.length) return res.status(404).json({ ok: false, error: "invalid_token" });
+    const share = rows[0];
+    if (new Date(share.expires_at).getTime() < Date.now()) return res.status(410).json({ ok: false, error: "token_expired" });
 
-    const t = rows[0];
-    if (new Date(t.expires_at).getTime() < Date.now()) return res.status(410).json({ ok: false, error: "token_expired" });
-
-    let [envRows] = await pool.query(
-      "SELECT alg, enc_key_b64, meta_json FROM file_key_envelopes WHERE file_id = ? AND recipient_type = 'contact' AND recipient_id = ? LIMIT 1",
-      [t.file_id, t.contact_id]
+    const [escrowRows] = await pool.query(
+      "SELECT alg, enc_key_b64 FROM file_key_escrows WHERE file_id = ? LIMIT 1", [share.file_id]
     );
+    if (!escrowRows?.[0]?.enc_key_b64) return res.status(500).json({ ok: false, error: "missing_file_escrow" });
+    const escrowPrivateKeyPem = getEscrowPrivateKeyPemOrNull();
+    if (!escrowPrivateKeyPem) return res.status(500).json({ ok: false, error: "escrow_private_key_missing" });
 
-    const [fown] = await pool.query("SELECT user_id FROM files WHERE id = ? LIMIT 1", [t.file_id]);
-    const ownerUserId = fown && fown.length ? String(fown[0].user_id) : "";
-    if (!ownerUserId) return res.status(404).json({ ok: false, error: "file_not_found" });
-
-    const [uenv] = await pool.query(
+    const [ownerRows] = await pool.query("SELECT user_id FROM files WHERE id = ? LIMIT 1", [share.file_id]);
+    if (!ownerRows?.[0]?.user_id) return res.status(500).json({ ok: false, error: "missing_envelope_meta" });
+    const [metaRows] = await pool.query(
       "SELECT meta_json FROM file_key_envelopes WHERE file_id = ? AND recipient_type = 'user' AND recipient_id = ? LIMIT 1",
-      [t.file_id, ownerUserId]
+      [share.file_id, String(ownerRows[0].user_id)]
     );
-
-    let ivB64 = null;
+    const storedMeta = metaRows?.[0]?.meta_json;
+    if (!storedMeta) return res.status(500).json({ ok: false, error: "missing_envelope_meta" });
+    let meta;
     try {
-      const uj = uenv && uenv.length && uenv[0].meta_json ? JSON.parse(String(uenv[0].meta_json)) : null;
-      ivB64 = uj && uj.iv_b64 ? String(uj.iv_b64) : null;
+      // MySQL JSON columns may already be decoded by the driver.
+      meta = typeof storedMeta === "string" ? JSON.parse(storedMeta) : storedMeta;
+      if (!meta || typeof meta !== "object" || Array.isArray(meta)) throw new Error("invalid_envelope_meta");
     } catch {
-      ivB64 = null;
+      return res.status(500).json({ ok: false, error: "invalid_envelope_meta" });
     }
 
-
-    if (!envRows || !envRows.length) {
-      const [crows] = await pool.query("SELECT public_key FROM emergency_contacts WHERE id = ? LIMIT 1", [t.contact_id]);
-      
-const contactPub = crows && crows.length && crows[0].public_key ? String(crows[0].public_key) : "";
-
-	const contactPubPem = contactPub.replace(/\\n/g, "\n").trim();
-      if (!contactPub) return res.status(404).json({ ok: false, error: "contact_missing_public_key" });
-
-      const [erows] = await pool.query("SELECT alg, enc_key_b64 FROM file_key_escrows WHERE file_id = ? LIMIT 1", [t.file_id]);
-      if (!erows || !erows.length || !erows[0].enc_key_b64) {
-        return res.status(500).json({ ok: false, error: "missing_file_escrow" });
-      }
-
-      const privPem = getEscrowPrivateKeyPemOrNull();
-      if (!privPem) return res.status(500).json({ ok: false, error: "escrow_private_key_missing" });
-
-      const envelope = buildContactEnvelopeFromEscrow({
-        escrowAlg: String(erows[0].alg || "rsa-oaep-sha256"),
-        escrowEncKeyB64: String(erows[0].enc_key_b64),
-        contactPublicKeyPem: contactPubPem,
-        escrowPrivateKeyPem: privPem,
+    let envelope;
+    try {
+      envelope = buildContactEnvelopeFromEscrow({
+        escrowAlg: String(escrowRows[0].alg || "rsa-oaep-sha256"),
+        escrowEncKeyB64: String(escrowRows[0].enc_key_b64),
+        contactPublicKeyPem: normalizedPublicKey,
+        escrowPrivateKeyPem,
       });
-
-      const metaForContact = uenv && uenv.length && uenv[0].meta_json ? String(uenv[0].meta_json) : null;
-
-      await pool.query(
-        "INSERT INTO file_key_envelopes (file_id, recipient_type, recipient_id, alg, enc_key_b64, meta_json) VALUES (?, 'contact', ?, ?, ?, ?) ON DUPLICATE KEY UPDATE alg=VALUES(alg), enc_key_b64=VALUES(enc_key_b64), meta_json=VALUES(meta_json)",
-        [t.file_id, t.contact_id, envelope.alg, envelope.enc_key_b64, metaForContact]
-      );
-
-      const [fresh] = await pool.query(
-        "SELECT alg, enc_key_b64, meta_json FROM file_key_envelopes WHERE file_id = ? AND recipient_type = 'contact' AND recipient_id = ? LIMIT 1",
-        [t.file_id, t.contact_id]
-      );
-      envRows = fresh;
-
-      [envRows] = await pool.query(
-        "SELECT alg, enc_key_b64, meta_json FROM file_key_envelopes WHERE file_id = ? AND recipient_type = 'contact' AND recipient_id = ? LIMIT 1",
-        [t.file_id, t.contact_id]
-      );
-
-      if (!envRows || !envRows.length) return res.status(500).json({ ok: false, error: "envelope_create_failed" });
-    }
-
-    let meta = null;
-    try {
-      meta = envRows[0].meta_json ? JSON.parse(String(envRows[0].meta_json)) : null;
     } catch {
-      meta = null;
+      // Do not forward crypto exceptions or key material to logs/responses.
+      return res.status(500).json({ ok: false, error: "envelope_create_failed" });
     }
-
-    // Backfill meta_json.iv_b64 if missing (older rows were saved with NULL meta).
-    let existingMeta = null;
-    try {
-      existingMeta = envRows[0].meta_json ? JSON.parse(String(envRows[0].meta_json)) : null;
-    } catch {
-      existingMeta = null;
-    }
-
-    if ((!existingMeta || !existingMeta.iv_b64) && ivB64) {
-      const fixedMeta = JSON.stringify({ iv_b64: ivB64 });
-      await pool.query(
-        "UPDATE file_key_envelopes SET meta_json = ? WHERE file_id = ? AND recipient_type = 'contact' AND recipient_id = ? LIMIT 1",
-        [fixedMeta, t.file_id, t.contact_id]
-      );
-      existingMeta = { iv_b64: ivB64 };
-    }
-
     return res.json({
       ok: true,
-      contact_id: Number(t.contact_id),
-      file_id: String(t.file_id),
-      alg: String(envRows[0].alg),
-      enc_key_b64: String(envRows[0].enc_key_b64),
-      meta_json: existingMeta,
+      contact_id: Number(share.contact_id),
+      file_id: String(share.file_id),
+      alg: envelope.alg,
+      enc_key_b64: envelope.enc_key_b64,
+      meta_json: meta,
     });
-
   })
 );
 
