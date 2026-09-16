@@ -1,3 +1,4 @@
+import { QuickGuideDialog } from "@/components/app/QuickGuideDialog";
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -18,7 +19,6 @@ import {
 import {
   Shield,
   Upload,
-  Bell,
   LayoutDashboard,
   FolderLock,
   CheckCircle2,
@@ -33,7 +33,7 @@ import {
   Lock,
   Unlock,
 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 
 type VaultFile = {
@@ -134,6 +134,8 @@ export function AppLayout() {
   const { user, logout, vaultLocked, lockVault } = useAuth();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
+  const guideTriggerRef = useRef<HTMLButtonElement>(null);
 
   const [storageUsedBytes, setStorageUsedBytes] = useState<number | null>(null);
   const [storageLimitBytes, setStorageLimitBytes] = useState<number | null>(null);
@@ -214,6 +216,7 @@ export function AppLayout() {
 
   return (
     <div className="app-shell min-h-screen flex bg-background">
+      <QuickGuideDialog open={guideOpen} onOpenChange={setGuideOpen} triggerRef={guideTriggerRef} />
       <a className="skip-link" href="#app-main-content">Skip to main content</a>
       <aside className="app-sidebar hidden lg:flex flex-col w-60 border-r border-border bg-card">
         <div className="h-20 flex items-center gap-2 px-6 border-b border-border">
@@ -281,9 +284,10 @@ export function AppLayout() {
               </Button>
             </Link>
 
-            <Button variant="ghost" size="icon" className="relative icon-button" aria-label="Notifications, unread items">
-              <Bell aria-hidden="true" className="h-5 w-5" />
-              <span aria-hidden="true" className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-destructive" />
+            <Button ref={guideTriggerRef} variant="ghost" size="icon" className="relative icon-button"
+              aria-label="How AnyCircumstances works" title="How AnyCircumstances works"
+              aria-haspopup="dialog" aria-expanded={guideOpen} onClick={() => setGuideOpen(true)}>
+              <HelpCircle aria-hidden="true" className="h-5 w-5" />
             </Button>
 
             <DropdownMenu>
