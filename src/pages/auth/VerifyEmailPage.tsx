@@ -16,7 +16,7 @@ export function VerifyEmailPage() {
 
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { setRole } = useAuth();
+  const { refreshSession } = useAuth();
 
   useEffect(() => {
     const saved = sessionStorage.getItem('pending_verify_email') || '';
@@ -58,8 +58,15 @@ export function VerifyEmailPage() {
 
       sessionStorage.removeItem('pending_verify_email');
 
-      // IMPORTANT: mark user as logged in on the frontend too
-      setRole('user');
+      if (!await refreshSession()) {
+        toast({
+          title: 'Email verified. Please sign in.',
+          description: 'We could not load your session. Sign in to continue setting up your PIN.',
+          variant: 'destructive',
+        });
+        navigate('/login');
+        return;
+      }
 
       toast({
         title: 'Email verified',
