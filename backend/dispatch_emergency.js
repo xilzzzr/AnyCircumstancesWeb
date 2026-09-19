@@ -83,7 +83,7 @@ const stepMs = Math.max(1, Math.floor(graceMs / reminders));
       if (!ins || !ins.affectedRows) continue;
 
       const subject = "AnyCircumstances: Reminder — check-in required";
-      const link = publicAppBase() + "/app/verification";
+      const link = publicAppBase() + "/app/check-in";
       const rendered = renderAnyCircumstancesEmail({
         title: "Your check-in is overdue",
         preview: "Check in before your grace period ends.",
@@ -103,7 +103,7 @@ const stepMs = Math.max(1, Math.floor(graceMs / reminders));
             body: "Your check-in is overdue but still within the grace period.",
             data: {
               type: "verification_reminder",
-              route: "/app/verification"
+              route: "/app/check-in"
             }
           });
         } catch (pushError) {
