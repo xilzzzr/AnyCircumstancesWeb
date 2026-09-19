@@ -121,17 +121,12 @@ export function SignupPage() {
         return;
       }
 
-sessionStorage.setItem('pending_verify_email', email);
-
-toast({
-  title: 'Account created',
-  description: 'Please check your email to verify your account.',
-});
-
-navigate('/verify-email');
-
-
-navigate('/verify-email');
+      sessionStorage.setItem('pending_verify_email', email);
+      toast({
+        title: 'Account created',
+        description: 'Please check your email to verify your account.',
+      });
+      navigate('/verify-email');
     } catch {
       toast({
         title: 'Network error',

@@ -11,29 +11,38 @@ export class ErrorBoundary extends React.Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
-    // eslint-disable-next-line no-console
     console.error("[ErrorBoundary]", error, info);
   }
 
   render() {
     if (this.state.error) {
+      const chunkFailure = /ChunkLoadError|Loading chunk|dynamically imported module|Importing a module script failed|module script.*failed/i.test(
+        `${this.state.error.name} ${this.state.error.message}`,
+      );
       return (
-        <div className="min-h-[60vh] p-8">
+        <main className="min-h-[60vh] p-8" role="alert">
           <div className="max-w-3xl mx-auto rounded-2xl border border-border bg-card p-6">
             <h1 className="text-xl font-semibold text-foreground mb-2">
-              Page crashed while rendering
+              {chunkFailure ? "This page could not be loaded." : "Something went wrong while loading this page."}
             </h1>
             <p className="text-muted-foreground mb-4">
-              This is shown on purpose so we can see the exact error in production.
+              {chunkFailure ? "The application may have been updated. Reload to try again." : "Please try again or return to your dashboard."}
             </p>
-            <pre className="whitespace-pre-wrap break-words text-sm rounded-xl bg-muted/40 p-4 text-foreground">
-{String(this.state.error?.stack || this.state.error?.message || this.state.error)}
-            </pre>
+            <div className="flex flex-wrap gap-4">
+              {!chunkFailure && <button className="underline" onClick={() => this.setState({ error: undefined })}>Try again</button>}
+              <button className="underline" onClick={() => window.location.reload()}>Reload page</button>
+              {/* A full navigation also clears React.lazy's cached rejection. */}
+              <a className="underline" href="/app">Return to dashboard</a>
+            </div>
+            {import.meta.env.DEV && (
+              <pre className="mt-4 whitespace-pre-wrap break-words text-sm rounded-xl bg-muted/40 p-4 text-foreground">
+                {String(this.state.error.stack || this.state.error.message)}
+              </pre>
+            )}
           </div>
-        </div>
+        </main>
       );
     }
-
     return this.props.children;
   }
 }

@@ -105,7 +105,10 @@ export function LoginPage() {
         return;
       }
 
-      await refreshSession();
+      if (!await refreshSession()) {
+        toast({ title: 'Could not load your session', description: 'Please try signing in again.' });
+        return;
+      }
       toast({
         title: 'Welcome back',
         description: 'You have successfully logged in.',
