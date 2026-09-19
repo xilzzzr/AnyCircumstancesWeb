@@ -7,6 +7,25 @@ import { Shield, Eye, EyeOff, Loader2 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 
+function getSafePostLoginDestination(search: string) {
+  const requested = new URLSearchParams(search).get('next');
+  if (
+    !requested ||
+    !requested.startsWith('/') ||
+    requested.startsWith('//') ||
+    requested.includes('\\')
+  ) {
+    return '/app';
+  }
+
+  const base = 'https://uac.local';
+  const target = new URL(requested, base);
+  const isAppRoute = target.pathname === '/app' || target.pathname.startsWith('/app/');
+
+  if (target.origin !== base || !isAppRoute) return '/app';
+  return target.pathname + target.search + target.hash;
+}
+
 export function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -94,7 +113,7 @@ export function LoginPage() {
         title: 'Welcome back',
         description: 'You have successfully logged in.',
       });
-      navigate('/app');
+      navigate(getSafePostLoginDestination(location.search), { replace: true });
     } catch {
       toast({
         title: 'Network error',
