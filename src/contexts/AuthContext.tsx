@@ -23,10 +23,9 @@ interface AuthContextType {
   loading: boolean;
   isAuthenticated: boolean;
   vaultLocked: boolean;
-  refreshSession: () => Promise<void>;
+  refreshSession: () => Promise<boolean>;
   login: (email: string, password: string) => Promise<boolean>;
   logout: () => Promise<void>;
-  setRole: (role: UserRole) => void;
   unlockVault: (pin: string) => Promise<boolean>;
   lockVault: () => void;
 }
@@ -64,7 +63,7 @@ function isPaymentRequired(resp: Response, data: any) {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
-  const [role, setRoleState] = useState<UserRole>("logged_out");
+  const role: UserRole = user ? "user" : "logged_out";
   const [vaultLocked, setVaultLocked] = useState(true);
   const [loading, setLoading] = useState(true);
 
@@ -74,23 +73,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const nextRole: UserRole = d?.role === "user" ? "user" : "logged_out";
 
     if (d?.ok && nextRole !== "logged_out") {
-      setRoleState(nextRole);
       setUser(d?.user ?? { email: d?.email });
-      return;
+      return true;
     }
 
     setUser(null);
-    setRoleState("logged_out");
     setVaultLocked(true);
+    return false;
   }, []);
 
   const refreshSession = useCallback(async () => {
     setLoading(true);
     try {
       const d = await loadAuthSession();
-      applySession(d);
+      return applySession(d);
     } catch {
-      applySession({ ok: false });
+      return applySession({ ok: false });
     } finally {
       setLoading(false);
     }
@@ -112,8 +110,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const d = await r.json().catch(() => ({}));
         if (!r.ok || !d?.ok) return false;
 
-        await refreshSession();
-        return true;
+        return await refreshSession();
       } catch {
         return false;
       }
@@ -127,16 +124,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {}
 
     setUser(null);
-    setRoleState("logged_out");
     setVaultLocked(true);
-  }, []);
-
-  const setRole = useCallback((newRole: UserRole) => {
-    setRoleState(newRole);
-    if (newRole === "logged_out") {
-      setUser(null);
-      setVaultLocked(true);
-    }
   }, []);
 
   const unlockVault = useCallback(async (pin: string): Promise<boolean> => {
@@ -184,7 +172,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         refreshSession,
         login,
         logout,
-        setRole,
         unlockVault,
         lockVault,
       }}

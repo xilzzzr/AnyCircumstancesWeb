@@ -586,12 +586,12 @@ router.post(
     try {
       await conn.beginTransaction();
 
-      if (!user.email_verified_at) {
-        const out = await consumeEmailVerificationForUser(conn, user.id, code);
-        if (!out.ok) {
-          await conn.rollback();
-          return res.status(400).json({ ok: false, error: out.reason });
-        }
+      // Verification must prove possession of an unused code, even if the
+      // account was already verified in another tab or request.
+      const out = await consumeEmailVerificationForUser(conn, user.id, code);
+      if (!out.ok) {
+        await conn.rollback();
+        return res.status(400).json({ ok: false, error: out.reason });
       }
 
       const refresh = await issueRefreshToken(conn, user.id);

@@ -32,7 +32,7 @@ TLS, logging, security headers, and any other reverse-proxy matchers. The key
 behavior is:
 
 - backend namespaces are handled before frontend files;
-- only known client routes receive `/index.html` fallback;
+- only known client routes receive `/spa.html` fallback;
 - public paths use an actual file or `<path>/index.html`;
 - the final static handler uses `=404`;
 - `handle_errors 404` serves `/404.html` while retaining status 404.
@@ -66,3 +66,33 @@ curl -sS https://anycircumstances.com/dead-mans-switch | grep -E '<title>|name="
 The public, `/app`, and `/share/...` requests should resolve through their
 intended handlers. The fake page must report `404`, and its response body should
 be the generated branded `dist/404.html` page.
+
+## Complete builds and cache policy
+
+The repository does not automate atomic frontend releases. Build in a separate
+release directory, upload the complete `dist/`, verify it, then atomically switch
+the served directory (for example a symlink). Keep the prior release for rollback.
+Do not run a destructive in-place sync against the directory currently served.
+If an atomic switch is unavailable, upload assets first and HTML entry points last.
+
+An atomic switch alone does not protect already-open tabs: keep previous hashed
+assets available under `/assets/` across releases, in a shared asset store or by
+copying retained assets into each release before switching. Do not immediately
+delete old chunks. HTML should revalidate (`Cache-Control: no-cache`); hashed
+assets can use `public, max-age=31536000, immutable`. Error responses should not
+inherit immutable caching. The example explicitly separates `/assets/*` from
+SPA routing and makes missing files return 404.
+
+Verify on the live server after deploying the reviewed configuration:
+
+```sh
+curl -sSI https://anycircumstances.com/app/upload
+curl -sSI https://anycircumstances.com/assets/nonexistent-route-chunk.js
+# Also request a real hashed JS filename from the deployed spa.html.
+```
+
+The app URL must serve the SPA shell with revalidation. Existing JS must have a
+JavaScript content type and immutable cache header; missing JS must return 404,
+never HTML with status 200. Keep an old tab open across a release and follow an
+unvisited setup link. If a chunk still fails, the application offers manual reload
+and dashboard recovery, with no automatic reload loop.

@@ -154,9 +154,11 @@ export function AppLayout() {
 
   useEffect(() => {
     let alive = true;
+    const controller = new AbortController();
+    let requestInFlight = false;
 
     async function fetchJson(path: string) {
-      const r = await fetch(`${API_BASE}${path}`, { credentials: "include" });
+      const r = await fetch(`${API_BASE}${path}`, { credentials: "include", signal: controller.signal });
       if (!r.ok) {
         const body = await r.json().catch(() => null);
         const err = new Error(body?.error || `http_${r.status}`);
@@ -167,13 +169,20 @@ export function AppLayout() {
     }
 
     async function loadStorage() {
+      if (!alive || requestInFlight) return;
+      requestInFlight = true;
       try {
-        const [filesOut, billingOut] = await Promise.all([
+        const results = await Promise.allSettled([
           fetchJson("/files/list"),
           fetchJson("/auth/billing/summary?limit=1"),
         ]);
 
         if (!alive) return;
+        const [filesResult, billingResult] = results;
+        if (filesResult.status === 'rejected') throw filesResult.reason;
+        if (billingResult.status === 'rejected') throw billingResult.reason;
+        const filesOut = filesResult.value;
+        const billingOut = billingResult.value;
 
         const files: VaultFile[] = Array.isArray(filesOut?.files) ? filesOut.files : [];
         const used = files.reduce((sum, f) => {
@@ -197,6 +206,8 @@ export function AppLayout() {
         if (!alive) return;
         setStorageUsedBytes(null);
         setStorageLimitBytes(null);
+      } finally {
+        requestInFlight = false;
       }
     }
 
@@ -205,6 +216,7 @@ export function AppLayout() {
 
     return () => {
       alive = false;
+      controller.abort();
       window.clearInterval(t);
     };
   }, []);

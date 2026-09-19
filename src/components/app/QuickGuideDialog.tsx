@@ -33,13 +33,13 @@ export function QuickGuideDialog({ open, onOpenChange, triggerRef }: QuickGuideD
   const pageCount = content.pageCount.replace('{current}', String(current + 1)).replace('{total}', String(pages.length));
 
   useEffect(() => {
-    if (!api) return;
+    if (!open || !api) return;
     const update = () => setCurrent(api.selectedScrollSnap());
     update();
     api.on('select', update);
     api.on('reInit', update);
     return () => { api.off('select', update); api.off('reInit', update); };
-  }, [api]);
+  }, [open, api]);
 
   useEffect(() => {
     const element = carouselRef.current;
