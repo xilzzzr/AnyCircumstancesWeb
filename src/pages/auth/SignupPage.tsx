@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Shield, Eye, EyeOff, Loader2, Check } from 'lucide-react';
+import { Shield, Eye, EyeOff, Loader2, Check, CheckCircle2, Clock3, Siren } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 const requirements = [
@@ -157,6 +157,30 @@ navigate('/verify-email');
             <h1 className="text-2xl font-bold text-foreground mb-2">Create your vault</h1>
             <p className="text-muted-foreground">Start protecting your important files today</p>
           </div>
+
+          <section className="mb-6 rounded-xl border border-border bg-card/60 p-4" aria-labelledby="signup-overview-title">
+            <h2 id="signup-overview-title" className="text-sm font-semibold text-foreground">How your protection works</h2>
+            <div className="mt-3 space-y-3">
+              <div className="flex gap-3">
+                <CheckCircle2 aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-success" />
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Your regular check-in PIN confirms you are safe and resets your check-in timer.
+                </p>
+              </div>
+              <div className="flex gap-3">
+                <Siren aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Your separate emergency PIN immediately starts sending assigned files to your verified emergency contacts when entered on the Check-in page.
+                </p>
+              </div>
+              <div className="flex gap-3">
+                <Clock3 aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  If you miss a check-in, reminders and your grace period happen before automatic emergency delivery begins.
+                </p>
+              </div>
+            </div>
+          </section>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
