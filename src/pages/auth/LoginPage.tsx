@@ -23,7 +23,7 @@ function getSafePostLoginDestination(search: string) {
   const isAppRoute = target.pathname === '/app' || target.pathname.startsWith('/app/');
 
   if (target.origin !== base || !isAppRoute) return '/app';
-  return \`\${target.pathname}\${target.search}\${target.hash}\`;
+  return target.pathname + target.search + target.hash;
 }
 
 export function LoginPage() {
