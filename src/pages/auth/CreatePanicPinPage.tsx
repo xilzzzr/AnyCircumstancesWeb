@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { Loader2, KeyRound, ArrowLeft, Siren } from 'lucide-react';
+import { Loader2, ArrowLeft, Siren, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
 import { Input } from '@/components/ui/input';
@@ -128,12 +128,25 @@ export function CreatePanicPinPage() {
           </h1>
           <p className="text-muted-foreground">
             {step === 'create'
-              ? 'This PIN triggers emergency dispatch. Choose 4 to 6 digits. Keep it secret.'
+              ? 'This is not a backup check-in PIN. Entering it on the Check-in page immediately triggers emergency delivery. Choose 4 to 6 digits and keep it secret.'
               : 'Enter your emergency PIN again to confirm.'}
           </p>
         </div>
 
         <div className="space-y-6">
+          <div role="note" className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-left">
+            <div className="flex items-center gap-2 text-destructive">
+              <AlertTriangle aria-hidden="true" className="h-4 w-4 shrink-0" />
+              <p className="text-sm font-semibold">Immediate emergency action</p>
+            </div>
+            <p className="mt-2 text-sm leading-relaxed text-foreground">
+              Entering this PIN on the Check-in page immediately starts emergency delivery of the files you assigned to your verified emergency contacts.
+            </p>
+            <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+              It does not wait for a missed check-in or for your grace period to end.
+            </p>
+          </div>
+
           <div className="space-y-2">
             <Label htmlFor="panic-current-password">Current account password</Label>
             <Input id="panic-current-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" disabled={loading} />
@@ -192,7 +205,7 @@ export function CreatePanicPinPage() {
           )}
 
           <p className="text-xs text-center text-muted-foreground">
-            Your emergency PIN is stored securely. Entering it will dispatch your emergency contacts.
+            Keep this PIN separate from your regular check-in PIN. Use your regular PIN whenever you are safe.
           </p>
         </div>
       </div>
