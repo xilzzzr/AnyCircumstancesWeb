@@ -20,6 +20,22 @@ UPDATE verification_reminder_emails
 SET sent_at = UTC_TIMESTAMP(3)
 WHERE sent_at IS NULL;
 
+CREATE TABLE IF NOT EXISTS emergency_trigger_jobs (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  user_id BIGINT UNSIGNED NOT NULL,
+  reason VARCHAR(32) NOT NULL,
+  request_ip VARCHAR(64) NULL,
+  request_user_agent VARCHAR(255) NULL,
+  status ENUM('pending','processing','completed','failed') NOT NULL DEFAULT 'pending',
+  attempts SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+  last_error VARCHAR(255) NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  KEY idx_emergency_trigger_pending (status, updated_at),
+  KEY idx_emergency_trigger_user (user_id, created_at)
+);
+
 CREATE TABLE IF NOT EXISTS verification_emergency_contact_dispatches (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   user_id BIGINT UNSIGNED NOT NULL,
