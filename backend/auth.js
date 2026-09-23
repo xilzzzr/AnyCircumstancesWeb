@@ -15,7 +15,7 @@ const {
   upsertAppleEntitlement,
   verifyTransaction,
 } = require("./apple_subscriptions");
-const { purgeVaultFiles, deleteUserRecords } = require("./account_lifecycle");
+const { enqueueAccountLifecycleJob, processAccountLifecycleJob } = require("./account_jobs");
 const { createFixedWindowGate, positiveInt } = require("./security");
 const { consumeEmailVerificationByTokenOnly } = require("./email_verification");
 const { createEmailVerificationHandler } = require("./email_verification_route");
@@ -2776,22 +2776,14 @@ router.post(
       });
     }
 
-    const stripeSubscriptionId = String(profile.stripe_subscription_id || "");
-    if (stripeSubscriptionId && stripe) {
-      await stripe.subscriptions.cancel(stripeSubscriptionId);
-      await pool.query(
-        "UPDATE billing_entitlements SET status = 'inactive' WHERE provider = 'stripe' AND external_subscription_id = ?",
-        [stripeSubscriptionId]
-      );
-    }
-    const purge = await purgeVaultFiles(pool, userId);
-    await refreshAggregateBillingStatus(pool, userId);
+    const jobId = await enqueueAccountLifecycleJob(pool, userId, "cancel_subscription");
+    const result = await processAccountLifecycleJob(pool, jobId);
     clearVaultUnlockCookie(res);
     return res.json({
       ok: true,
-      ...purge,
-      requiresAppleAction: Boolean(profile.has_apple),
-      appleManageUrl: profile.has_apple ? "https://apps.apple.com/account/subscriptions" : null,
+      deletedFiles: Number(result.deletedFiles || 0),
+      requiresAppleAction: Boolean(result.requiresAppleAction),
+      appleManageUrl: result.appleManageUrl || null,
     });
   })
 );
@@ -2836,16 +2828,10 @@ router.delete(
       return res.json({ ok: true, deletedFiles: pretendDeletedFiles });
     }
 
-    const [rows] = await pool.query(
-      "SELECT stripe_subscription_id FROM billing_profiles WHERE user_id = ? LIMIT 1",
-      [String(userId)]
-    );
-    const stripeSubscriptionId = String(rows?.[0]?.stripe_subscription_id || "");
-    if (stripeSubscriptionId && stripe) await stripe.subscriptions.cancel(stripeSubscriptionId);
-    const purge = await purgeVaultFiles(pool, userId);
-    await deleteUserRecords(pool, userId);
+    const jobId = await enqueueAccountLifecycleJob(pool, userId, "delete_account");
+    const result = await processAccountLifecycleJob(pool, jobId);
     clearAuthCookies(res);
-    return res.json({ ok: true, ...purge });
+    return res.json({ ok: true, deletedFiles: Number(result.deletedFiles || pretendDeletedFiles) });
   })
 );
 
