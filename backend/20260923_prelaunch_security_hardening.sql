@@ -24,3 +24,18 @@ CREATE TABLE IF NOT EXISTS emergency_delivery_attempts (
   KEY idx_emergency_delivery_retry (status, updated_at),
   KEY idx_emergency_delivery_user_due (user_id, due_at)
 );
+
+CREATE TABLE IF NOT EXISTS account_lifecycle_jobs (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  action VARCHAR(32) NOT NULL,
+  status VARCHAR(24) NOT NULL DEFAULT 'pending',
+  attempt_count INT NOT NULL DEFAULT 0,
+  last_error VARCHAR(255) NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  completed_at DATETIME(3) NULL,
+  PRIMARY KEY (id),
+  KEY idx_account_lifecycle_pending (status, updated_at),
+  KEY idx_account_lifecycle_user (user_id, created_at)
+);
