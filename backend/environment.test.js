@@ -94,3 +94,23 @@ test("production rejects a short JWT secret without logging its value", () => {
     }
   );
 });
+
+test("production requires KMS escrow unless legacy mode is explicitly enabled", () => {
+  const base = {
+    NODE_ENV: "production",
+    DB_HOST: "pm2-db-host",
+    DB_USER: "pm2-db-user",
+    DB_NAME: "pm2-db-name",
+    JWT_ACCESS_SECRET: "test-only-secret-with-more-than-thirty-two-bytes",
+  };
+  assert.throws(
+    () => validateBackendEnvironment(base),
+    { message: /Production requires ESCROW_KMS_KEY_ID/ }
+  );
+  assert.doesNotThrow(() =>
+    validateBackendEnvironment({ ...base, ESCROW_KMS_KEY_ID: "arn:aws:kms:us-east-1:123456789012:key/test" })
+  );
+  assert.doesNotThrow(() =>
+    validateBackendEnvironment({ ...base, ALLOW_LEGACY_ESCROW_PRIVATE_KEY: "true" })
+  );
+});
