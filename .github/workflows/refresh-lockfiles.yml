@@ -1,0 +1,46 @@
+name: Refresh security lockfiles
+
+on:
+  push:
+    branches: ["security/prelaunch-hardening"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-security-lockfiles
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: security/prelaunch-hardening
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Patch frontend lockfile
+        run: |
+          npm install --package-lock-only
+          npm audit fix || true
+      - name: Patch backend lockfile
+        working-directory: backend
+        run: |
+          npm install --package-lock-only
+          npm audit fix || true
+      - name: Commit patched lockfiles
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json backend/package.json backend/package-lock.json
+          if git diff --cached --quiet; then
+            echo "No dependency changes needed"
+          else
+            git commit -m "Patch vulnerable npm dependencies"
+            git fetch origin security/prelaunch-hardening
+            git rebase origin/security/prelaunch-hardening
+            git push origin HEAD:security/prelaunch-hardening
+          fi
