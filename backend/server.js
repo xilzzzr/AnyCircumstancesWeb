@@ -204,7 +204,6 @@ app.use("/auth/emergency-contacts", (req, res, next) => {
 app.use(
   [
     "/files/share-lookup",
-    "/files/share-set-contact-public-key",
     "/files/share-get-contact-envelope",
     "/files/share-presign-download",
   ],
