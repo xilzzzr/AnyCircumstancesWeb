@@ -17,10 +17,15 @@ async function purgeVaultFiles(pool, userId) {
     const s3 = new S3Client({ region });
     for (const [bucket, keys] of byBucket) {
       for (let i = 0; i < keys.length; i += 1000) {
-        await s3.send(new DeleteObjectsCommand({
+        const result = await s3.send(new DeleteObjectsCommand({
           Bucket: bucket,
           Delete: { Objects: keys.slice(i, i + 1000).map((Key) => ({ Key })), Quiet: true },
         }));
+        if (Array.isArray(result.Errors) && result.Errors.length) {
+          const error = new Error("s3_delete_incomplete");
+          error.failedKeys = result.Errors.map((entry) => String(entry.Key || "")).filter(Boolean);
+          throw error;
+        }
       }
     }
   }
