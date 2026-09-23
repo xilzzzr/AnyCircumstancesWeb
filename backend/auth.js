@@ -172,6 +172,46 @@ function signAccessToken(payload) {
   return jwt.sign(payload, JWT_ACCESS_SECRET, { algorithm: "HS256", expiresIn: accessTtlSeconds });
 }
 
+const vaultUnlockTtlSeconds = positiveInt(process.env.VAULT_UNLOCK_TTL_SECONDS, 600);
+const vaultUnlockSecret = crypto.createHash("sha256").update(`${JWT_ACCESS_SECRET}:vault-unlock`).digest();
+
+function vaultCookieOptions(maxAgeMs) {
+  return {
+    httpOnly: true,
+    secure: cookieSecure,
+    sameSite: "strict",
+    domain: cookieDomain,
+    path: "/",
+    maxAge: maxAgeMs,
+  };
+}
+
+function setVaultUnlockCookie(res, userId, authVersion) {
+  const token = jwt.sign(
+    { sub: String(userId), av: Number(authVersion), purpose: "vault_unlock" },
+    vaultUnlockSecret,
+    { algorithm: "HS256", expiresIn: vaultUnlockTtlSeconds }
+  );
+  res.cookie("vault_unlock", token, vaultCookieOptions(vaultUnlockTtlSeconds * 1000));
+}
+
+function clearVaultUnlockCookie(res) {
+  res.clearCookie("vault_unlock", { httpOnly: true, secure: cookieSecure, sameSite: "strict", domain: cookieDomain, path: "/" });
+}
+
+function verifyVaultUnlockCookie(req, userId, authVersion) {
+  const raw = req.cookies?.vault_unlock ? String(req.cookies.vault_unlock) : "";
+  if (!raw) return false;
+  try {
+    const payload = jwt.verify(raw, vaultUnlockSecret, { algorithms: ["HS256"] });
+    return payload?.purpose === "vault_unlock" &&
+      String(payload?.sub || "") === String(userId) &&
+      Number(payload?.av) === Number(authVersion);
+  } catch {
+    return false;
+  }
+}
+
 function cookieOptions(maxAgeMs) {
   return {
     httpOnly: true,
@@ -192,6 +232,7 @@ function clearAuthCookies(res) {
   const options = { httpOnly: true, secure: cookieSecure, sameSite: "lax", domain: cookieDomain, path: "/" };
   res.clearCookie("access_token", options);
   res.clearCookie("refresh_token", options);
+  clearVaultUnlockCookie(res);
 }
 
 let _mailer = null;
@@ -272,14 +313,14 @@ async function sendPasswordResetEmail(toEmail, resetUrl) {
 
 async function getUserByEmail(email) {
   const [rows] = await pool.query(
-    "SELECT id, email, password_hash, email_verified_at, status FROM users WHERE email = ? LIMIT 1",
+    "SELECT id, email, password_hash, email_verified_at, status, auth_version, duress_locked_until FROM users WHERE email = ? LIMIT 1",
     [email]
   );
   return rows[0] || null;
 }
 
 async function getUserById(userId) {
-  const [rows] = await pool.query("SELECT id, email, email_verified_at, status FROM users WHERE id = ? LIMIT 1", [userId]);
+  const [rows] = await pool.query("SELECT id, email, email_verified_at, status, auth_version, duress_locked_until FROM users WHERE id = ? LIMIT 1", [userId]);
   return rows[0] || null;
 }
 
@@ -291,31 +332,56 @@ async function verifyCurrentPassword(userId, password) {
   return bcrypt.compare(String(password), String(user.password_hash));
 }
 
-function getUserIdFromAccessCookie(req) {
+async function validateAccessSession(req) {
   const access = req.cookies?.access_token ? String(req.cookies.access_token) : "";
-  if (!access) return null;
+  if (!access) return { ok: false, error: "not_authenticated" };
 
+  let payload;
   try {
-    const payload = jwt.verify(access, JWT_ACCESS_SECRET, { algorithms: ["HS256"] });
-    const userId = payload?.sub ? String(payload.sub) : null;
-    return userId || null;
+    payload = jwt.verify(access, JWT_ACCESS_SECRET, { algorithms: ["HS256"] });
   } catch {
-    return null;
+    return { ok: false, error: "invalid_session" };
   }
+
+  const userId = payload?.sub ? String(payload.sub) : "";
+  if (!userId) return { ok: false, error: "invalid_session" };
+
+  const [rows] = await pool.query(
+    "SELECT status, email_verified_at, auth_version, duress_locked_until FROM users WHERE id = ? LIMIT 1",
+    [userId]
+  );
+  const user = rows?.[0];
+  if (!user || user.status !== "active" || !user.email_verified_at) {
+    return { ok: false, error: "invalid_session" };
+  }
+  if (user.duress_locked_until && new Date(user.duress_locked_until).getTime() > Date.now()) {
+    return { ok: false, error: "temporarily_locked", lockedUntil: user.duress_locked_until };
+  }
+  const authVersion = Number(user.auth_version || 1);
+  if (Number(payload?.av || 0) !== authVersion) {
+    return { ok: false, error: "stale_session" };
+  }
+  return { ok: true, userId, authVersion };
 }
 
-function requireUserId(req, res) {
-  const userId = getUserIdFromAccessCookie(req);
-  if (!userId) {
-    res.status(401).json({ ok: false, error: "not_authenticated" });
+async function requireUserId(req, res) {
+  const session = await validateAccessSession(req);
+  if (!session.ok) {
+    clearAuthCookies(res);
+    res.status(session.error === "temporarily_locked" ? 423 : 401).json({
+      ok: false,
+      error: session.error,
+      ...(session.lockedUntil ? { locked_until: new Date(session.lockedUntil).toISOString() } : {}),
+    });
     return null;
   }
-  req.userId = userId;
-  return userId;
+  req.userId = session.userId;
+  req.authVersion = session.authVersion;
+  return session.userId;
 }
 
 async function requireActiveSubscription(req, res) {
-  const userId = requireUserId(req, res);
+  const userId = await requireUserId(req, res);
   if (!userId) return null;
 
   const [rows] = await pool.query(
@@ -490,7 +556,7 @@ async function consumePasswordResetToken(conn, rawToken, newPassword) {
   const passwordHash = await bcrypt.hash(newPassword, 12);
 
   await conn.query("UPDATE password_reset_tokens SET used_at = NOW() WHERE id = ?", [row.id]);
-  await conn.query("UPDATE users SET password_hash = ? WHERE id = ? LIMIT 1", [passwordHash, row.user_id]);
+  await conn.query("UPDATE users SET password_hash = ?, auth_version = auth_version + 1 WHERE id = ? LIMIT 1", [passwordHash, row.user_id]);
   await conn.query("UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = ? AND revoked_at IS NULL", [row.user_id]);
 
   return { ok: true, userId: row.user_id };
@@ -595,7 +661,7 @@ router.post(
       }
 
       const refresh = await issueRefreshToken(conn, user.id);
-      const access = signAccessToken({ sub: String(user.id), email: user.email });
+      const access = signAccessToken({ sub: String(user.id), email: user.email, av: Number(user.auth_version || 1) });
 
       await conn.commit();
 
@@ -628,6 +694,9 @@ router.post(
     const passwordOk = await bcrypt.compare(password, user?.password_hash || DUMMY_PASSWORD_HASH);
     if (!user || !passwordOk) return res.status(401).json({ ok: false, error: "invalid_credentials" });
     if (user.status !== "active") return res.status(403).json({ ok: false, error: "account_disabled" });
+    if (user.duress_locked_until && new Date(user.duress_locked_until).getTime() > Date.now()) {
+      return res.status(423).json({ ok: false, error: "temporarily_locked" });
+    }
     if (!user.email_verified_at) return res.status(403).json({ ok: false, error: "email_not_verified" });
 
     const conn = await pool.getConnection();
@@ -635,7 +704,7 @@ router.post(
       await conn.beginTransaction();
 
       const refresh = await issueRefreshToken(conn, user.id);
-      const access = signAccessToken({ sub: String(user.id), email: user.email });
+      const access = signAccessToken({ sub: String(user.id), email: user.email, av: Number(user.auth_version || 1) });
 
       await conn.commit();
 
@@ -671,13 +740,14 @@ router.post(
       }
 
       const user = await getUserById(rotated.userId);
-      if (!user || user.status !== "active" || !user.email_verified_at) {
+      if (!user || user.status !== "active" || !user.email_verified_at ||
+          (user.duress_locked_until && new Date(user.duress_locked_until).getTime() > Date.now())) {
         await conn.rollback();
         clearAuthCookies(res);
         return res.status(401).json({ ok: false, error: "invalid_user" });
       }
 
-      const access = signAccessToken({ sub: String(user.id), email: user.email });
+      const access = signAccessToken({ sub: String(user.id), email: user.email, av: Number(user.auth_version || 1) });
 
       await conn.commit();
 
@@ -770,7 +840,7 @@ router.post(
 router.post(
   "/set-pin",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
     if (!(await verifyCurrentPassword(userId, req.body?.password))) {
       return res.status(401).json({ ok: false, error: "reauthentication_failed" });
@@ -778,6 +848,10 @@ router.post(
 
     const pin = String(req.body?.pin || "");
     if (!/^\d{4,6}$/.test(pin)) return res.status(400).json({ ok: false, error: "invalid_pin" });
+    const [otherPins] = await pool.query("SELECT panic_pin_hash FROM users WHERE id = ? LIMIT 1", [String(userId)]);
+    if (otherPins?.[0]?.panic_pin_hash && await bcrypt.compare(pin, String(otherPins[0].panic_pin_hash))) {
+      return res.status(409).json({ ok: false, error: "pin_must_differ_from_emergency_pin" });
+    }
 
     const pinHash = await bcrypt.hash(pin, 12);
     await pool.query("UPDATE users SET pin_hash = ? WHERE id = ? LIMIT 1", [pinHash, String(userId)]);
@@ -789,7 +863,7 @@ router.post(
 router.post(
   "/set-panic-pin",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
     if (!(await verifyCurrentPassword(userId, req.body?.password))) {
       return res.status(401).json({ ok: false, error: "reauthentication_failed" });
@@ -797,6 +871,10 @@ router.post(
 
     const pin = String(req.body?.pin || "");
     if (!/^\d{4,6}$/.test(pin)) return res.status(400).json({ ok: false, error: "invalid_pin" });
+    const [otherPins] = await pool.query("SELECT pin_hash FROM users WHERE id = ? LIMIT 1", [String(userId)]);
+    if (otherPins?.[0]?.pin_hash && await bcrypt.compare(pin, String(otherPins[0].pin_hash))) {
+      return res.status(409).json({ ok: false, error: "emergency_pin_must_differ_from_pin" });
+    }
 
     const pinHash = await bcrypt.hash(pin, 12);
     await pool.query("UPDATE users SET panic_pin_hash = ? WHERE id = ? LIMIT 1", [pinHash, String(userId)]);
@@ -980,7 +1058,7 @@ function settingsDto(row) {
 router.get(
   "/verification-settings",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
 
     await syncVerificationFromBilling(userId);
@@ -1000,7 +1078,7 @@ const row = await getVerificationSettingsRow(userId);
 router.put(
   "/verification-settings",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
 
 const requestedFrequency = String(req.body?.frequency || "");
@@ -1047,7 +1125,7 @@ if (existing?.last_checkin_at) {
 router.post(
   "/verification-check-in",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
 
     const pin = String(req.body?.pin || "");
@@ -1087,6 +1165,7 @@ router.post(
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
+      await conn.query("SELECT user_id FROM verification_settings WHERE user_id = ? FOR UPDATE", [String(userId)]);
 
       await conn.query("INSERT INTO verification_checkins (user_id, method) VALUES (?, 'manual')", [String(userId)]);
 
@@ -1123,7 +1202,7 @@ router.post(
 router.get(
   "/verification-checkins",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
 
     let limit = Number(req.query?.limit);
@@ -1149,7 +1228,7 @@ router.get(
 router.get(
   "/verification-status",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
 	await syncVerificationFromBilling(userId);
 
@@ -1197,7 +1276,7 @@ async function listInvoices(userId, limit) {
 router.get(
   "/billing/summary",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
 
     await ensureBillingProfile(userId);
@@ -1284,7 +1363,7 @@ async function createBillingPortalUrl(userId, returnUrl) {
 router.post(
   "/billing/portal",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
 
     await ensureBillingProfile(userId);
@@ -1306,7 +1385,7 @@ router.post(
 router.post(
   "/billing/update-plan",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
     if (!stripe) return res.status(503).json({ ok: false, error: "billing_unavailable" });
 
@@ -1429,7 +1508,7 @@ router.post(
 router.post(
   "/billing/choose-plan",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
 
     await ensureBillingProfile(userId);
@@ -1483,7 +1562,7 @@ router.post(
 router.get(
   "/billing/invoices",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
 
     const invoices = await listInvoices(userId, Number(req.query?.limit));
@@ -1553,7 +1632,7 @@ function validatePlanInput(body) {
 router.post(
   "/billing/quote",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
 
     const plan = validatePlanInput(req.body);
@@ -1582,7 +1661,7 @@ router.post(
 router.post(
   "/billing/create-checkout-session",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
 
     if (!stripe) return res.status(500).json({ ok: false, error: "stripe_not_configured" });
@@ -1690,7 +1769,7 @@ router.post(
 router.post(
   "/billing/create-portal-session",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
 
     if (!stripe) return res.status(500).json({ ok: false, error: "stripe_not_configured" });
@@ -1715,7 +1794,7 @@ router.post(
 router.get(
   "/billing/status",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
 
     const [rows] = await pool.query(
@@ -1742,7 +1821,7 @@ router.get(
 router.get(
   "/billing/apple/account-token",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
     await ensureBillingProfile(userId);
     const appAccountToken = await ensureAppleAccountToken(pool, userId);
@@ -1753,7 +1832,7 @@ router.get(
 router.post(
   "/billing/apple/sync",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
     const signedTransactionInfo = String(req.body?.signedTransactionInfo || "");
     if (!signedTransactionInfo) return res.status(400).json({ ok: false, error: "missing_signed_transaction" });
@@ -1785,14 +1864,15 @@ router.post(
     const pin = String(req.body?.pin || "").trim();
     if (!/^\d{4,6}$/.test(pin)) return res.status(400).json({ ok: false, error: "invalid_pin" });
 
-    const [urows] = await pool.query("SELECT pin_hash FROM users WHERE id = ? LIMIT 1", [String(userId)]);
+    const [urows] = await pool.query("SELECT pin_hash, auth_version FROM users WHERE id = ? LIMIT 1", [String(userId)]);
     const pinHash = urows?.[0]?.pin_hash ? String(urows[0].pin_hash) : "";
     if (!pinHash) return res.status(400).json({ ok: false, error: "no_pin_set" });
 
     const ok = await bcrypt.compare(pin, pinHash);
     if (!ok) return res.status(401).json({ ok: false, error: "invalid_pin" });
 
-    return res.json({ ok: true });
+    setVaultUnlockCookie(res, userId, Number(urows[0].auth_version || 1));
+    return res.json({ ok: true, expires_in_seconds: vaultUnlockTtlSeconds });
   })
 );
 
@@ -2631,7 +2711,7 @@ router.get(
 router.post(
   "/device-token",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
 
     const token = String(req.body?.token || "").trim();
@@ -2686,22 +2766,9 @@ router.post(
 router.get(
   "/me",
   asyncHandler(async (req, res) => {
-    const access = req.cookies?.access_token ? String(req.cookies.access_token) : "";
-    if (!access) return res.json({ ok: false });
-
-    let payload;
-    try {
-      payload = jwt.verify(access, JWT_ACCESS_SECRET, { algorithms: ["HS256"] });
-    } catch {
-      return res.json({ ok: false });
-    }
-
-    const userId = payload?.sub ? String(payload.sub) : "";
-    if (!userId) return res.json({ ok: false });
-
+    const userId = await requireUserId(req, res);
+    if (!userId) return;
     const user = await getUserById(userId);
-    if (!user || user.status !== "active" || !user.email_verified_at) return res.json({ ok: false });
-
     return res.json({ ok: true, role: "user", userId, user: { id: String(user.id), email: user.email } });
   })
 );
@@ -2709,7 +2776,7 @@ router.get(
 router.post(
   "/account/cancel-subscription",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
     if (String(req.body?.confirmation || "") !== "DELETE MY FILES") {
       return res.status(400).json({ ok: false, error: "confirmation_required" });
@@ -2743,7 +2810,7 @@ router.post(
 router.delete(
   "/account",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
     if (String(req.body?.confirmation || "") !== "DELETE MY ACCOUNT") {
       return res.status(400).json({ ok: false, error: "confirmation_required" });
@@ -2890,4 +2957,11 @@ async function stripeWebhookHandler(req, res) {
   }
 }
 
-module.exports = { authRouter: router, authPool: pool, stripeWebhookHandler };
+module.exports = {
+  authRouter: router,
+  authPool: pool,
+  stripeWebhookHandler,
+  validateAccessSession,
+  verifyVaultUnlockCookie,
+  clearVaultUnlockCookie,
+};
