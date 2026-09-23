@@ -38,7 +38,7 @@ function deriveFilenameFromKey(key: string) {
 }
 
 const shareErrorCodes = new Set([
-  "invalid_token", "token_expired", "missing_file_escrow", "escrow_private_key_missing",
+  "invalid_token", "token_expired", "token_consumed", "missing_file_escrow", "escrow_key_unavailable",
   "missing_envelope_meta", "invalid_envelope_meta", "missing_public_key", "public_key_too_large",
   "invalid_public_key", "unwrap_failed", "download_failed", "decrypt_failed",
   "envelope_create_failed", "presign_failed", "rate_limited", "server_error",
