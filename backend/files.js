@@ -64,6 +64,46 @@ function isValidShareToken(token) {
   return /^[a-f0-9]{64}$/i.test(String(token || ""));
 }
 
+function shareSessionCookieOptions(maxAgeMs = 20 * 60 * 1000) {
+  return {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production" || String(process.env.COOKIE_SECURE || "").toLowerCase() === "true",
+    sameSite: "strict",
+    domain: process.env.COOKIE_DOMAIN || undefined,
+    path: "/",
+    maxAge: maxAgeMs,
+  };
+}
+
+function setShareSessionCookie(res, shareRow, tokenHash) {
+  const secret = String(process.env.JWT_ACCESS_SECRET || "");
+  if (!secret) throw new Error("server_misconfig");
+  const session = jwt.sign(
+    {
+      purpose: "share",
+      tid: String(shareRow.id),
+      cid: String(shareRow.contact_id),
+      fid: String(shareRow.file_id),
+      th: String(tokenHash),
+    },
+    secret,
+    { algorithm: "HS256", expiresIn: 20 * 60 }
+  );
+  res.cookie("share_session", session, shareSessionCookieOptions());
+}
+
+function getShareSession(req) {
+  const raw = req.cookies?.share_session ? String(req.cookies.share_session) : "";
+  const secret = String(process.env.JWT_ACCESS_SECRET || "");
+  if (!raw || !secret) return null;
+  try {
+    const payload = jwt.verify(raw, secret, { algorithms: ["HS256"] });
+    return payload?.purpose === "share" ? payload : null;
+  } catch {
+    return null;
+  }
+}
+
 function shareExpiresAt() {
   const requested = Number(process.env.SHARE_LINK_TTL_DAYS || 30);
   const days = Number.isInteger(requested) ? Math.max(1, Math.min(requested, 90)) : 30;
@@ -692,38 +732,83 @@ router.post(
 router.post(
   "/share-lookup",
   asyncHandler(async (req, res) => {
+    res.set("Cache-Control", "no-store");
     const token = String(req.body?.token || "");
     if (!isValidShareToken(token)) return res.status(400).json({ ok: false, error: "invalid_token" });
 
     const tokenHash = sha256Hex(token);
     const pool = getPool();
+    const existingSession = getShareSession(req);
 
-    const [rows] = await pool.query(
-      `SELECT t.contact_id, t.file_id, t.expires_at, t.used_at,
-              f.content_type
-       FROM contact_file_share_tokens t
-       JOIN emergency_contacts c ON c.id = t.contact_id
-       JOIN files f ON f.id = t.file_id AND f.user_id = c.user_id
-       WHERE t.token_hash = ? LIMIT 1`,
-      [tokenHash]
-    );
+    if (existingSession && String(existingSession.th || "") === tokenHash) {
+      const [rows] = await pool.query(
+        `SELECT t.id, t.contact_id, t.file_id, t.expires_at, t.used_at, f.content_type
+         FROM contact_file_share_tokens t
+         JOIN emergency_contacts c ON c.id = t.contact_id
+         JOIN files f ON f.id = t.file_id AND f.user_id = c.user_id
+         WHERE t.id = ? AND t.token_hash = ? LIMIT 1`,
+        [String(existingSession.tid || ""), tokenHash]
+      );
+      const row = rows?.[0];
+      if (
+        row &&
+        row.used_at &&
+        new Date(row.expires_at).getTime() >= Date.now() &&
+        String(row.contact_id) === String(existingSession.cid || "") &&
+        String(row.file_id) === String(existingSession.fid || "")
+      ) {
+        return res.json({
+          ok: true,
+          file: { id: String(row.file_id), content_type: String(row.content_type) },
+          token: { expires_at: row.expires_at, redeemed: true },
+        });
+      }
+    }
 
-    if (!rows || !rows.length) return res.status(404).json({ ok: false, error: "invalid_token" });
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const [rows] = await conn.query(
+        `SELECT t.id, t.contact_id, t.file_id, t.expires_at, t.used_at, f.content_type
+         FROM contact_file_share_tokens t
+         JOIN emergency_contacts c ON c.id = t.contact_id
+         JOIN files f ON f.id = t.file_id AND f.user_id = c.user_id
+         WHERE t.token_hash = ? LIMIT 1 FOR UPDATE`,
+        [tokenHash]
+      );
 
-    const r = rows[0];
-    if (new Date(r.expires_at).getTime() < Date.now()) return res.status(410).json({ ok: false, error: "token_expired" });
+      const row = rows?.[0];
+      if (!row) {
+        await conn.rollback();
+        return res.status(404).json({ ok: false, error: "invalid_token" });
+      }
+      if (new Date(row.expires_at).getTime() < Date.now()) {
+        await conn.rollback();
+        return res.status(410).json({ ok: false, error: "token_expired" });
+      }
+      if (row.used_at) {
+        await conn.rollback();
+        return res.status(410).json({ ok: false, error: "token_already_redeemed" });
+      }
 
-    return res.json({
-      ok: true,
-      file: {
-        id: String(r.file_id),
-        content_type: String(r.content_type),
-      },
-      token: {
-        expires_at: r.expires_at,
-        used_at: r.used_at,
-      },
-    });
+      await conn.query(
+        "UPDATE contact_file_share_tokens SET used_at = UTC_TIMESTAMP(3) WHERE id = ? AND used_at IS NULL",
+        [row.id]
+      );
+      await conn.commit();
+
+      setShareSessionCookie(res, row, tokenHash);
+      return res.json({
+        ok: true,
+        file: { id: String(row.file_id), content_type: String(row.content_type) },
+        token: { expires_at: row.expires_at, redeemed: true },
+      });
+    } catch (error) {
+      try { await conn.rollback(); } catch {}
+      throw error;
+    } finally {
+      conn.release();
+    }
   })
 );
 
@@ -867,10 +952,9 @@ router.post(
 router.post(
   "/share-get-contact-envelope",
   asyncHandler(async (req, res) => {
-    // The unexpired bearer token authorizes re-wrapping to this request's key.
     res.set("Cache-Control", "no-store");
-    const token = String(req.body?.token || "");
-    if (!isValidShareToken(token)) return res.status(400).json({ ok: false, error: "invalid_token" });
+    const shareSession = getShareSession(req);
+    if (!shareSession) return res.status(401).json({ ok: false, error: "share_session_required" });
 
     const publicKey = String(req.body?.public_key || "").trim();
     if (!publicKey) return res.status(400).json({ ok: false, error: "missing_public_key" });
@@ -882,14 +966,14 @@ router.post(
 
     const pool = getPool();
     const [rows] = await pool.query(
-      `SELECT t.contact_id, t.file_id, t.expires_at
+      `SELECT t.contact_id, t.file_id, t.expires_at, t.used_at
        FROM contact_file_share_tokens t
        JOIN emergency_contacts c ON c.id = t.contact_id
        JOIN files f ON f.id = t.file_id AND f.user_id = c.user_id
-       WHERE t.token_hash = ? LIMIT 1`,
-      [sha256Hex(token)]
+       WHERE t.id = ? AND t.contact_id = ? AND t.file_id = ? LIMIT 1`,
+      [String(shareSession.tid || ""), String(shareSession.cid || ""), String(shareSession.fid || "")]
     );
-    if (!rows?.length) return res.status(404).json({ ok: false, error: "invalid_token" });
+    if (!rows?.length || !rows[0].used_at) return res.status(404).json({ ok: false, error: "invalid_share_session" });
     const share = rows[0];
     if (new Date(share.expires_at).getTime() < Date.now()) return res.status(410).json({ ok: false, error: "token_expired" });
 
@@ -908,9 +992,9 @@ router.post(
     );
     const storedMeta = metaRows?.[0]?.meta_json;
     if (!storedMeta) return res.status(500).json({ ok: false, error: "missing_envelope_meta" });
+
     let meta;
     try {
-      // MySQL JSON columns may already be decoded by the driver.
       meta = typeof storedMeta === "string" ? JSON.parse(storedMeta) : storedMeta;
       if (!meta || typeof meta !== "object" || Array.isArray(meta)) throw new Error("invalid_envelope_meta");
     } catch {
@@ -926,9 +1010,9 @@ router.post(
         escrowPrivateKeyPem,
       });
     } catch {
-      // Do not forward crypto exceptions or key material to logs/responses.
       return res.status(500).json({ ok: false, error: "envelope_create_failed" });
     }
+
     return res.json({
       ok: true,
       contact_id: Number(share.contact_id),
@@ -943,48 +1027,44 @@ router.post(
 router.post(
   "/share-presign-download",
   asyncHandler(async (req, res) => {
-    const token = String(req.body?.token || "");
-    if (!isValidShareToken(token)) return res.status(400).json({ ok: false, error: "invalid_token" });
+    const shareSession = getShareSession(req);
+    if (!shareSession) return res.status(401).json({ ok: false, error: "share_session_required" });
 
-    const tokenHash = sha256Hex(token);
     const pool = getPool();
-
     const [trows] = await pool.query(
-      `SELECT t.contact_id, t.file_id, t.expires_at
+      `SELECT t.contact_id, t.file_id, t.expires_at, t.used_at
        FROM contact_file_share_tokens t
        JOIN emergency_contacts c ON c.id = t.contact_id
        JOIN files f ON f.id = t.file_id AND f.user_id = c.user_id
-       WHERE t.token_hash = ? LIMIT 1`,
-      [tokenHash]
+       WHERE t.id = ? AND t.contact_id = ? AND t.file_id = ? LIMIT 1`,
+      [String(shareSession.tid || ""), String(shareSession.cid || ""), String(shareSession.fid || "")]
     );
-    if (!trows || !trows.length) return res.status(404).json({ ok: false, error: "invalid_token" });
+    if (!trows?.length || !trows[0].used_at) return res.status(404).json({ ok: false, error: "invalid_share_session" });
 
     const t = trows[0];
     if (new Date(t.expires_at).getTime() < Date.now()) return res.status(410).json({ ok: false, error: "token_expired" });
 
-    const [frows] = await pool.query("SELECT bucket, content_type FROM files WHERE id = ? LIMIT 1", [String(t.file_id)]);
-    if (!frows || !frows.length) return res.status(404).json({ ok: false, error: "file_not_found" });
-
-    const f = frows[0];
+    const [frows] = await pool.query(
+      "SELECT bucket, content_type FROM files WHERE id = ? AND user_id = (SELECT user_id FROM emergency_contacts WHERE id = ? LIMIT 1) LIMIT 1",
+      [String(t.file_id), String(t.contact_id)]
+    );
+    if (!frows?.length) return res.status(404).json({ ok: false, error: "file_not_found" });
 
     const region = String(process.env.AWS_REGION || "").trim();
     if (!region) return res.status(500).json({ ok: false, error: "AWS_REGION missing" });
 
-    const s3 = new S3Client({ region });
-
-    const bucket = String(f.bucket || "").trim();
+    const bucket = String(frows[0].bucket || "").trim();
     if (!bucket) return res.status(500).json({ ok: false, error: "missing_bucket" });
 
     const fileId = String(t.file_id);
     const basename = fileId.split("/").pop() || "download.bin";
-
+    const s3 = new S3Client({ region });
     const cmd = new GetObjectCommand({
       Bucket: bucket,
       Key: fileId,
-      ResponseContentType: String(f.content_type || "application/octet-stream").slice(0, 255),
-      ResponseContentDisposition: `attachment; filename="${basename}"`,
+      ResponseContentType: String(frows[0].content_type || "application/octet-stream").slice(0, 255),
+      ResponseContentDisposition: `attachment; filename="${basename.replace(/["\\\r\n]/g, "_")}"`,
     });
-
     const url = await getSignedUrl(s3, cmd, { expiresIn: 600 });
 
     return res.json({ ok: true, url, file_id: fileId, contact_id: Number(t.contact_id) });
