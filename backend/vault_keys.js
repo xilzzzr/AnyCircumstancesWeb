@@ -24,8 +24,8 @@ function validateBundle(input) {
   };
 }
 
-function registerVaultKeyRoutes(router, requireUser, getPool, asyncHandler) {
-  router.get('/vault-keys', requireUser, asyncHandler(async (req, res) => {
+function registerVaultKeyRoutes(router, requireUser, requireVaultUnlocked, getPool, asyncHandler) {
+  router.get('/vault-keys', requireUser, requireVaultUnlocked, asyncHandler(async (req, res) => {
     const pool = getPool();
     const [users] = await pool.query('SELECT public_key FROM users WHERE id = ? AND status = \'active\' LIMIT 1', [req.userId]);
     if (!users.length) return res.status(401).json({ ok: false, error: 'not_authenticated' });
@@ -35,7 +35,7 @@ function registerVaultKeyRoutes(router, requireUser, getPool, asyncHandler) {
       keys: rows.map((row) => typeof row.bundle_json === 'string' ? JSON.parse(row.bundle_json) : row.bundle_json) });
   }));
 
-  router.post('/vault-keys', requireUser, asyncHandler(async (req, res) => {
+  router.post('/vault-keys', requireUser, requireVaultUnlocked, asyncHandler(async (req, res) => {
     let bundle;
     try { bundle = validateBundle(req.body?.bundle); }
     catch { return res.status(400).json({ ok: false, error: 'invalid_vault_key' }); }
