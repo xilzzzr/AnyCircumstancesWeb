@@ -21,7 +21,7 @@ for (const verified of [false, true]) {
         pool: { getConnection: async () => conn },
         consumeEmailVerificationForUser: async () => { checked = true; return { ok: validCode, reason: 'invalid_code' }; },
         issueRefreshToken: async () => { assert.equal(checked && validCode, true); return 'refresh'; },
-        signAccessToken: () => 'access', setAuthCookies: () => { cookies = true; }, logError: () => assert.fail('Unexpected error'),
+        signAccessTokenForUser: () => 'access', setAuthCookies: () => { cookies = true; }, logError: () => assert.fail('Unexpected error'),
       });
       const res = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
       await handler({ body: { email: 'test@example.test', code: '123456' } }, res);
