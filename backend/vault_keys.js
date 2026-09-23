@@ -24,8 +24,8 @@ function validateBundle(input) {
   };
 }
 
-function registerVaultKeyRoutes(router, requireUser, getPool, asyncHandler) {
-  router.get('/vault-keys', requireUser, asyncHandler(async (req, res) => {
+function registerVaultKeyRoutes(router, requireUser, requireVaultAuthorization, getPool, asyncHandler) {
+  router.get('/vault-keys', requireUser, requireVaultAuthorization, asyncHandler(async (req, res) => {
     const pool = getPool();
     const [users] = await pool.query('SELECT public_key FROM users WHERE id = ? AND status = \'active\' LIMIT 1', [req.userId]);
     if (!users.length) return res.status(401).json({ ok: false, error: 'not_authenticated' });
