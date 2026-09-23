@@ -1163,6 +1163,7 @@ router.post(
     const nextDue = addDays(now, daysForFrequency(frequency));
 
     const conn = await pool.getConnection();
+    let preparedEmergency = null;
     try {
       await conn.beginTransaction();
       await conn.query("SELECT user_id FROM verification_settings WHERE user_id = ? FOR UPDATE", [String(userId)]);
@@ -1175,11 +1176,7 @@ router.post(
       );
 
       if (isPanic) {
-        const out = await dispatchEmergencyForUser(conn, userId, req);
-        if (!out?.ok) {
-          await conn.rollback();
-          return res.status(500).json({ ok: false, error: out?.error || "server_error" });
-        }
+        preparedEmergency = await prepareEmergencyDispatch(conn, userId, req);
       }
 
       await conn.commit();
@@ -1191,6 +1188,13 @@ router.post(
       return res.status(500).json({ ok: false, error: "server_error" });
     } finally {
       conn.release();
+    }
+
+    if (preparedEmergency) {
+      const sent = await sendPreparedEmergencyDeliveries(preparedEmergency.deliveries);
+      if (!sent.ok) {
+        return res.status(502).json({ ok: false, error: sent.error || "emergency_delivery_partial_failure" });
+      }
     }
 
     const saved = await getVerificationSettingsRow(userId);
@@ -1876,91 +1880,92 @@ router.post(
   })
 );
 
-async function dispatchEmergencyForUser(conn, userId, req) {
-  const transporter = getMailer();
-  const from = emailSender();
-  if (!transporter) {
-    return { ok: false, error: "mailer_not_configured", emailedContacts: 0, linksCreated: 0 };
-  }
-
+async function prepareEmergencyDispatch(conn, userId, req, { scheduled = false } = {}) {
   const publicBase = String(process.env.PUBLIC_APP_BASE_URL || "https://anycircumstances.com").replace(/\/+$/, "");
-
-  let emailedContacts = 0;
-  let linksCreated = 0;
-
   await conn.query("INSERT INTO verification_panic_dispatches (user_id, ip, user_agent) VALUES (?, ?, ?)", [
     String(userId),
-    String(req.ip || "").slice(0, 64),
-    String(req.headers["user-agent"] || "").slice(0, 255),
+    String(req?.ip || "").slice(0, 64),
+    String(req?.headers?.["user-agent"] || "").slice(0, 255),
   ]);
 
   const [urows] = await conn.query("SELECT email FROM users WHERE id = ? LIMIT 1", [String(userId)]);
   const ownerEmail = urows?.[0]?.email ? String(urows[0].email) : "";
-
   const [contacts] = await conn.query(
-    "SELECT id, email, name, verified_at, public_key FROM emergency_contacts WHERE user_id = ? AND verified_at IS NOT NULL",
+    "SELECT id, email, name, public_key FROM emergency_contacts WHERE user_id = ? AND verified_at IS NOT NULL",
     [String(userId)]
   );
-
-  if (!contacts.length) {
-    return { ok: true, emailedContacts: 0, linksCreated: 0, note: "no_contacts" };
-  }
-
   const [assignments] = await conn.query(
-    `
-      SELECT a.contact_id, a.file_id
-      FROM emergency_contact_file_assignments a
-      JOIN emergency_contacts c ON c.id = a.contact_id
-      JOIN files f ON f.id = a.file_id
-      WHERE c.user_id = ? AND f.user_id = c.user_id
-    `,
+    `SELECT a.contact_id, a.file_id
+       FROM emergency_contact_file_assignments a
+       JOIN emergency_contacts ec ON ec.id = a.contact_id
+       JOIN files f ON f.id = a.file_id
+       WHERE ec.user_id = ? AND f.user_id = ec.user_id`,
     [String(userId)]
   );
 
   const filesByContact = new Map();
-  for (const a of assignments) {
-    const cid = Number(a.contact_id);
-    const arr = filesByContact.get(cid) || [];
-    arr.push(String(a.file_id));
-    filesByContact.set(cid, arr);
+  for (const row of assignments || []) {
+    const id = Number(row.contact_id);
+    const list = filesByContact.get(id) || [];
+    list.push(String(row.file_id));
+    filesByContact.set(id, list);
   }
 
-  for (const c of contacts) {
-    const contactId = Number(c.id);
-    const email = String(c.email);
-    const name = String(c.name || "");
-    const list = filesByContact.get(contactId) || [];
-    if (!list.length) continue;
-
-    const missingSetup = !c.public_key;
-
+  const deliveries = [];
+  let linksCreated = 0;
+  for (const contact of contacts || []) {
+    const contactId = Number(contact.id);
+    const fileIds = filesByContact.get(contactId) || [];
+    if (!fileIds.length) continue;
     const links = [];
-    for (const fileId of list) {
+    for (const fileId of fileIds) {
       const token = crypto.randomBytes(32).toString("hex");
-      const tokenHash = sha256Hex(token);
-
       await conn.query(
         "INSERT INTO contact_file_share_tokens (contact_id, file_id, token_hash, expires_at) VALUES (?, ?, ?, ?)",
-        [contactId, fileId, tokenHash, shareExpiresAt()]
+        [contactId, fileId, sha256Hex(token), shareExpiresAt()]
       );
-links.push(publicBase + "/share#token=" + encodeURIComponent(token));
+      links.push(publicBase + "/share#token=" + encodeURIComponent(token));
       linksCreated += 1;
     }
-
-    const subject = "AnyCircumstances: Emergency access link (manual trigger)";
-    const rendered = renderEmergencyEmail({ name, ownerEmail, links, missingSetup });
-
-await transporter.sendMail({
-  from,
-  to: email,
-  subject,
-  text: rendered.text,
-  html: rendered.html,
-});
-    emailedContacts += 1;
+    const rendered = renderEmergencyEmail({
+      name: String(contact.name || ""),
+      ownerEmail,
+      links,
+      scheduled,
+    });
+    deliveries.push({
+      to: String(contact.email),
+      subject: scheduled
+        ? "AnyCircumstances: Emergency access link"
+        : "AnyCircumstances: Emergency access link (manual trigger)",
+      rendered,
+    });
   }
+  return { ok: true, linksCreated, deliveries };
+}
 
-  return { ok: true, emailedContacts, linksCreated };
+async function sendPreparedEmergencyDeliveries(deliveries) {
+  const transporter = getMailer();
+  const from = emailSender();
+  if (!transporter) return { ok: false, error: "mailer_not_configured", emailedContacts: 0, failedContacts: deliveries.length };
+  let emailedContacts = 0;
+  let failedContacts = 0;
+  for (const delivery of deliveries) {
+    try {
+      await transporter.sendMail({
+        from,
+        to: delivery.to,
+        subject: delivery.subject,
+        text: delivery.rendered.text,
+        html: delivery.rendered.html,
+      });
+      emailedContacts += 1;
+    } catch (error) {
+      failedContacts += 1;
+      logError("emergency-delivery", error);
+    }
+  }
+  return { ok: failedContacts === 0, emailedContacts, failedContacts };
 }
 
 
@@ -1973,111 +1978,36 @@ router.post(
     const pin = String(req.body?.pin || "");
     if (!/^\d{4,6}$/.test(pin)) return res.status(400).json({ ok: false, error: "invalid_pin" });
 
-    const [urows] = await pool.query("SELECT email, panic_pin_hash FROM users WHERE id = ? LIMIT 1", [String(userId)]);
+    const [urows] = await pool.query("SELECT panic_pin_hash FROM users WHERE id = ? LIMIT 1", [String(userId)]);
     const panicHash = urows?.[0]?.panic_pin_hash ? String(urows[0].panic_pin_hash) : "";
-    const ownerEmail = urows?.[0]?.email ? String(urows[0].email) : "";
-
     if (!panicHash) return res.status(400).json({ ok: false, error: "panic_pin_not_set" });
-
-    const ok = await bcrypt.compare(pin, panicHash);
-    if (!ok) return res.status(401).json({ ok: false, error: "invalid_pin" });
+    if (!(await bcrypt.compare(pin, panicHash))) {
+      return res.status(401).json({ ok: false, error: "invalid_pin" });
+    }
     if (!consumeEmergencyDispatchQuota(userId, res)) return;
 
-    const transporter = getMailer();
-    const from = emailSender();
-    if (!transporter) return res.status(500).json({ ok: false, error: "mailer_not_configured" });
-
-    const publicBase = String(process.env.PUBLIC_APP_BASE_URL || "https://anycircumstances.com").replace(/\/+$/, "");
-
     const conn = await pool.getConnection();
-    let emailedContacts = 0;
-    let linksCreated = 0;
-
+    let prepared;
     try {
       await conn.beginTransaction();
-
-      await conn.query("INSERT INTO verification_panic_dispatches (user_id, ip, user_agent) VALUES (?, ?, ?)", [
-        String(userId),
-        String(req.ip || "").slice(0, 64),
-        String(req.headers["user-agent"] || "").slice(0, 255),
-      ]);
-
-      const [contacts] = await conn.query(
-        "SELECT id, email, name, verified_at, public_key FROM emergency_contacts WHERE user_id = ? AND verified_at IS NOT NULL",
-        [String(userId)]
-      );
-
-      if (!contacts.length) {
-        await conn.commit();
-        return res.json({ ok: true, emailedContacts: 0, linksCreated: 0, note: "no_contacts" });
-      }
-
-      const [assignments] = await conn.query(
-        `
-        SELECT a.contact_id, a.file_id
-        FROM emergency_contact_file_assignments a
-        JOIN emergency_contacts c ON c.id = a.contact_id
-        JOIN files f ON f.id = a.file_id
-        WHERE c.user_id = ? AND f.user_id = c.user_id
-        `,
-        [String(userId)]
-      );
-
-      const filesByContact = new Map();
-      for (const a of assignments) {
-        const cid = Number(a.contact_id);
-        const arr = filesByContact.get(cid) || [];
-        arr.push(String(a.file_id));
-        filesByContact.set(cid, arr);
-      }
-
-      for (const c of contacts) {
-        const contactId = Number(c.id);
-        const email = String(c.email);
-        const name = String(c.name || "");
-        const list = filesByContact.get(contactId) || [];
-        if (!list.length) continue;
-
-        const missingSetup = !c.public_key;
-
-        const links = [];
-        for (const fileId of list) {
-          const token = crypto.randomBytes(32).toString("hex");
-          const tokenHash = sha256Hex(token);
-
-          await conn.query(
-        "INSERT INTO contact_file_share_tokens (contact_id, file_id, token_hash, expires_at) VALUES (?, ?, ?, ?)",
-        [contactId, fileId, tokenHash, shareExpiresAt()]
-      );
-links.push(publicBase + "/share#token=" + encodeURIComponent(token));
-          linksCreated += 1;
-        }
-
-        const subject = "AnyCircumstances: Emergency access link (manual trigger)";
-    const rendered = renderEmergencyEmail({ name, ownerEmail, links, missingSetup });
-
-await transporter.sendMail({
-  from,
-  to: email,
-  subject,
-  text: rendered.text,
-  html: rendered.html,
-});
-        emailedContacts += 1;
-      }
-
+      prepared = await prepareEmergencyDispatch(conn, userId, req);
       await conn.commit();
-    } catch (e) {
-      try {
-        await conn.rollback();
-      } catch {}
-      logError("trigger-emergency", e);
+    } catch (error) {
+      try { await conn.rollback(); } catch {}
+      logError("trigger-emergency:prepare", error);
       return res.status(500).json({ ok: false, error: "server_error" });
     } finally {
       conn.release();
     }
 
-    return res.json({ ok: true, emailedContacts, linksCreated });
+    const sent = await sendPreparedEmergencyDeliveries(prepared.deliveries);
+    return res.status(sent.ok ? 200 : 502).json({
+      ok: sent.ok,
+      emailedContacts: sent.emailedContacts,
+      failedContacts: sent.failedContacts,
+      linksCreated: prepared.linksCreated,
+      ...(sent.ok ? {} : { error: sent.error || "emergency_delivery_partial_failure" }),
+    });
   })
 );
 
