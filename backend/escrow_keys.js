@@ -98,6 +98,15 @@ async function getEscrowPublicKeyPem() {
       return cachedPublicKey;
     }
     const response = await kmsRequest("GetPublicKey", { KeyId: cfg.keyId });
+    if (response.KeyUsage && response.KeyUsage !== "ENCRYPT_DECRYPT") {
+      throw new Error("escrow_kms_key_usage_invalid");
+    }
+    if (
+      Array.isArray(response.EncryptionAlgorithms) &&
+      !response.EncryptionAlgorithms.includes("RSAES_OAEP_SHA_256")
+    ) {
+      throw new Error("escrow_kms_oaep_sha256_not_supported");
+    }
     const der = Buffer.from(String(response.PublicKey || ""), "base64");
     if (!der.length) throw new Error("escrow_kms_public_key_missing");
     const key = crypto.createPublicKey({ key: der, format: "der", type: "spki" });
