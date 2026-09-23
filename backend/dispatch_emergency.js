@@ -110,20 +110,24 @@ async function sendGraceReminders(pool, mail) {
 
       await pool.query(
         `INSERT IGNORE INTO verification_reminder_emails
-          (user_id, due_at, reminder_index, sent_at, attempts, last_error)
-         VALUES (?, ?, ?, NULL, 0, NULL)`,
+          (user_id, due_at, reminder_index, sent_at, sending_at, attempts, last_error)
+         VALUES (?, ?, ?, NULL, NULL, 0, NULL)`,
         [userId, dueAt, idx]
       );
 
-      const [stateRows] = await pool.query(
-        `SELECT sent_at, attempts
-         FROM verification_reminder_emails
+      const [claim] = await pool.query(
+        `UPDATE verification_reminder_emails
+         SET sending_at = UTC_TIMESTAMP(3), attempts = attempts + 1, last_error = NULL
          WHERE user_id = ? AND due_at = ? AND reminder_index = ?
-         LIMIT 1`,
+           AND sent_at IS NULL
+           AND attempts < 5
+           AND (
+             sending_at IS NULL
+             OR sending_at < DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 10 MINUTE)
+           )`,
         [userId, dueAt, idx]
       );
-      const state = stateRows?.[0];
-      if (!state || state.sent_at || Number(state.attempts || 0) >= 5) continue;
+      if (!claim?.affectedRows) continue;
 
       const rendered = renderAnyCircumstancesEmail({
         title: "Your check-in is overdue",
@@ -147,7 +151,7 @@ async function sendGraceReminders(pool, mail) {
         });
         await pool.query(
           `UPDATE verification_reminder_emails
-           SET sent_at = UTC_TIMESTAMP(3), attempts = attempts + 1, last_error = NULL
+           SET sent_at = UTC_TIMESTAMP(3), sending_at = NULL, last_error = NULL
            WHERE user_id = ? AND due_at = ? AND reminder_index = ?`,
           [userId, dueAt, idx]
         );
@@ -169,7 +173,7 @@ async function sendGraceReminders(pool, mail) {
       } catch (error) {
         await pool.query(
           `UPDATE verification_reminder_emails
-           SET attempts = attempts + 1, last_error = ?
+           SET sending_at = NULL, last_error = ?
            WHERE user_id = ? AND due_at = ? AND reminder_index = ?`,
           [String(error?.message || error || "send_failed").slice(0, 255), userId, dueAt, idx]
         );
