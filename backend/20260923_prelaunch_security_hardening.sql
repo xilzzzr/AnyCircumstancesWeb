@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS verification_emergency_contact_dispatches (
   user_id BIGINT UNSIGNED NOT NULL,
   contact_id BIGINT UNSIGNED NOT NULL,
   due_at DATETIME(3) NOT NULL,
+  reason VARCHAR(32) NOT NULL DEFAULT 'scheduled',
   file_ids_json JSON NOT NULL,
   status ENUM('pending','delivered','failed') NOT NULL DEFAULT 'pending',
   attempts SMALLINT UNSIGNED NOT NULL DEFAULT 0,
