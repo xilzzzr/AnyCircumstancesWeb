@@ -5,6 +5,9 @@ ALTER TABLE users
   ADD COLUMN session_version INT UNSIGNED NOT NULL DEFAULT 1,
   ADD COLUMN duress_locked_until DATETIME(3) NULL;
 
+ALTER TABLE file_key_escrows
+  ADD COLUMN escrow_key_id VARCHAR(255) NULL;
+
 ALTER TABLE verification_reminder_emails
   ADD COLUMN sent_at DATETIME(3) NULL,
   ADD COLUMN sending_at DATETIME(3) NULL,
