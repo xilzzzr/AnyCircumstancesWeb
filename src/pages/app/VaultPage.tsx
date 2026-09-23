@@ -194,6 +194,11 @@ export function VaultPage() {
   };
 
 const handleDelete = async (fileKey: string) => {
+  if (vaultLocked) {
+    setUnlockModal(true);
+    toast({ title: "Unlock vault first", description: "Enter your safety PIN, then choose Delete again." });
+    return;
+  }
   if (!confirm("Delete this file? This cannot be undone.")) return;
 
   try {
