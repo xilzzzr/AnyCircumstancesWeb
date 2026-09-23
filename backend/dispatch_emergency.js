@@ -5,7 +5,9 @@ initializeEnvironment();
 const fs = require("fs");
 const mysql = require("mysql2/promise");
 const nodemailer = require("nodemailer");
+const Stripe = require("stripe");
 const { emailSender, renderAnyCircumstancesEmail } = require("./emails");
+const { processPendingAccountLifecycleJobs } = require("./account_actions");
 const { sendPushToUser } = require("./push_notifications");
 const {
   deliverPendingEmergencyDispatches,
@@ -204,10 +206,18 @@ async function queueNewScheduledEmergencies(pool) {
 
 async function main() {
   const pool = buildDbPool();
+  const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
   const mail = mailTransport();
-  if (!mail.ok) throw new Error("Missing SMTP env vars.");
 
   try {
+    // Destructive account cleanup must not depend on SMTP health.
+    await processPendingAccountLifecycleJobs(pool, stripe, { limit: 20 });
+
+    if (!mail.ok) {
+      console.error("[dispatcher] SMTP is not configured; skipping reminders and emergency email delivery.");
+      return;
+    }
+
     await sendGraceReminders(pool, mail);
 
     // Retry previously queued deliveries first. Each contact is independent,
