@@ -34,3 +34,16 @@ CREATE TABLE IF NOT EXISTS verification_emergency_contact_dispatches (
   KEY idx_emergency_contact_dispatch_pending (status, updated_at),
   KEY idx_emergency_contact_dispatch_user_due (user_id, due_at)
 );
+
+CREATE TABLE IF NOT EXISTS account_lifecycle_jobs (
+  user_id BIGINT UNSIGNED NOT NULL,
+  action ENUM('cancel_files','delete_account') NOT NULL,
+  stripe_subscription_id VARCHAR(255) NULL,
+  status ENUM('pending','processing','failed') NOT NULL DEFAULT 'pending',
+  attempts SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+  last_error VARCHAR(255) NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (user_id),
+  KEY idx_account_lifecycle_jobs_status (status, updated_at)
+);
