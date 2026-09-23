@@ -116,8 +116,10 @@ export function UploadPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [passphrase, setPassphrase] = useState("");
+  const [pin, setPin] = useState("");
   const [passphraseOpen, setPassphraseOpen] = useState(false);
   const passphraseOk = useMemo(() => passphrase.trim().length >= 8, [passphrase]);
+  const pinOk = useMemo(() => /^\d{4,6}$/.test(pin), [pin]);
 
   const [isPaidCache, setIsPaidCache] = useState<boolean | null>(null);
 
@@ -158,9 +160,27 @@ export function UploadPage() {
           return;
         }
 
-        if (!passphraseOk) {
+        if (!passphraseOk || !pinOk) {
           updateFile(uf.id, { status: "needs_passphrase", progress: 0, error: undefined });
           setPassphraseOpen(true);
+          return;
+        }
+
+        const unlockResp = await fetch("/auth/unlock-vault", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ pin }),
+        });
+        const unlock = await unlockResp.json().catch(() => ({}));
+        if (!unlockResp.ok || !unlock?.ok) {
+          updateFile(uf.id, { status: "needs_passphrase", progress: 0, error: unlock?.error || "vault_locked" });
+          setPassphraseOpen(true);
+          toast({
+            title: "Vault unlock failed",
+            description: unlock?.error === "invalid_pin" ? "Incorrect safety PIN." : String(unlock?.error || "Could not unlock vault."),
+            variant: "destructive",
+          });
           return;
         }
 
@@ -307,7 +327,7 @@ export function UploadPage() {
         toast({ title: "Upload failed", description: msg, variant: "destructive" });
       }
     },
-    [checkPaid, passphraseOk, passphrase, toast, updateFile]
+    [checkPaid, passphraseOk, pinOk, passphrase, pin, toast, updateFile]
   );
 
   const resumePassphraseQueue = useCallback(() => {
@@ -367,10 +387,21 @@ export function UploadPage() {
 
           <input
             type="password"
+            inputMode="numeric"
+            value={pin}
+            onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+            placeholder="Safety PIN"
+            autoComplete="off"
+          />
+
+          <input
+            type="password"
             value={passphrase}
             onChange={(e) => setPassphrase(e.target.value)}
             className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-            placeholder="At least 8 characters"
+            placeholder="Vault passphrase, at least 8 characters"
+            autoComplete="off"
           />
 
           <div className="rounded-lg border border-border p-3 text-sm text-muted-foreground flex items-start gap-2">
@@ -387,7 +418,7 @@ export function UploadPage() {
                 setPassphraseOpen(false);
                 resumePassphraseQueue();
               }}
-              disabled={!passphraseOk}
+              disabled={!passphraseOk || !pinOk}
             >
               Save
             </Button>
