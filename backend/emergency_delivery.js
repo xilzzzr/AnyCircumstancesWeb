@@ -137,7 +137,7 @@ async function queueEmergencyDispatch(pool, {
 }
 
 async function createShareLinks(pool, contactId, userId, fileIds) {
-  if (!fileIds.length) return [];
+  if (!fileIds.length) return { links: [], tokenHashes: [] };
   const placeholders = fileIds.map(() => "?").join(",");
   const [rows] = await pool.query(
     `SELECT id FROM files WHERE user_id = ? AND id IN (${placeholders})`,
@@ -145,17 +145,30 @@ async function createShareLinks(pool, contactId, userId, fileIds) {
   );
   const validIds = new Set((rows || []).map((row) => String(row.id)));
   const links = [];
+  const tokenHashes = [];
 
   for (const fileId of fileIds) {
     if (!validIds.has(String(fileId))) continue;
     const token = crypto.randomBytes(32).toString("hex");
+    const tokenHash = sha256Hex(token);
     await pool.query(
       "INSERT INTO contact_file_share_tokens (contact_id, file_id, token_hash, expires_at) VALUES (?, ?, ?, ?)",
-      [String(contactId), String(fileId), sha256Hex(token), shareExpiresAt()]
+      [String(contactId), String(fileId), tokenHash, shareExpiresAt()]
     );
+    tokenHashes.push(tokenHash);
     links.push(publicAppBase() + "/share#token=" + encodeURIComponent(token));
   }
-  return links;
+  return { links, tokenHashes };
+}
+
+async function revokeUnsentShareLinks(pool, contactId, tokenHashes) {
+  if (!tokenHashes?.length) return;
+  const placeholders = tokenHashes.map(() => "?").join(",");
+  await pool.query(
+    `DELETE FROM contact_file_share_tokens
+     WHERE contact_id = ? AND used_at IS NULL AND token_hash IN (${placeholders})`,
+    [String(contactId), ...tokenHashes]
+  );
 }
 
 async function maybeMarkDispatchComplete(pool, userId, dueAt) {
@@ -177,7 +190,10 @@ async function maybeMarkDispatchComplete(pool, userId, dueAt) {
 
 async function deliverPendingEmergencyDispatches(pool, { userId = null, dueAt = null, limit = 50 } = {}) {
   const params = [];
-  const where = ["d.status IN ('pending','failed')", "d.attempts < 5"];
+  const where = [
+    "(d.status IN ('pending','failed') OR (d.status = 'processing' AND d.updated_at < DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 10 MINUTE)))",
+    "d.attempts < 5",
+  ];
   if (userId !== null) {
     where.push("d.user_id = ?");
     params.push(String(userId));
@@ -213,6 +229,19 @@ async function deliverPendingEmergencyDispatches(pool, { userId = null, dueAt = 
   let failed = 0;
 
   for (const dispatch of dispatches || []) {
+    const [claim] = await pool.query(
+      `UPDATE verification_emergency_contact_dispatches
+       SET status='processing', attempts=attempts+1, last_error=NULL
+       WHERE id = ?
+         AND attempts < 5
+         AND (
+           status IN ('pending','failed')
+           OR (status='processing' AND updated_at < DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 10 MINUTE))
+         )`,
+      [dispatch.id]
+    );
+    if (!claim?.affectedRows) continue;
+
     let fileIds;
     try {
       fileIds = typeof dispatch.file_ids_json === "string"
@@ -222,21 +251,22 @@ async function deliverPendingEmergencyDispatches(pool, { userId = null, dueAt = 
       fileIds = fileIds.map(String).slice(0, 100);
     } catch {
       await pool.query(
-        "UPDATE verification_emergency_contact_dispatches SET status='failed', attempts=attempts+1, last_error='invalid_file_list' WHERE id = ?",
+        "UPDATE verification_emergency_contact_dispatches SET status='failed', last_error='invalid_file_list' WHERE id = ? AND status='processing'",
         [dispatch.id]
       );
       failed += 1;
       continue;
     }
 
+    let created = { links: [], tokenHashes: [] };
     try {
-      const links = await createShareLinks(pool, dispatch.contact_id, dispatch.user_id, fileIds);
-      if (!links.length) throw new Error("no_available_files");
+      created = await createShareLinks(pool, dispatch.contact_id, dispatch.user_id, fileIds);
+      if (!created.links.length) throw new Error("no_available_files");
 
       const rendered = renderEmergencyEmail({
         name: String(dispatch.name || ""),
         ownerEmail: String(dispatch.owner_email || ""),
-        links,
+        links: created.links,
         scheduled: String(dispatch.reason || "") === "scheduled",
       });
 
@@ -250,17 +280,18 @@ async function deliverPendingEmergencyDispatches(pool, { userId = null, dueAt = 
 
       await pool.query(
         `UPDATE verification_emergency_contact_dispatches
-         SET status='delivered', attempts=attempts+1, delivered_at=UTC_TIMESTAMP(3), last_error=NULL
-         WHERE id = ?`,
+         SET status='delivered', delivered_at=UTC_TIMESTAMP(3), last_error=NULL
+         WHERE id = ? AND status='processing'`,
         [dispatch.id]
       );
       delivered += 1;
       await maybeMarkDispatchComplete(pool, dispatch.user_id, dispatch.due_at);
     } catch (error) {
+      await revokeUnsentShareLinks(pool, dispatch.contact_id, created.tokenHashes).catch(() => null);
       await pool.query(
         `UPDATE verification_emergency_contact_dispatches
-         SET status='failed', attempts=attempts+1, last_error=?
-         WHERE id = ?`,
+         SET status='failed', last_error=?
+         WHERE id = ? AND status='processing'`,
         [String(error?.message || error || "send_failed").slice(0, 255), dispatch.id]
       );
       failed += 1;
