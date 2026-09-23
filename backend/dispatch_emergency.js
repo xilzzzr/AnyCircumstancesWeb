@@ -119,6 +119,10 @@ const stepMs = Math.max(1, Math.floor(graceMs / reminders));
       } catch (e) {
         const code = (e && (e.code || e.responseCode)) || "send_failed";
         const msg = (e && (e.response || e.message)) || "";
+        await conn.query(
+          "DELETE FROM verification_reminder_emails WHERE user_id = ? AND due_at = ? AND reminder_index = ?",
+          [userId, dueAt, idx]
+        ).catch(() => null);
         console.log("[dispatcher] reminder failed user_id=", userId, "idx=", idx, "code=", code, "msg=", String(msg).slice(0, 200));
       }
 
@@ -194,6 +198,187 @@ function buildDbPool() {
   return mysql.createPool(cfg);
 }
 
+async function claimScheduledDispatch(pool, userId, dueAt) {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [settings] = await conn.query(
+      `SELECT vs.next_due_at, vs.grace_period_hours,
+              (UTC_TIMESTAMP(3) > DATE_ADD(vs.next_due_at, INTERVAL vs.grace_period_hours HOUR)) AS still_overdue,
+              EXISTS(
+                SELECT 1 FROM billing_entitlements be
+                WHERE be.user_id = vs.user_id AND be.status = 'active'
+                  AND (be.current_period_end IS NULL OR be.current_period_end > UTC_TIMESTAMP(3))
+              ) AS has_active
+       FROM verification_settings vs
+       WHERE vs.user_id = ? FOR UPDATE`,
+      [userId]
+    );
+    const current = settings?.[0];
+    if (!current || !current.still_overdue || !current.has_active ||
+        new Date(current.next_due_at).getTime() !== new Date(dueAt).getTime()) {
+      await conn.rollback();
+      return false;
+    }
+
+    await conn.query(
+      "INSERT IGNORE INTO verification_emergency_dispatches (user_id, due_at) VALUES (?, ?)",
+      [userId, dueAt]
+    );
+
+    const [contacts] = await conn.query(
+      "SELECT id, email, name FROM emergency_contacts WHERE user_id = ? AND verified_at IS NOT NULL",
+      [userId]
+    );
+    const [assignments] = await conn.query(
+      `SELECT a.contact_id, a.file_id
+       FROM emergency_contact_file_assignments a
+       JOIN emergency_contacts ec ON ec.id = a.contact_id
+       JOIN files f ON f.id = a.file_id
+       WHERE ec.user_id = ? AND f.user_id = ec.user_id`,
+      [userId]
+    );
+    const filesByContact = new Map();
+    for (const row of assignments || []) {
+      const contactId = Number(row.contact_id);
+      const list = filesByContact.get(contactId) || [];
+      list.push(String(row.file_id));
+      filesByContact.set(contactId, list);
+    }
+
+    for (const contact of contacts || []) {
+      const contactId = Number(contact.id);
+      const fileIds = filesByContact.get(contactId) || [];
+      if (!fileIds.length) continue;
+      await conn.query(
+        `INSERT IGNORE INTO emergency_delivery_attempts
+          (user_id, due_at, contact_id, recipient_email, recipient_name, file_ids_json, status)
+         VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
+        [
+          userId,
+          dueAt,
+          contactId,
+          String(contact.email),
+          String(contact.name || ""),
+          JSON.stringify(fileIds),
+        ]
+      );
+    }
+
+    await conn.commit();
+    return true;
+  } catch (error) {
+    try { await conn.rollback(); } catch {}
+    throw error;
+  } finally {
+    conn.release();
+  }
+}
+
+async function deliverScheduledAttempts(pool, mail, userId, dueAt) {
+  const [jobs] = await pool.query(
+    `SELECT id, contact_id, recipient_email, recipient_name, file_ids_json, attempt_count
+     FROM emergency_delivery_attempts
+     WHERE user_id = ? AND due_at = ? AND status <> 'delivered'
+     ORDER BY id`,
+    [userId, dueAt]
+  );
+  if (!jobs.length) return;
+
+  const [ownerRows] = await pool.query("SELECT email FROM users WHERE id = ? LIMIT 1", [userId]);
+  const ownerEmail = String(ownerRows?.[0]?.email || "");
+
+  for (const job of jobs) {
+    const rawIds = typeof job.file_ids_json === "string" ? JSON.parse(job.file_ids_json) : job.file_ids_json;
+    const fileIds = Array.isArray(rawIds) ? rawIds.map(String) : [];
+    if (!fileIds.length) {
+      await pool.query(
+        "UPDATE emergency_delivery_attempts SET status = 'failed_permanent', last_error = 'no_files', attempt_count = attempt_count + 1 WHERE id = ?",
+        [job.id]
+      );
+      continue;
+    }
+
+    const placeholders = fileIds.map(() => "?").join(",");
+    const [validFiles] = await pool.query(
+      `SELECT f.id
+       FROM files f
+       JOIN emergency_contacts ec ON ec.id = ? AND ec.user_id = f.user_id
+       WHERE f.id IN (${placeholders}) AND f.user_id = ?`,
+      [job.contact_id, ...fileIds, userId]
+    );
+    const validIds = (validFiles || []).map((row) => String(row.id));
+    if (!validIds.length) {
+      await pool.query(
+        "UPDATE emergency_delivery_attempts SET status = 'failed_permanent', last_error = 'files_or_contact_removed', attempt_count = attempt_count + 1 WHERE id = ?",
+        [job.id]
+      );
+      continue;
+    }
+
+    const tx = await pool.getConnection();
+    const links = [];
+    const tokenHashes = [];
+    try {
+      await tx.beginTransaction();
+      for (const fileId of validIds) {
+        const token = crypto.randomBytes(32).toString("hex");
+        const tokenHash = sha256Hex(token);
+        await tx.query(
+          "INSERT INTO contact_file_share_tokens (contact_id, file_id, token_hash, expires_at) VALUES (?, ?, ?, ?)",
+          [job.contact_id, fileId, tokenHash, shareExpiresAt()]
+        );
+        tokenHashes.push(tokenHash);
+        links.push(publicAppBase() + "/share#token=" + encodeURIComponent(token));
+      }
+      await tx.query(
+        "UPDATE emergency_delivery_attempts SET status = 'sending', attempt_count = attempt_count + 1, last_error = NULL WHERE id = ?",
+        [job.id]
+      );
+      await tx.commit();
+    } catch (error) {
+      try { await tx.rollback(); } catch {}
+      tx.release();
+      throw error;
+    }
+    tx.release();
+
+    const rendered = renderEmergencyEmail({
+      name: String(job.recipient_name || ""),
+      ownerEmail,
+      links,
+      scheduled: true,
+    });
+    try {
+      await mail.transporter.sendMail({
+        from: mail.from,
+        to: String(job.recipient_email),
+        subject: "AnyCircumstances: Emergency access link",
+        ...rendered,
+      });
+      await pool.query(
+        "UPDATE emergency_delivery_attempts SET status = 'delivered', delivered_at = UTC_TIMESTAMP(3), last_error = NULL WHERE id = ?",
+        [job.id]
+      );
+      console.log("[dispatcher] delivered scheduled emergency job_id=", job.id, "files=", validIds.length);
+    } catch (error) {
+      if (tokenHashes.length) {
+        const marks = tokenHashes.map(() => "?").join(",");
+        await pool.query(
+          `DELETE FROM contact_file_share_tokens WHERE token_hash IN (${marks})`,
+          tokenHashes
+        ).catch(() => null);
+      }
+      const msg = String((error && (error.response || error.message)) || "send_failed").slice(0, 240);
+      await pool.query(
+        "UPDATE emergency_delivery_attempts SET status = 'retry', last_error = ? WHERE id = ?",
+        [msg, job.id]
+      );
+      console.log("[dispatcher] scheduled emergency retry job_id=", job.id, "msg=", msg);
+    }
+  }
+}
+
 async function main() {
   const pool = buildDbPool();
 
@@ -205,125 +390,39 @@ async function main() {
 
   const conn = await pool.getConnection();
   try {
+    await sendGraceReminders(conn, mail);
 
-await sendGraceReminders(conn, mail);
-
-
-const [overdue] = await conn.query(
-      `
-      SELECT
-        vs.user_id,
-        vs.next_due_at,
-        vs.grace_period_hours
-      FROM verification_settings vs
-      WHERE
-        vs.next_due_at IS NOT NULL
-        AND EXISTS (
-          SELECT 1 FROM billing_entitlements be
-          WHERE be.user_id = vs.user_id AND be.status = 'active'
-            AND (be.current_period_end IS NULL OR be.current_period_end > UTC_TIMESTAMP(3))
-        )
-        AND NOW() > DATE_ADD(vs.next_due_at, INTERVAL vs.grace_period_hours HOUR)
-      `
+    const [overdue] = await conn.query(
+      `SELECT vs.user_id, vs.next_due_at
+       FROM verification_settings vs
+       WHERE vs.next_due_at IS NOT NULL
+         AND EXISTS (
+           SELECT 1 FROM billing_entitlements be
+           WHERE be.user_id = vs.user_id AND be.status = 'active'
+             AND (be.current_period_end IS NULL OR be.current_period_end > UTC_TIMESTAMP(3))
+         )
+         AND UTC_TIMESTAMP(3) > DATE_ADD(vs.next_due_at, INTERVAL vs.grace_period_hours HOUR)`
     );
-
     console.log("[dispatcher] overdue_users:", overdue.length);
+    for (const row of overdue) {
+      const userId = Number(row.user_id);
+      const dueAt = row.next_due_at;
+      const claimed = await claimScheduledDispatch(pool, userId, dueAt);
+      if (claimed) await deliverScheduledAttempts(pool, mail, userId, dueAt);
+    }
 
-    for (const u of overdue) {
-      const userId = Number(u.user_id);
-      const dueAt = u.next_due_at;
-
-      const [already] = await conn.query(
-        "SELECT 1 FROM verification_emergency_dispatches WHERE user_id = ? AND due_at = ? LIMIT 1",
-        [userId, dueAt]
-      );
-      if (already && already.length) {
-        console.log("[dispatcher] skip already dispatched user_id=", userId, "due_at=", dueAt);
-        continue;
-      }
-
-      const [contacts] = await conn.query(
-        "SELECT id, email, name, verified_at, public_key FROM emergency_contacts WHERE user_id = ? AND verified_at IS NOT NULL",
-        [userId]
-      );
-      const [assignments] = await conn.query(
-	        `
-	        SELECT a.contact_id, a.file_id
-	        FROM emergency_contact_file_assignments a
-	        JOIN emergency_contacts c ON c.id = a.contact_id
-	        JOIN files f ON f.id = a.file_id
-	        WHERE c.user_id = ? AND f.user_id = c.user_id
-	        `,
-	        [userId]
-	      );
-
-      if (!contacts.length || !assignments.length) {
-        console.log("[dispatcher] no contacts/assignments for user_id=", userId, "contacts=", contacts.length, "assignments=", assignments.length);
-        continue;
-      }
-
-      const filesByContact = new Map();
-      for (const a of assignments) {
-        const cid = Number(a.contact_id);
-        const arr = filesByContact.get(cid) || [];
-        arr.push(String(a.file_id));
-        filesByContact.set(cid, arr);
-      }
-
-      let emailedContacts = 0;
-      let linksCreated = 0;
-
-      for (const c of contacts) {
-        const contactId = Number(c.id);
-        const email = String(c.email);
-        const name = String(c.name || "");
-        const list = filesByContact.get(contactId) || [];
-        if (!list.length) continue;
-
-        const missingSetup = !c.public_key;
-
-        const links = [];
-        for (const fileId of list) {
-          const token = crypto.randomBytes(32).toString("hex");
-          const tokenHash = sha256Hex(token);
-
-          await conn.query(
-        "INSERT INTO contact_file_share_tokens (contact_id, file_id, token_hash, expires_at) VALUES (?, ?, ?, ?)",
-        [contactId, fileId, tokenHash, shareExpiresAt()]
-      );
-links.push(publicAppBase() + "/share#token=" + encodeURIComponent(token));
-          linksCreated += 1;
-        }
-
-        const subject = "AnyCircumstances: Emergency access link";
-        const rendered = renderEmergencyEmail({ name, links, missingSetup, scheduled: true });
-
-        try {
-          await mail.transporter.sendMail({
-            from: mail.from,
-            to: email,
-            subject,
-            ...rendered
-          });
-
-          emailedContacts += 1;
-          console.log("[dispatcher] emailed contact_id=", contactId, "files=", links.length);
-        } catch (e) {
-          const code = (e && (e.code || e.responseCode)) || "send_failed";
-          const msg = (e && (e.response || e.message)) || "";
-          console.log("[dispatcher] email failed contact_id=", contactId, "code=", code, "msg=", String(msg).slice(0, 200));
-        }
-      }
-
-      if (emailedContacts > 0 && linksCreated > 0) {
-        await conn.query(
-          "INSERT INTO verification_emergency_dispatches (user_id, due_at) VALUES (?, ?)",
-          [userId, dueAt]
-        );
-        console.log("[dispatcher] marked dispatched user_id=", userId, "due_at=", dueAt, "emailedContacts=", emailedContacts, "linksCreated=", linksCreated);
-      } else {
-        console.log("[dispatcher] did not dispatch user_id=", userId, "due_at=", dueAt, "emailedContacts=", emailedContacts, "linksCreated=", linksCreated);
-      }
+    // Retry previously claimed deliveries even if the user subsequently checks in.
+    // The lock/claim above defines the release ordering; successful check-ins that
+    // commit before the claim prevent it, while a claim that commits first is durable.
+    const [pending] = await conn.query(
+      `SELECT DISTINCT user_id, due_at
+       FROM emergency_delivery_attempts
+       WHERE status IN ('pending', 'sending', 'retry')
+       ORDER BY due_at
+       LIMIT 100`
+    );
+    for (const row of pending) {
+      await deliverScheduledAttempts(pool, mail, Number(row.user_id), row.due_at);
     }
   } finally {
     conn.release();
