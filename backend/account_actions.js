@@ -124,7 +124,11 @@ async function processPendingAccountLifecycleJobs(pool, stripe, { limit = 20 } =
   const [jobs] = await pool.query(
     `SELECT user_id, action, stripe_subscription_id, attempts
      FROM account_lifecycle_jobs
-     WHERE status IN ('pending','failed') AND attempts < 10
+     WHERE (
+       status IN ('pending','failed')
+       OR (status = 'processing' AND updated_at < DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 10 MINUTE))
+     )
+       AND attempts < 10
      ORDER BY updated_at, created_at
      LIMIT ?`,
     [Math.max(1, Math.min(100, Number(limit) || 20))]
