@@ -94,3 +94,38 @@ test("production rejects a short JWT secret without logging its value", () => {
     }
   );
 });
+
+test("production requires KMS-backed escrow and rejects an exportable private key", () => {
+  const base = {
+    NODE_ENV: "production",
+    DB_HOST: "pm2-db-host",
+    DB_USER: "pm2-db-user",
+    DB_NAME: "pm2-db-name",
+    JWT_ACCESS_SECRET: "test-only-secret-with-more-than-thirty-two-bytes",
+    AWS_REGION: "us-east-1",
+  };
+
+  assert.throws(
+    () => validateBackendEnvironment(base),
+    { message: "ESCROW_KMS_KEY_ID is required in production" }
+  );
+
+  assert.doesNotThrow(() =>
+    validateBackendEnvironment({
+      ...base,
+      ESCROW_KMS_KEY_ID: "alias/anycircumstances-escrow",
+    })
+  );
+
+  assert.throws(
+    () =>
+      validateBackendEnvironment({
+        ...base,
+        ESCROW_KMS_KEY_ID: "alias/anycircumstances-escrow",
+        ESCROW_PRIVATE_KEY_PEM: "-----BEGIN PRIVATE KEY-----\nnot-a-real-key\n-----END PRIVATE KEY-----",
+      }),
+    {
+      message: "ESCROW_PRIVATE_KEY_PEM must not be used in production; use AWS KMS",
+    }
+  );
+});
