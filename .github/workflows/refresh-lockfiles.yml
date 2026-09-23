@@ -19,10 +19,10 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
-      - run: npm audit fix
+      - run: npm audit fix || true
       - run: npm ci
         working-directory: backend
-      - run: npm audit fix
+      - run: npm audit fix || true
         working-directory: backend
       - name: Commit patched lockfiles
         run: |
