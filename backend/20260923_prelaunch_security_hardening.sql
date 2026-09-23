@@ -10,6 +10,12 @@ ALTER TABLE verification_reminder_emails
   ADD COLUMN attempts SMALLINT UNSIGNED NOT NULL DEFAULT 0,
   ADD COLUMN last_error VARCHAR(255) NULL;
 
+-- Existing rows were created by the old dispatcher only when it attempted delivery.
+-- Mark them complete so deploying this migration cannot resend historical reminders.
+UPDATE verification_reminder_emails
+SET sent_at = UTC_TIMESTAMP(3)
+WHERE sent_at IS NULL;
+
 CREATE TABLE IF NOT EXISTS verification_emergency_contact_dispatches (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   user_id BIGINT UNSIGNED NOT NULL,
