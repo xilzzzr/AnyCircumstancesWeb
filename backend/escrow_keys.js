@@ -26,6 +26,11 @@ function kmsConfig() {
   return keyId && region ? { keyId, region } : null;
 }
 
+function escrowKeyId() {
+  const cfg = kmsConfig();
+  return cfg ? cfg.keyId : "legacy-local";
+}
+
 function legacyPrivateKey() {
   if (process.env.NODE_ENV === "production") return "";
   return String(process.env.ESCROW_PRIVATE_KEY_PEM || "").replace(/\\n/g, "\n").trim();
@@ -153,6 +158,7 @@ async function decryptEscrowedKey(encKeyB64) {
 
 module.exports = {
   decryptEscrowedKey,
+  escrowKeyId,
   getEscrowPublicKeyPem,
   kmsConfig,
 };
