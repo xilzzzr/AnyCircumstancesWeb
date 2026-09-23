@@ -122,7 +122,7 @@ test("production requires KMS-backed escrow and rejects an exportable private ke
       validateBackendEnvironment({
         ...base,
         ESCROW_KMS_KEY_ID: "alias/anycircumstances-escrow",
-        ESCROW_PRIVATE_KEY_PEM: "-----BEGIN PRIVATE KEY-----\nnot-a-real-key\n-----END PRIVATE KEY-----",
+        ESCROW_PRIVATE_KEY_PEM: "test-placeholder-private-key",
       }),
     {
       message: "ESCROW_PRIVATE_KEY_PEM must not be used in production; use AWS KMS",
