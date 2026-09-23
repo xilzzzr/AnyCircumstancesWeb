@@ -240,6 +240,7 @@ router.post(
   "/save-file-escrow",
   requireUser,
   requirePaid,
+  requireVaultUnlocked,
   asyncHandler(async (req, res) => {
     const fileId = String(req.body?.file_id || "");
     const alg = String(req.body?.alg || "").trim();
@@ -372,6 +373,7 @@ router.post(
   "/presign-upload",
   requireUser,
   requirePaid,
+  requireVaultUnlocked,
   presignUploadLimiter,
 
   asyncHandler(async (req, res) => {
@@ -506,6 +508,7 @@ router.post(
   "/confirm-upload",
   requireUser,
   requirePaid,
+  requireVaultUnlocked,
   confirmUploadLimiter,
 
   asyncHandler(async (req, res) => {
@@ -581,6 +584,7 @@ router.post(
   "/save-user-envelope",
   requireUser,
   requirePaid,
+  requireVaultUnlocked,
   asyncHandler(async (req, res) => {
     const fileId = String(req.body?.file_id || "");
     const alg = String(req.body?.alg || "");
@@ -648,6 +652,7 @@ router.post(
   "/create-contact-share-link",
   requireUser,
   requirePaid,
+  requireVaultUnlocked,
   asyncHandler(async (req, res) => {
     const contactId = Number(req.body?.contact_id || 0);
     const fileId = String(req.body?.file_id || "");
