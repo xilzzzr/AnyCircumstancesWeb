@@ -175,7 +175,16 @@ app.use(
 );
 app.use("/auth/login", loginAccountLimiter);
 app.use(["/auth/verify-email", "/auth/verify-email-code", "/auth/emergency-contacts/verify"], verificationAccountLimiter);
-app.use(["/auth/unlock-vault", "/auth/verification-check-in"], pinUserLimiter);
+app.use(
+  [
+    "/auth/unlock-vault",
+    "/auth/verification-check-in",
+    "/auth/trigger-emergency",
+    "/auth/account/cancel-subscription",
+    "/auth/account",
+  ],
+  pinUserLimiter
+);
 app.use(
   [
     "/auth/billing/create-checkout-session",
