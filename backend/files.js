@@ -677,6 +677,9 @@ router.post(
 
     const r = rows[0];
     if (new Date(r.expires_at).getTime() < Date.now()) return res.status(410).json({ ok: false, error: "token_expired" });
+    if (r.used_at && Date.now() - new Date(r.used_at).getTime() > 15 * 60 * 1000) {
+      return res.status(410).json({ ok: false, error: "token_consumed" });
+    }
 
     return res.json({
       ok: true,
@@ -847,7 +850,7 @@ router.post(
 
     const pool = getPool();
     const [rows] = await pool.query(
-      `SELECT t.contact_id, t.file_id, t.expires_at
+      `SELECT t.id, t.contact_id, t.file_id, t.expires_at, t.used_at
        FROM contact_file_share_tokens t
        JOIN emergency_contacts c ON c.id = t.contact_id
        JOIN files f ON f.id = t.file_id AND f.user_id = c.user_id
@@ -857,6 +860,13 @@ router.post(
     if (!rows?.length) return res.status(404).json({ ok: false, error: "invalid_token" });
     const share = rows[0];
     if (new Date(share.expires_at).getTime() < Date.now()) return res.status(410).json({ ok: false, error: "token_expired" });
+    if (share.used_at && Date.now() - new Date(share.used_at).getTime() > 15 * 60 * 1000) {
+      return res.status(410).json({ ok: false, error: "token_consumed" });
+    }
+    await pool.query(
+      "UPDATE contact_file_share_tokens SET used_at = COALESCE(used_at, UTC_TIMESTAMP(3)) WHERE id = ? LIMIT 1",
+      [share.id]
+    );
 
     const [escrowRows] = await pool.query(
       "SELECT alg, enc_key_b64 FROM file_key_escrows WHERE file_id = ? LIMIT 1", [share.file_id]
@@ -915,7 +925,7 @@ router.post(
     const pool = getPool();
 
     const [trows] = await pool.query(
-      `SELECT t.contact_id, t.file_id, t.expires_at
+      `SELECT t.contact_id, t.file_id, t.expires_at, t.used_at
        FROM contact_file_share_tokens t
        JOIN emergency_contacts c ON c.id = t.contact_id
        JOIN files f ON f.id = t.file_id AND f.user_id = c.user_id
@@ -926,6 +936,9 @@ router.post(
 
     const t = trows[0];
     if (new Date(t.expires_at).getTime() < Date.now()) return res.status(410).json({ ok: false, error: "token_expired" });
+    if (t.used_at && Date.now() - new Date(t.used_at).getTime() > 15 * 60 * 1000) {
+      return res.status(410).json({ ok: false, error: "token_consumed" });
+    }
 
     const [frows] = await pool.query("SELECT bucket, content_type FROM files WHERE id = ? LIMIT 1", [String(t.file_id)]);
     if (!frows || !frows.length) return res.status(404).json({ ok: false, error: "file_not_found" });
