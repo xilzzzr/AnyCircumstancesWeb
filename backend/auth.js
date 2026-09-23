@@ -1960,7 +1960,7 @@ router.post(
   })
 );
 
-async function createEmergencyContactVerificationCode(conn, contactId) {async function createEmergencyContactVerificationCode(conn, contactId) {
+async function createEmergencyContactVerificationCode(conn, contactId) {
   await conn.query("DELETE FROM emergency_contact_verification_tokens WHERE contact_id = ? AND used_at IS NULL", [contactId]);
 
   const expiresAt = addDays(nowUtc(), 2);
@@ -2842,7 +2842,7 @@ router.delete(
   })
 );
 
-async function stripeWebhookHandler(req, res) {async function stripeWebhookHandler(req, res) {
+async function stripeWebhookHandler(req, res) {
   let recordedEventId = "";
   try {
     if (!stripe) return res.status(500).send("stripe_not_configured");
