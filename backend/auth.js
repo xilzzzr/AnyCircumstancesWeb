@@ -794,11 +794,23 @@ router.post(
   "/logout",
   asyncHandler(async (req, res) => {
     const raw = req.cookies?.refresh_token ? String(req.cookies.refresh_token) : "";
+    const session = await validateAccessSession(req).catch(() => ({ ok: false }));
     const conn = await pool.getConnection();
 
     try {
       await conn.beginTransaction();
-      if (raw) await revokeRefreshToken(conn, raw);
+      if (session?.ok && session.userId) {
+        await conn.query(
+          "UPDATE users SET auth_version = auth_version + 1 WHERE id = ? LIMIT 1",
+          [String(session.userId)]
+        );
+        await conn.query(
+          "UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = ? AND revoked_at IS NULL",
+          [String(session.userId)]
+        );
+      } else if (raw) {
+        await revokeRefreshToken(conn, raw);
+      }
       await conn.commit();
     } catch (e) {
       try {
@@ -1944,12 +1956,15 @@ async function prepareEmergencyDispatch(conn, userId, req, { scheduled = false }
     const fileIds = filesByContact.get(contactId) || [];
     if (!fileIds.length) continue;
     const links = [];
+    const tokenHashes = [];
     for (const fileId of fileIds) {
       const token = crypto.randomBytes(32).toString("hex");
+      const tokenHash = sha256Hex(token);
       await conn.query(
         "INSERT INTO contact_file_share_tokens (contact_id, file_id, token_hash, expires_at) VALUES (?, ?, ?, ?)",
-        [contactId, fileId, sha256Hex(token), shareExpiresAt()]
+        [contactId, fileId, tokenHash, shareExpiresAt()]
       );
+      tokenHashes.push(tokenHash);
       links.push(publicBase + "/share#token=" + encodeURIComponent(token));
       linksCreated += 1;
     }
@@ -1962,6 +1977,7 @@ async function prepareEmergencyDispatch(conn, userId, req, { scheduled = false }
     deliveries.push({
       contactId,
       fileIds,
+      tokenHashes,
       to: String(contact.email),
       name: String(contact.name || ""),
       subject: scheduled
@@ -2006,6 +2022,14 @@ async function sendPreparedEmergencyDeliveries(pool, userId, prepared, deliveryK
   const from = emailSender();
   if (!transporter) {
     for (const delivery of deliveries) {
+      const tokenHashes = Array.isArray(delivery.tokenHashes) ? delivery.tokenHashes : [];
+      if (tokenHashes.length) {
+        const placeholders = tokenHashes.map(() => "?").join(",");
+        await pool.query(
+          `DELETE FROM contact_file_share_tokens WHERE token_hash IN (${placeholders})`,
+          tokenHashes
+        ).catch(() => null);
+      }
       await queueEmergencyDeliveryRetry(pool, userId, dispatchAt, delivery, deliveryKind, new Error("mailer_not_configured"));
     }
     return { ok: false, error: "mailer_not_configured", emailedContacts: 0, failedContacts: deliveries.length };
@@ -2025,6 +2049,14 @@ async function sendPreparedEmergencyDeliveries(pool, userId, prepared, deliveryK
       emailedContacts += 1;
     } catch (error) {
       failedContacts += 1;
+      const tokenHashes = Array.isArray(delivery.tokenHashes) ? delivery.tokenHashes : [];
+      if (tokenHashes.length) {
+        const placeholders = tokenHashes.map(() => "?").join(",");
+        await pool.query(
+          `DELETE FROM contact_file_share_tokens WHERE token_hash IN (${placeholders})`,
+          tokenHashes
+        ).catch(() => null);
+      }
       await queueEmergencyDeliveryRetry(pool, userId, dispatchAt, delivery, deliveryKind, error).catch((queueError) => {
         logError("emergency-delivery-retry-queue", queueError);
       });
