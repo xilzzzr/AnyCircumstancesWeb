@@ -47,11 +47,6 @@ async function sendGraceReminders(conn, mail) {
     FROM verification_settings vs
     JOIN users u ON u.id = vs.user_id
     WHERE vs.next_due_at IS NOT NULL
-      AND EXISTS (
-        SELECT 1 FROM billing_entitlements be
-        WHERE be.user_id = vs.user_id AND be.status = 'active'
-          AND (be.current_period_end IS NULL OR be.current_period_end > UTC_TIMESTAMP(3))
-      )
       AND NOW() > vs.next_due_at
       AND NOW() <= DATE_ADD(vs.next_due_at, INTERVAL COALESCE(vs.grace_period_hours, 24) HOUR)
       AND u.email IS NOT NULL
@@ -205,18 +200,13 @@ async function claimScheduledDispatch(pool, userId, dueAt) {
     await conn.beginTransaction();
     const [settings] = await conn.query(
       `SELECT vs.next_due_at, vs.grace_period_hours,
-              (UTC_TIMESTAMP(3) > DATE_ADD(vs.next_due_at, INTERVAL vs.grace_period_hours HOUR)) AS still_overdue,
-              EXISTS(
-                SELECT 1 FROM billing_entitlements be
-                WHERE be.user_id = vs.user_id AND be.status = 'active'
-                  AND (be.current_period_end IS NULL OR be.current_period_end > UTC_TIMESTAMP(3))
-              ) AS has_active
+              (UTC_TIMESTAMP(3) > DATE_ADD(vs.next_due_at, INTERVAL vs.grace_period_hours HOUR)) AS still_overdue
        FROM verification_settings vs
        WHERE vs.user_id = ? FOR UPDATE`,
       [userId]
     );
     const current = settings?.[0];
-    if (!current || !current.still_overdue || !current.has_active ||
+    if (!current || !current.still_overdue ||
         new Date(current.next_due_at).getTime() !== new Date(dueAt).getTime()) {
       await conn.rollback();
       return false;
@@ -398,11 +388,6 @@ async function main() {
       `SELECT vs.user_id, vs.next_due_at
        FROM verification_settings vs
        WHERE vs.next_due_at IS NOT NULL
-         AND EXISTS (
-           SELECT 1 FROM billing_entitlements be
-           WHERE be.user_id = vs.user_id AND be.status = 'active'
-             AND (be.current_period_end IS NULL OR be.current_period_end > UTC_TIMESTAMP(3))
-         )
          AND UTC_TIMESTAMP(3) > DATE_ADD(vs.next_due_at, INTERVAL vs.grace_period_hours HOUR)`
     );
     console.log("[dispatcher] overdue_users:", overdue.length);
