@@ -7,6 +7,7 @@ ALTER TABLE users
 
 ALTER TABLE verification_reminder_emails
   ADD COLUMN sent_at DATETIME(3) NULL,
+  ADD COLUMN sending_at DATETIME(3) NULL,
   ADD COLUMN attempts SMALLINT UNSIGNED NOT NULL DEFAULT 0,
   ADD COLUMN last_error VARCHAR(255) NULL;
 
@@ -23,7 +24,7 @@ CREATE TABLE IF NOT EXISTS verification_emergency_contact_dispatches (
   due_at DATETIME(3) NOT NULL,
   reason VARCHAR(32) NOT NULL DEFAULT 'scheduled',
   file_ids_json JSON NOT NULL,
-  status ENUM('pending','delivered','failed') NOT NULL DEFAULT 'pending',
+  status ENUM('pending','processing','delivered','failed') NOT NULL DEFAULT 'pending',
   attempts SMALLINT UNSIGNED NOT NULL DEFAULT 0,
   last_error VARCHAR(255) NULL,
   delivered_at DATETIME(3) NULL,
