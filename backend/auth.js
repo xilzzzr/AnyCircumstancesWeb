@@ -380,7 +380,9 @@ async function validateAccessSession(req) {
     return { ok: false, error: "invalid_session" };
   }
   if (user.duress_locked_until && new Date(user.duress_locked_until).getTime() > Date.now()) {
-    return { ok: false, error: "temporarily_locked", lockedUntil: user.duress_locked_until };
+    // Fail indistinguishably from a dead session so duress mode does not reveal
+    // that the account still exists.
+    return { ok: false, error: "invalid_session" };
   }
   const authVersion = Number(user.auth_version || 1);
   if (Number(payload?.av || 0) !== authVersion) {
@@ -393,10 +395,9 @@ async function requireUserId(req, res) {
   const session = await validateAccessSession(req);
   if (!session.ok) {
     clearAuthCookies(res);
-    res.status(session.error === "temporarily_locked" ? 423 : 401).json({
+    res.status(401).json({
       ok: false,
       error: session.error,
-      ...(session.lockedUntil ? { locked_until: new Date(session.lockedUntil).toISOString() } : {}),
     });
     return null;
   }
@@ -720,7 +721,7 @@ router.post(
     if (!user || !passwordOk) return res.status(401).json({ ok: false, error: "invalid_credentials" });
     if (user.status !== "active") return res.status(403).json({ ok: false, error: "account_disabled" });
     if (user.duress_locked_until && new Date(user.duress_locked_until).getTime() > Date.now()) {
-      return res.status(423).json({ ok: false, error: "temporarily_locked" });
+      return res.status(401).json({ ok: false, error: "invalid_credentials" });
     }
     if (!user.email_verified_at) return res.status(403).json({ ok: false, error: "email_not_verified" });
 
@@ -2844,8 +2845,8 @@ router.post(
       return res.json({
         ok: true,
         deletedFiles: Number(profile.file_count || 0),
-        requiresAppleAction: Boolean(profile.has_apple),
-        appleManageUrl: profile.has_apple ? "https://apps.apple.com/account/subscriptions" : null,
+        requiresAppleAction: false,
+        appleManageUrl: null,
       });
     }
 
