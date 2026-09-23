@@ -1216,7 +1216,7 @@ router.post(
     }
 
     if (preparedEmergency) {
-      const sent = await sendPreparedEmergencyDeliveries(preparedEmergency.deliveries);
+      const sent = await sendPreparedEmergencyDeliveries(pool, userId, preparedEmergency, "panic");
       if (!sent.ok) {
         return res.status(502).json({ ok: false, error: sent.error || "emergency_delivery_partial_failure" });
       }
@@ -1907,6 +1907,7 @@ router.post(
 
 async function prepareEmergencyDispatch(conn, userId, req, { scheduled = false } = {}) {
   const publicBase = String(process.env.PUBLIC_APP_BASE_URL || "https://anycircumstances.com").replace(/\/+$/, "");
+  const dispatchAt = new Date();
   await conn.query("INSERT INTO verification_panic_dispatches (user_id, ip, user_agent) VALUES (?, ?, ?)", [
     String(userId),
     String(req?.ip || "").slice(0, 64),
@@ -1959,20 +1960,57 @@ async function prepareEmergencyDispatch(conn, userId, req, { scheduled = false }
       scheduled,
     });
     deliveries.push({
+      contactId,
+      fileIds,
       to: String(contact.email),
+      name: String(contact.name || ""),
       subject: scheduled
         ? "AnyCircumstances: Emergency access link"
         : "AnyCircumstances: Emergency access link (manual trigger)",
       rendered,
     });
   }
-  return { ok: true, linksCreated, deliveries };
+  return { ok: true, linksCreated, deliveries, dispatchAt };
 }
 
-async function sendPreparedEmergencyDeliveries(deliveries) {
+async function queueEmergencyDeliveryRetry(pool, userId, dispatchAt, delivery, deliveryKind, error) {
+  await pool.query(
+    `INSERT INTO emergency_delivery_attempts
+      (user_id, due_at, contact_id, recipient_email, recipient_name, file_ids_json, delivery_kind, status, attempt_count, last_error)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'retry', 1, ?)
+     ON DUPLICATE KEY UPDATE
+       status = 'retry',
+       attempt_count = attempt_count + 1,
+       last_error = VALUES(last_error),
+       delivery_kind = VALUES(delivery_kind),
+       recipient_email = VALUES(recipient_email),
+       recipient_name = VALUES(recipient_name),
+       file_ids_json = VALUES(file_ids_json)`,
+    [
+      String(userId),
+      dispatchAt,
+      Number(delivery.contactId),
+      String(delivery.to),
+      String(delivery.name || ""),
+      JSON.stringify(delivery.fileIds || []),
+      String(deliveryKind || "manual").slice(0, 24),
+      String(error?.message || error || "send_failed").slice(0, 240),
+    ]
+  );
+}
+
+async function sendPreparedEmergencyDeliveries(pool, userId, prepared, deliveryKind = "manual") {
+  const deliveries = Array.isArray(prepared?.deliveries) ? prepared.deliveries : [];
+  const dispatchAt = prepared?.dispatchAt || new Date();
   const transporter = getMailer();
   const from = emailSender();
-  if (!transporter) return { ok: false, error: "mailer_not_configured", emailedContacts: 0, failedContacts: deliveries.length };
+  if (!transporter) {
+    for (const delivery of deliveries) {
+      await queueEmergencyDeliveryRetry(pool, userId, dispatchAt, delivery, deliveryKind, new Error("mailer_not_configured"));
+    }
+    return { ok: false, error: "mailer_not_configured", emailedContacts: 0, failedContacts: deliveries.length };
+  }
+
   let emailedContacts = 0;
   let failedContacts = 0;
   for (const delivery of deliveries) {
@@ -1987,6 +2025,9 @@ async function sendPreparedEmergencyDeliveries(deliveries) {
       emailedContacts += 1;
     } catch (error) {
       failedContacts += 1;
+      await queueEmergencyDeliveryRetry(pool, userId, dispatchAt, delivery, deliveryKind, error).catch((queueError) => {
+        logError("emergency-delivery-retry-queue", queueError);
+      });
       logError("emergency-delivery", error);
     }
   }
@@ -2025,7 +2066,7 @@ router.post(
       conn.release();
     }
 
-    const sent = await sendPreparedEmergencyDeliveries(prepared.deliveries);
+    const sent = await sendPreparedEmergencyDeliveries(pool, userId, prepared, "manual");
     return res.status(sent.ok ? 200 : 502).json({
       ok: sent.ok,
       emailedContacts: sent.emailedContacts,
@@ -2766,7 +2807,7 @@ router.post(
         conn.release();
       }
       clearAuthCookies(res);
-      const sent = await sendPreparedEmergencyDeliveries(prepared.deliveries);
+      const sent = await sendPreparedEmergencyDeliveries(pool, userId, prepared, "duress");
       if (!sent.ok) logError("duress-cancel-delivery", new Error(sent.error || "partial_delivery_failure"));
       return res.json({
         ok: true,
@@ -2823,7 +2864,7 @@ router.delete(
         conn.release();
       }
       clearAuthCookies(res);
-      const sent = await sendPreparedEmergencyDeliveries(prepared.deliveries);
+      const sent = await sendPreparedEmergencyDeliveries(pool, userId, prepared, "duress");
       if (!sent.ok) logError("duress-delete-delivery", new Error(sent.error || "partial_delivery_failure"));
       return res.json({ ok: true, deletedFiles: pretendDeletedFiles });
     }
