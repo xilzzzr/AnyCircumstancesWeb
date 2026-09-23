@@ -88,21 +88,65 @@ function safeFilename(name) {
   return cleaned || "upload.bin";
 }
 
-function requireUser(req, res, next) {
+async function requireUser(req, res, next) {
   const access = req.cookies?.access_token ? String(req.cookies.access_token) : "";
   if (!access) return res.status(401).json({ ok: false, error: "not_authenticated" });
 
   const secret = process.env.JWT_ACCESS_SECRET || "";
   if (!secret) return res.status(500).json({ ok: false, error: "server_misconfig" });
 
+  let payload;
   try {
-    const payload = jwt.verify(access, secret, { algorithms: ["HS256"] });
-    const userId = payload?.sub ? String(payload.sub) : "";
-    if (!userId) return res.status(401).json({ ok: false, error: "invalid_session" });
-    req.userId = userId;
-    next();
+    payload = jwt.verify(access, secret, { algorithms: ["HS256"] });
   } catch {
     return res.status(401).json({ ok: false, error: "invalid_session" });
+  }
+
+  const userId = payload?.sub ? String(payload.sub) : "";
+  if (!userId) return res.status(401).json({ ok: false, error: "invalid_session" });
+
+  const pool = getPool();
+  const [rows] = await pool.query(
+    "SELECT status, email_verified_at, session_version, duress_locked_until FROM users WHERE id = ? LIMIT 1",
+    [userId]
+  );
+  const user = rows?.[0];
+  const locked = Boolean(
+    user?.duress_locked_until &&
+    new Date(user.duress_locked_until).getTime() > Date.now()
+  );
+  if (
+    !user ||
+    user.status !== "active" ||
+    !user.email_verified_at ||
+    locked ||
+    Number(payload.sv || 0) !== Number(user.session_version || 1)
+  ) {
+    return res.status(401).json({ ok: false, error: locked ? "account_temporarily_locked" : "invalid_session" });
+  }
+
+  req.userId = userId;
+  req.sessionVersion = Number(user.session_version || 1);
+  return next();
+}
+
+function requireVaultAuthorization(req, res, next) {
+  const token = req.cookies?.vault_auth ? String(req.cookies.vault_auth) : "";
+  const secret = process.env.JWT_ACCESS_SECRET || "";
+  if (!token || !secret) return res.status(423).json({ ok: false, error: "vault_locked" });
+
+  try {
+    const payload = jwt.verify(token, secret, { algorithms: ["HS256"] });
+    if (
+      payload?.purpose !== "vault" ||
+      String(payload?.sub || "") !== String(req.userId || "") ||
+      Number(payload?.sv || 0) !== Number(req.sessionVersion || 0)
+    ) {
+      return res.status(423).json({ ok: false, error: "vault_locked" });
+    }
+    return next();
+  } catch {
+    return res.status(423).json({ ok: false, error: "vault_locked" });
   }
 }
 
@@ -284,7 +328,7 @@ router.get(
   })
 );
 
-require("./vault_keys").registerVaultKeyRoutes(router, requireUser, getPool, asyncHandler);
+require("./vault_keys").registerVaultKeyRoutes(router, requireUser, requireVaultAuthorization, getPool, asyncHandler);
 
 router.post(
   "/set-user-public-key",
@@ -417,6 +461,7 @@ router.post(
   "/delete",
   requireUser,
   requirePaid,
+  requireVaultAuthorization,
   deleteLimiter,
 
   asyncHandler(async (req, res) => {
@@ -500,6 +545,7 @@ router.post(
   "/presign-download",
   requireUser,
   requirePaid,
+  requireVaultAuthorization,
   presignDownloadLimiter,
 
   asyncHandler(async (req, res) => {
@@ -561,6 +607,7 @@ router.post(
   "/get-user-envelope",
   requireUser,
   requirePaid,
+  requireVaultAuthorization,
   asyncHandler(async (req, res) => {
     const fileId = String(req.body?.file_id || "");
     if (!fileId) return res.status(400).json({ ok: false, error: "missing_file_id" });
@@ -596,6 +643,7 @@ router.post(
   "/create-contact-share-link",
   requireUser,
   requirePaid,
+  requireVaultAuthorization,
   asyncHandler(async (req, res) => {
     const contactId = Number(req.body?.contact_id || 0);
     const fileId = String(req.body?.file_id || "");
