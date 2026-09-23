@@ -81,6 +81,7 @@ export default function SharePage() {
         const res: ShareLookup = await fetch("/files/share-lookup", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          credentials: "include",
           body: JSON.stringify({ token }),
         }).then((r) => r.json());
 
@@ -91,6 +92,9 @@ export default function SharePage() {
           return;
         }
 
+        if (window.location.hash) {
+          window.history.replaceState(null, "", window.location.pathname + window.location.search);
+        }
         setStatus("Link loaded.");
       } catch {
         setStatus("Failed to load link.");
@@ -118,7 +122,8 @@ export default function SharePage() {
       const env: EnvelopeRes = await fetch("/files/share-get-contact-envelope", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, public_key: publicKeyB64 })
+        credentials: "include",
+        body: JSON.stringify({ public_key: publicKeyB64 })
       }).then((r) => r.json());
 
       if (!env.ok) throw new Error(env.error || "envelope_create_failed");
@@ -153,7 +158,8 @@ export default function SharePage() {
       const dl = await fetch("/files/share-presign-download", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token })
+        credentials: "include",
+        body: JSON.stringify({})
       }).then((r) => r.json());
 
       if (!dl.ok) throw new Error(dl.error || "presign_failed");
