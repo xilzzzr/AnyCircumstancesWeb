@@ -3,6 +3,7 @@ const express = require("express");
 const crypto = require("crypto");
 
 const { S3Client, GetObjectCommand, DeleteObjectCommand, HeadObjectCommand } = require("@aws-sdk/client-s3");
+const { KMSClient, DecryptCommand, GetPublicKeyCommand } = require("@aws-sdk/client-kms");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const { createPresignedPost } = require("@aws-sdk/s3-presigned-post");
 const { rateLimit } = require("express-rate-limit");
@@ -151,8 +152,24 @@ function requirePaid(req, res, next) {
       res.status(500).json({ ok: false, error: "server_error" });
     });
 }
-function getEscrowPrivateKeyPem() {
-  return String(process.env.ESCROW_PRIVATE_KEY_PEM || "").replace(/\\n/g, "\n").trim();
+function getLegacyEscrowPrivateKeyPem() {
+  const raw = String(process.env.ESCROW_PRIVATE_KEY_PEM || "").replace(/\\n/g, "\n").trim();
+  if (!raw) return "";
+  if (process.env.NODE_ENV === "production" &&
+      String(process.env.ALLOW_LEGACY_ESCROW_PRIVATE_KEY || "").toLowerCase() !== "true") {
+    return "";
+  }
+  return raw;
+}
+
+function escrowKmsKeyId() {
+  return String(process.env.ESCROW_KMS_KEY_ID || "").trim();
+}
+
+function kmsClient() {
+  const region = String(process.env.AWS_REGION || "").trim();
+  if (!region) throw new Error("AWS_REGION missing");
+  return new KMSClient({ region });
 }
 
 function normalizePublicKeyPem(input) {
@@ -189,21 +206,29 @@ function isBoundedBase64(input, maxLength = 4096) {
 }
 
 
-function getEscrowPublicKeyPem() {
-  const privPem = getEscrowPrivateKeyPem();
+async function getEscrowPublicKeyPem() {
+  const keyId = escrowKmsKeyId();
+  if (keyId) {
+    const response = await kmsClient().send(new GetPublicKeyCommand({ KeyId: keyId }));
+    if (!response.PublicKey) return null;
+    return crypto.createPublicKey({
+      key: Buffer.from(response.PublicKey),
+      format: "der",
+      type: "spki",
+    }).export({ type: "spki", format: "pem" }).toString();
+  }
+
+  const privPem = getLegacyEscrowPrivateKeyPem();
   if (!privPem) return null;
-
-  const privKeyObj = crypto.createPrivateKey(privPem);
-  const pubKeyObj = crypto.createPublicKey(privKeyObj);
-
-  return pubKeyObj.export({ type: "spki", format: "pem" }).toString();
+  return crypto.createPublicKey(crypto.createPrivateKey(privPem))
+    .export({ type: "spki", format: "pem" }).toString();
 }
 
 router.get(
   "/escrow-public-key",
   asyncHandler(async (req, res) => {
-    const pub = getEscrowPublicKeyPem();
-    if (!pub) return res.status(500).json({ ok: false, error: "escrow_private_key_missing" });
+    const pub = await getEscrowPublicKeyPem();
+    if (!pub) return res.status(500).json({ ok: false, error: "escrow_key_unavailable" });
     return res.json({ ok: true, public_key_pem: pub });
   })
 );
@@ -241,50 +266,52 @@ router.post(
 
 
 /**
- * Decrypt escrowed per-file key using ESCROW_PRIVATE_KEY_PEM and re-encrypt for a contact public key.
- * Returns { alg, enc_key_b64 } or throws.
+ * Unwraps an escrowed per-file AES key. Production should use an AWS KMS
+ * asymmetric RSA key so the private key is non-exportable from KMS.
  */
-function buildContactEnvelopeFromEscrow({ escrowAlg, escrowEncKeyB64, contactPublicKeyPem, escrowPrivateKeyPem }) {
-  const encEscrowBuf = Buffer.from(String(escrowEncKeyB64), "base64");
+async function unwrapEscrowKey(escrowEncKeyB64) {
+  const ciphertext = Buffer.from(String(escrowEncKeyB64), "base64");
+  const keyId = escrowKmsKeyId();
 
-  const plainKeyBuf = crypto.privateDecrypt(
-    { key: escrowPrivateKeyPem, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING, oaepHash: "sha256" },
-    encEscrowBuf
-  );
-
-  let pubInput = String(contactPublicKeyPem || "").trim();
-  if (!pubInput) throw new Error("contact_public_key_missing");
-
-  if (!pubInput.includes("BEGIN")) {
-    pubInput = "-----BEGIN PUBLIC KEY-----\n" + pubInput.match(/.{1,64}/g).join("\n") + "\n-----END PUBLIC KEY-----\n";
+  if (keyId) {
+    const response = await kmsClient().send(new DecryptCommand({
+      KeyId: keyId,
+      CiphertextBlob: ciphertext,
+      EncryptionAlgorithm: "RSAES_OAEP_SHA_256",
+    }));
+    if (!response.Plaintext) throw new Error("kms_decrypt_failed");
+    return Buffer.from(response.Plaintext);
   }
 
-  const pubKeyObj = crypto.createPublicKey(pubInput);
-
-  const normalizedContactPem = normalizePublicKeyPem(contactPublicKeyPem);
-  if (!normalizedContactPem) throw new Error("invalid_contact_public_key");
-
-const contactKeyStr = String(contactPublicKeyPem || "").trim();
-
-const contactKeyObj = contactKeyStr.includes("BEGIN PUBLIC KEY")
-  ? crypto.createPublicKey(contactKeyStr.replace(/\\n/g, "\n"))
-  : crypto.createPublicKey({ key: Buffer.from(contactKeyStr, "base64"), format: "der", type: "spki" });
-
-const encForContactBuf = crypto.publicEncrypt(
-  { key: contactKeyObj, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING, oaepHash: "sha256" },
-  plainKeyBuf
-);
-
-  return { alg: String(escrowAlg || "rsa-oaep-sha256"), enc_key_b64: encForContactBuf.toString("base64") };
+  const privateKeyPem = getLegacyEscrowPrivateKeyPem();
+  if (!privateKeyPem) throw new Error("escrow_key_unavailable");
+  return crypto.privateDecrypt(
+    {
+      key: privateKeyPem,
+      padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+      oaepHash: "sha256",
+    },
+    ciphertext
+  );
 }
 
-/**
- * Loads ESCROW_PRIVATE_KEY_PEM from env. Supports multiline pasted PEM via \n.
- */
-function getEscrowPrivateKeyPemOrNull() {
-  const raw = String(process.env.ESCROW_PRIVATE_KEY_PEM || "").trim();
-  if (!raw) return null;
-  return raw.replace(/\\n/g, "\n").trim();
+async function buildContactEnvelopeFromEscrow({ escrowAlg, escrowEncKeyB64, contactPublicKeyPem }) {
+  const plainKeyBuf = await unwrapEscrowKey(escrowEncKeyB64);
+  const normalizedContactPem = normalizePublicKeyPem(contactPublicKeyPem);
+  if (!normalizedContactPem) throw new Error("invalid_contact_public_key");
+  const contactKeyObj = crypto.createPublicKey(normalizedContactPem);
+  const encForContactBuf = crypto.publicEncrypt(
+    {
+      key: contactKeyObj,
+      padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+      oaepHash: "sha256",
+    },
+    plainKeyBuf
+  );
+  return {
+    alg: String(escrowAlg || "rsa-oaep-sha256"),
+    enc_key_b64: encForContactBuf.toString("base64"),
+  };
 }
 
 router.get(
@@ -872,8 +899,9 @@ router.post(
       "SELECT alg, enc_key_b64 FROM file_key_escrows WHERE file_id = ? LIMIT 1", [share.file_id]
     );
     if (!escrowRows?.[0]?.enc_key_b64) return res.status(500).json({ ok: false, error: "missing_file_escrow" });
-    const escrowPrivateKeyPem = getEscrowPrivateKeyPemOrNull();
-    if (!escrowPrivateKeyPem) return res.status(500).json({ ok: false, error: "escrow_private_key_missing" });
+    if (!escrowKmsKeyId() && !getLegacyEscrowPrivateKeyPem()) {
+      return res.status(500).json({ ok: false, error: "escrow_key_unavailable" });
+    }
 
     const [ownerRows] = await pool.query("SELECT user_id FROM files WHERE id = ? LIMIT 1", [share.file_id]);
     if (!ownerRows?.[0]?.user_id) return res.status(500).json({ ok: false, error: "missing_envelope_meta" });
@@ -894,11 +922,10 @@ router.post(
 
     let envelope;
     try {
-      envelope = buildContactEnvelopeFromEscrow({
+      envelope = await buildContactEnvelopeFromEscrow({
         escrowAlg: String(escrowRows[0].alg || "rsa-oaep-sha256"),
         escrowEncKeyB64: String(escrowRows[0].enc_key_b64),
         contactPublicKeyPem: normalizedPublicKey,
-        escrowPrivateKeyPem,
       });
     } catch {
       // Do not forward crypto exceptions or key material to logs/responses.
