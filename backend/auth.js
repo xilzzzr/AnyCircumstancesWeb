@@ -500,6 +500,7 @@ async function rotateRefreshToken(conn, raw) {
   if (!row) return { ok: false, reason: "invalid_refresh" };
   if (row.revoked_at) {
     await conn.query("UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = ? AND revoked_at IS NULL", [row.user_id]);
+    await conn.query("UPDATE users SET session_version = session_version + 1 WHERE id = ? LIMIT 1", [row.user_id]);
     return { ok: false, reason: "refresh_reuse_detected" };
   }
   if (new Date(row.expires_at).getTime() < nowUtc().getTime()) return { ok: false, reason: "expired_refresh" };
@@ -767,16 +768,27 @@ router.post(
   "/logout",
   asyncHandler(async (req, res) => {
     const raw = req.cookies?.refresh_token ? String(req.cookies.refresh_token) : "";
+    const payload = getAccessPayload(req);
+    const userId = payload?.sub ? String(payload.sub) : "";
     const conn = await pool.getConnection();
 
     try {
       await conn.beginTransaction();
-      if (raw) await revokeRefreshToken(conn, raw);
+      if (userId) {
+        await conn.query(
+          "UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = ? AND revoked_at IS NULL",
+          [userId]
+        );
+        await conn.query(
+          "UPDATE users SET session_version = session_version + 1 WHERE id = ? LIMIT 1",
+          [userId]
+        );
+      } else if (raw) {
+        await revokeRefreshToken(conn, raw);
+      }
       await conn.commit();
     } catch (e) {
-      try {
-        await conn.rollback();
-      } catch {}
+      try { await conn.rollback(); } catch {}
       logError("logout-tx", e);
     } finally {
       conn.release();
