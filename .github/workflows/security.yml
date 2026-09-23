@@ -32,6 +32,14 @@ jobs:
             package-lock.json
             backend/package-lock.json
 
+      - name: Backend syntax checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in backend/*.js; do
+            node --check "$file"
+          done
+
       - name: Install frontend dependencies
         run: npm ci
 
