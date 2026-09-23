@@ -206,30 +206,33 @@ function isBoundedBase64(input, maxLength = 4096) {
 }
 
 
-async function getEscrowPublicKeyPem() {
+async function getEscrowPublicKeyInfo() {
   const keyId = escrowKmsKeyId();
   if (keyId) {
     const response = await kmsClient().send(new GetPublicKeyCommand({ KeyId: keyId }));
     if (!response.PublicKey) return null;
-    return crypto.createPublicKey({
+    const publicKeyPem = crypto.createPublicKey({
       key: Buffer.from(response.PublicKey),
       format: "der",
       type: "spki",
     }).export({ type: "spki", format: "pem" }).toString();
+    return { publicKeyPem, keyRef: `kms:${keyId}` };
   }
 
   const privPem = getLegacyEscrowPrivateKeyPem();
   if (!privPem) return null;
-  return crypto.createPublicKey(crypto.createPrivateKey(privPem))
+  const publicKeyPem = crypto.createPublicKey(crypto.createPrivateKey(privPem))
     .export({ type: "spki", format: "pem" }).toString();
+  const fingerprint = crypto.createHash("sha256").update(publicKeyPem).digest("hex");
+  return { publicKeyPem, keyRef: `legacy:${fingerprint}` };
 }
 
 router.get(
   "/escrow-public-key",
   asyncHandler(async (req, res) => {
-    const pub = await getEscrowPublicKeyPem();
-    if (!pub) return res.status(500).json({ ok: false, error: "escrow_key_unavailable" });
-    return res.json({ ok: true, public_key_pem: pub });
+    const info = await getEscrowPublicKeyInfo();
+    if (!info) return res.status(500).json({ ok: false, error: "escrow_key_unavailable" });
+    return res.json({ ok: true, public_key_pem: info.publicKeyPem, key_ref: info.keyRef });
   })
 );
 
@@ -241,6 +244,7 @@ router.post(
     const fileId = String(req.body?.file_id || "");
     const alg = String(req.body?.alg || "").trim();
     const encKeyB64 = String(req.body?.enc_key_b64 || "").trim();
+    const keyRef = String(req.body?.key_ref || "").trim();
 
     if (!fileId) return res.status(400).json({ ok: false, error: "missing_file_id" });
 
@@ -249,6 +253,11 @@ router.post(
 
     if (alg !== "rsa-oaep-sha256") return res.status(400).json({ ok: false, error: "invalid_alg" });
     if (!isBoundedBase64(encKeyB64)) return res.status(400).json({ ok: false, error: "invalid_enc_key" });
+    if (!keyRef || keyRef.length > 512) return res.status(400).json({ ok: false, error: "invalid_key_ref" });
+    const activeEscrow = await getEscrowPublicKeyInfo();
+    if (!activeEscrow || keyRef !== activeEscrow.keyRef) {
+      return res.status(409).json({ ok: false, error: "escrow_key_rotated" });
+    }
 
     const pool = getPool();
 
@@ -256,8 +265,8 @@ router.post(
     if (!frows || !frows.length) return res.status(404).json({ ok: false, error: "file_not_found" });
 
     await pool.query(
-      "INSERT INTO file_key_escrows (file_id, alg, enc_key_b64) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE alg=VALUES(alg), enc_key_b64=VALUES(enc_key_b64)",
-      [fileId, alg, encKeyB64]
+      "INSERT INTO file_key_escrows (file_id, alg, enc_key_b64, key_ref) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE alg=VALUES(alg), enc_key_b64=VALUES(enc_key_b64), key_ref=VALUES(key_ref)",
+      [fileId, alg, encKeyB64, keyRef]
     );
 
     return res.json({ ok: true });
@@ -269,11 +278,13 @@ router.post(
  * Unwraps an escrowed per-file AES key. Production should use an AWS KMS
  * asymmetric RSA key so the private key is non-exportable from KMS.
  */
-async function unwrapEscrowKey(escrowEncKeyB64) {
+async function unwrapEscrowKey(escrowEncKeyB64, keyRef) {
   const ciphertext = Buffer.from(String(escrowEncKeyB64), "base64");
-  const keyId = escrowKmsKeyId();
+  const ref = String(keyRef || "").trim();
 
-  if (keyId) {
+  if (ref.startsWith("kms:")) {
+    const keyId = ref.slice(4);
+    if (!keyId) throw new Error("invalid_escrow_key_ref");
     const response = await kmsClient().send(new DecryptCommand({
       KeyId: keyId,
       CiphertextBlob: ciphertext,
@@ -283,8 +294,9 @@ async function unwrapEscrowKey(escrowEncKeyB64) {
     return Buffer.from(response.Plaintext);
   }
 
+  // Existing rows predate key_ref and are therefore legacy ciphertext.
   const privateKeyPem = getLegacyEscrowPrivateKeyPem();
-  if (!privateKeyPem) throw new Error("escrow_key_unavailable");
+  if (!privateKeyPem) throw new Error("legacy_escrow_key_unavailable");
   return crypto.privateDecrypt(
     {
       key: privateKeyPem,
@@ -295,8 +307,8 @@ async function unwrapEscrowKey(escrowEncKeyB64) {
   );
 }
 
-async function buildContactEnvelopeFromEscrow({ escrowAlg, escrowEncKeyB64, contactPublicKeyPem }) {
-  const plainKeyBuf = await unwrapEscrowKey(escrowEncKeyB64);
+async function buildContactEnvelopeFromEscrow({ escrowAlg, escrowEncKeyB64, escrowKeyRef, contactPublicKeyPem }) {
+  const plainKeyBuf = await unwrapEscrowKey(escrowEncKeyB64, escrowKeyRef);
   const normalizedContactPem = normalizePublicKeyPem(contactPublicKeyPem);
   if (!normalizedContactPem) throw new Error("invalid_contact_public_key");
   const contactKeyObj = crypto.createPublicKey(normalizedContactPem);
@@ -896,7 +908,7 @@ router.post(
     );
 
     const [escrowRows] = await pool.query(
-      "SELECT alg, enc_key_b64 FROM file_key_escrows WHERE file_id = ? LIMIT 1", [share.file_id]
+      "SELECT alg, enc_key_b64, key_ref FROM file_key_escrows WHERE file_id = ? LIMIT 1", [share.file_id]
     );
     if (!escrowRows?.[0]?.enc_key_b64) return res.status(500).json({ ok: false, error: "missing_file_escrow" });
     if (!escrowKmsKeyId() && !getLegacyEscrowPrivateKeyPem()) {
@@ -925,6 +937,7 @@ router.post(
       envelope = await buildContactEnvelopeFromEscrow({
         escrowAlg: String(escrowRows[0].alg || "rsa-oaep-sha256"),
         escrowEncKeyB64: String(escrowRows[0].enc_key_b64),
+        escrowKeyRef: escrowRows[0].key_ref ? String(escrowRows[0].key_ref) : "",
         contactPublicKeyPem: normalizedPublicKey,
       });
     } catch {
