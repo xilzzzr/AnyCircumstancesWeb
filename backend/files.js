@@ -2,7 +2,7 @@
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
-const { decryptEscrowedKey, getEscrowPublicKeyPem } = require("./escrow_keys");
+const { decryptEscrowedKey, escrowKeyId, getEscrowPublicKeyPem } = require("./escrow_keys");
 
 const { S3Client, GetObjectCommand, DeleteObjectCommand, HeadObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
@@ -292,8 +292,8 @@ router.post(
     if (!frows || !frows.length) return res.status(404).json({ ok: false, error: "file_not_found" });
 
     await pool.query(
-      "INSERT INTO file_key_escrows (file_id, alg, enc_key_b64) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE alg=VALUES(alg), enc_key_b64=VALUES(enc_key_b64)",
-      [fileId, alg, encKeyB64]
+      "INSERT INTO file_key_escrows (file_id, alg, enc_key_b64, escrow_key_id) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE alg=VALUES(alg), enc_key_b64=VALUES(enc_key_b64), escrow_key_id=VALUES(escrow_key_id)",
+      [fileId, alg, encKeyB64, escrowKeyId()]
     );
 
     return res.json({ ok: true });
@@ -896,9 +896,12 @@ router.post(
     if (new Date(share.expires_at).getTime() < Date.now()) return res.status(410).json({ ok: false, error: "token_expired" });
 
     const [escrowRows] = await pool.query(
-      "SELECT alg, enc_key_b64 FROM file_key_escrows WHERE file_id = ? LIMIT 1", [share.file_id]
+      "SELECT alg, enc_key_b64, escrow_key_id FROM file_key_escrows WHERE file_id = ? LIMIT 1", [share.file_id]
     );
     if (!escrowRows?.[0]?.enc_key_b64) return res.status(500).json({ ok: false, error: "missing_file_escrow" });
+    if (process.env.NODE_ENV === "production" && String(escrowRows[0].escrow_key_id || "") !== escrowKeyId()) {
+      return res.status(503).json({ ok: false, error: "escrow_key_migration_required" });
+    }
     const [ownerRows] = await pool.query("SELECT user_id FROM files WHERE id = ? LIMIT 1", [share.file_id]);
     if (!ownerRows?.[0]?.user_id) return res.status(500).json({ ok: false, error: "missing_envelope_meta" });
     const [metaRows] = await pool.query(
