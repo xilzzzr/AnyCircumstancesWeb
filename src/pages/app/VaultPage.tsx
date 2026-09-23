@@ -194,6 +194,11 @@ export function VaultPage() {
   };
 
 const handleDelete = async (fileKey: string) => {
+  if (vaultLocked) {
+    setUnlockModal(true);
+    toast({ title: "Unlock the vault", description: "Enter your safety PIN, then retry the deletion." });
+    return;
+  }
   if (!confirm("Delete this file? This cannot be undone.")) return;
 
   try {
@@ -283,7 +288,19 @@ const handleDelete = async (fileKey: string) => {
             {loading ? "Loading..." : `${files.length} encrypted file${files.length === 1 ? "" : "s"}`}
           </p>
         </div>
-        <Button variant="outline" onClick={() => setSyncKey(true)}>Enable cross-device access</Button>
+        <Button
+          variant="outline"
+          onClick={() => {
+            if (vaultLocked) {
+              setUnlockModal(true);
+              toast({ title: "Unlock the vault", description: "Enter your safety PIN before accessing the encrypted key backup." });
+              return;
+            }
+            setSyncKey(true);
+          }}
+        >
+          Enable cross-device access
+        </Button>
         <Link to="/app/upload">
           <Button className="gap-2">
             <Upload className="h-4 w-4" /> Upload files
