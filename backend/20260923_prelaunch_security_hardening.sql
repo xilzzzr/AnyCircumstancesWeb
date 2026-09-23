@@ -5,6 +5,9 @@ ALTER TABLE users
   ADD COLUMN auth_version INT NOT NULL DEFAULT 1,
   ADD COLUMN duress_locked_until DATETIME(3) NULL;
 
+ALTER TABLE file_key_escrows
+  ADD COLUMN key_ref VARCHAR(512) NULL;
+
 CREATE TABLE IF NOT EXISTS emergency_delivery_attempts (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   user_id BIGINT NOT NULL,
