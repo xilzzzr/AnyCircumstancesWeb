@@ -78,12 +78,18 @@ async function processAccountLifecycleJob(pool, stripe, job) {
   const action = String(job.action);
   const subscriptionId = String(job.stripe_subscription_id || "");
 
-  await pool.query(
+  const [claim] = await pool.query(
     `UPDATE account_lifecycle_jobs
      SET status='processing', attempts=attempts+1, last_error=NULL
-     WHERE user_id = ?`,
+     WHERE user_id = ?
+       AND attempts < 10
+       AND (
+         status IN ('pending','failed')
+         OR (status='processing' AND updated_at < DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 10 MINUTE))
+       )`,
     [userId]
   );
+  if (!claim?.affectedRows) return { ok: true, claimed: false };
 
   try {
     await cancelStripeSubscription(stripe, subscriptionId);
@@ -108,7 +114,7 @@ async function processAccountLifecycleJob(pool, stripe, job) {
     }
 
     await pool.query("DELETE FROM account_lifecycle_jobs WHERE user_id = ?", [userId]);
-    return { ok: true };
+    return { ok: true, claimed: true };
   } catch (error) {
     await pool.query(
       `UPDATE account_lifecycle_jobs
@@ -116,7 +122,7 @@ async function processAccountLifecycleJob(pool, stripe, job) {
        WHERE user_id = ?`,
       [String(error?.message || error || "account_action_failed").slice(0, 255), userId]
     ).catch(() => null);
-    return { ok: false, error };
+    return { ok: false, error, claimed: true };
   }
 }
 
@@ -138,6 +144,7 @@ async function processPendingAccountLifecycleJobs(pool, stripe, { limit = 20 } =
   let failed = 0;
   for (const job of jobs || []) {
     const out = await processAccountLifecycleJob(pool, stripe, job);
+    if (out.claimed === false) continue;
     if (out.ok) completed += 1;
     else failed += 1;
   }
