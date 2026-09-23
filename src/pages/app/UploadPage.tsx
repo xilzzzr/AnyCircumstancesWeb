@@ -8,6 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { encryptFileToAesGcm, ensureUserKeypair, wrapAesKeyForUser } from "@/lib/vaultCrypto";
+import { useAuth } from "@/contexts/AuthContext";
 
 async function saveEscrowForFile(fileId: string, rawAesKey: Uint8Array) {
   const pubRes = await fetch("/files/escrow-public-key", { credentials: "include" });
@@ -57,7 +58,7 @@ type UploadingFile = {
   id: string;
   file: File;
   progress: number;
-  status: "needs_passphrase" | "encrypting" | "uploading" | "complete" | "error";
+  status: "needs_pin" | "needs_passphrase" | "encrypting" | "uploading" | "complete" | "error";
   includeInEmergency: boolean;
   key?: string;
   error?: string;
@@ -112,8 +113,12 @@ export function UploadPage() {
   const [files, setFiles] = useState<UploadingFile[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const { toast } = useToast();
+  const { unlockVault } = useAuth();
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [pin, setPin] = useState("");
+  const [pinOpen, setPinOpen] = useState(false);
+  const [unlocking, setUnlocking] = useState(false);
 
   const [passphrase, setPassphrase] = useState("");
   const [passphraseOpen, setPassphraseOpen] = useState(false);
@@ -175,6 +180,11 @@ export function UploadPage() {
           pubSpkiB64 = kp.pubSpkiB64;
         } catch (e: any) {
           const msg = String(e?.message || "");
+          if (msg === "vault_locked") {
+            updateFile(uf.id, { status: "needs_pin", progress: 0, error: undefined });
+            setPinOpen(true);
+            return;
+          }
           if (msg === "bad_passphrase") {
             updateFile(uf.id, { status: "needs_passphrase", progress: 0, error: "bad_passphrase" });
             setPassphraseOpen(true);
@@ -310,6 +320,24 @@ export function UploadPage() {
     [checkPaid, passphraseOk, passphrase, toast, updateFile]
   );
 
+  const handlePinUnlock = useCallback(async () => {
+    if (!/^\d{4,6}$/.test(pin) || unlocking) return;
+    setUnlocking(true);
+    try {
+      const ok = await unlockVault(pin);
+      if (!ok) {
+        toast({ title: "Incorrect PIN", description: "Enter your safety PIN to unlock the vault.", variant: "destructive" });
+        return;
+      }
+      setPinOpen(false);
+      setPin("");
+      const pending = files.filter((file) => file.status === "needs_pin");
+      setTimeout(() => pending.forEach((file) => startUpload(file)), 0);
+    } finally {
+      setUnlocking(false);
+    }
+  }, [files, pin, startUpload, toast, unlockVault, unlocking]);
+
   const resumePassphraseQueue = useCallback(() => {
     setFiles((prev) => {
       const pending = prev.filter((f) => f.status === "needs_passphrase");
@@ -354,6 +382,33 @@ export function UploadPage() {
 
   return (
     <div className="p-6 lg:p-8 max-w-3xl mx-auto space-y-6">
+      <Dialog open={pinOpen} onOpenChange={(open) => !unlocking && setPinOpen(open)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Lock className="h-4 w-4" /> Unlock vault
+            </DialogTitle>
+            <DialogDescription>
+              Enter your safety PIN before the app can retrieve your encrypted vault-key backup.
+            </DialogDescription>
+          </DialogHeader>
+          <Input
+            type="password"
+            inputMode="numeric"
+            value={pin}
+            onChange={(event) => setPin(event.target.value.replace(/\D/g, "").slice(0, 6))}
+            placeholder="Safety PIN"
+            autoComplete="off"
+            onKeyDown={(event) => { if (event.key === "Enter") handlePinUnlock(); }}
+          />
+          <DialogFooter>
+            <Button onClick={handlePinUnlock} disabled={unlocking || !/^\d{4,6}$/.test(pin)}>
+              {unlocking ? <Loader2 className="h-4 w-4 animate-spin" /> : "Unlock"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={passphraseOpen} onOpenChange={setPassphraseOpen}>
         <DialogContent>
           <DialogHeader>
@@ -453,6 +508,12 @@ export function UploadPage() {
                   <p className="font-medium text-foreground truncate">{uf.file.name}</p>
 
                   <div className="flex items-center gap-2 mt-1">
+                    {uf.status === "needs_pin" && (
+                      <span className="text-xs text-muted-foreground flex items-center gap-1">
+                        <Lock className="h-3 w-3" /> Waiting for safety PIN...
+                      </span>
+                    )}
+
                     {uf.status === "needs_passphrase" && (
                       <span className="text-xs text-muted-foreground flex items-center gap-1">
                         <Lock className="h-3 w-3" /> Waiting for passphrase...
