@@ -11,6 +11,7 @@ const { processPendingAccountLifecycleJobs } = require("./account_actions");
 const { sendPushToUser } = require("./push_notifications");
 const {
   deliverPendingEmergencyDispatches,
+  processEmergencyTriggerJobs,
   queueEmergencyDispatch,
 } = require("./emergency_delivery");
 
@@ -223,6 +224,9 @@ async function main() {
     }
 
     await sendGraceReminders(pool, mail);
+
+    // Convert durable panic/duress triggers into per-contact release jobs.
+    await processEmergencyTriggerJobs(pool, { limit: 100 });
 
     // Retry previously queued deliveries first. Each contact is independent,
     // so one bad address cannot invalidate links already delivered to others.
