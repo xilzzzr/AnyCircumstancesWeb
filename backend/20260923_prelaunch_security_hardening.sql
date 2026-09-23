@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS emergency_delivery_attempts (
   recipient_email VARCHAR(254) NOT NULL,
   recipient_name VARCHAR(255) NULL,
   file_ids_json JSON NOT NULL,
+  delivery_kind VARCHAR(24) NOT NULL DEFAULT 'scheduled',
   status VARCHAR(24) NOT NULL DEFAULT 'pending',
   attempt_count INT NOT NULL DEFAULT 0,
   last_error VARCHAR(255) NULL,
