@@ -54,7 +54,7 @@ async function deleteUserRecords(pool, userId) {
       "verification_reminder_emails", "verification_emergency_dispatches", "verification_panic_dispatches",
       "emergency_delivery_attempts", "verification_checkins", "verification_settings", "user_device_tokens",
       "password_reset_tokens", "email_verification_tokens", "refresh_tokens", "billing_invoices",
-      "billing_entitlements", "apple_account_links", "billing_profiles", "user_vault_keys",
+      "billing_entitlements", "apple_account_links", "billing_profiles", "user_vault_keys", "account_lifecycle_jobs",
     ]) {
       await conn.query(`DELETE FROM ${table} WHERE user_id = ?`, [uid]);
     }
