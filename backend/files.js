@@ -1,6 +1,5 @@
 // files.js
 const express = require("express");
-const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 
 const { S3Client, GetObjectCommand, DeleteObjectCommand, HeadObjectCommand } = require("@aws-sdk/client-s3");
@@ -89,21 +88,32 @@ function safeFilename(name) {
 }
 
 function requireUser(req, res, next) {
-  const access = req.cookies?.access_token ? String(req.cookies.access_token) : "";
-  if (!access) return res.status(401).json({ ok: false, error: "not_authenticated" });
+  const auth = require("./auth");
+  Promise.resolve(auth.validateAccessSession(req))
+    .then((session) => {
+      if (!session?.ok) {
+        auth.clearVaultUnlockCookie(res);
+        return res.status(session?.error === "temporarily_locked" ? 423 : 401).json({
+          ok: false,
+          error: session?.error || "not_authenticated",
+        });
+      }
+      req.userId = session.userId;
+      req.authVersion = session.authVersion;
+      next();
+    })
+    .catch((error) => {
+      console.error("[files requireUser]", error && (error.stack || error));
+      res.status(500).json({ ok: false, error: "server_error" });
+    });
+}
 
-  const secret = process.env.JWT_ACCESS_SECRET || "";
-  if (!secret) return res.status(500).json({ ok: false, error: "server_misconfig" });
-
-  try {
-    const payload = jwt.verify(access, secret, { algorithms: ["HS256"] });
-    const userId = payload?.sub ? String(payload.sub) : "";
-    if (!userId) return res.status(401).json({ ok: false, error: "invalid_session" });
-    req.userId = userId;
-    next();
-  } catch {
-    return res.status(401).json({ ok: false, error: "invalid_session" });
+function requireVaultUnlocked(req, res, next) {
+  const auth = require("./auth");
+  if (!auth.verifyVaultUnlockCookie(req, req.userId, req.authVersion)) {
+    return res.status(403).json({ ok: false, error: "vault_locked" });
   }
+  next();
 }
 
 async function requireActiveSubscription(req, res) {
@@ -284,7 +294,7 @@ router.get(
   })
 );
 
-require("./vault_keys").registerVaultKeyRoutes(router, requireUser, getPool, asyncHandler);
+require("./vault_keys").registerVaultKeyRoutes(router, requireUser, requireVaultUnlocked, getPool, asyncHandler);
 
 router.post(
   "/set-user-public-key",
@@ -417,6 +427,7 @@ router.post(
   "/delete",
   requireUser,
   requirePaid,
+  requireVaultUnlocked,
   deleteLimiter,
 
   asyncHandler(async (req, res) => {
@@ -500,6 +511,7 @@ router.post(
   "/presign-download",
   requireUser,
   requirePaid,
+  requireVaultUnlocked,
   presignDownloadLimiter,
 
   asyncHandler(async (req, res) => {
@@ -561,6 +573,7 @@ router.post(
   "/get-user-envelope",
   requireUser,
   requirePaid,
+  requireVaultUnlocked,
   asyncHandler(async (req, res) => {
     const fileId = String(req.body?.file_id || "");
     if (!fileId) return res.status(400).json({ ok: false, error: "missing_file_id" });
