@@ -555,7 +555,7 @@ async function consumePasswordResetToken(conn, rawToken, newPassword) {
 
   await conn.query("UPDATE password_reset_tokens SET used_at = NOW() WHERE id = ?", [row.id]);
   await conn.query(
-    "UPDATE users SET password_hash = ?, session_version = session_version + 1, duress_locked_until = NULL WHERE id = ? LIMIT 1",
+    "UPDATE users SET password_hash = ?, session_version = session_version + 1 WHERE id = ? LIMIT 1",
     [passwordHash, row.user_id]
   );
   await conn.query("UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = ? AND revoked_at IS NULL", [row.user_id]);
@@ -1133,7 +1133,10 @@ router.post(
     const pin = String(req.body?.pin || "");
     if (!/^\d{4,6}$/.test(pin)) return res.status(400).json({ ok: false, error: "invalid_pin" });
 
-    const [urows] = await pool.query("SELECT pin_hash, panic_pin_hash FROM users WHERE id = ? LIMIT 1", [String(userId)]);
+    const [urows] = await pool.query(
+      "SELECT pin_hash, panic_pin_hash FROM users WHERE id = ? LIMIT 1",
+      [String(userId)]
+    );
     const pinHash = urows?.[0]?.pin_hash ? String(urows[0].pin_hash) : "";
     const panicHash = urows?.[0]?.panic_pin_hash ? String(urows[0].panic_pin_hash) : "";
 
@@ -1146,21 +1149,16 @@ router.post(
       isPanic = await bcrypt.compare(pin, panicHash);
       if (isPanic) ok = true;
     }
-
-    if (!ok && pinHash) {
-      ok = await bcrypt.compare(pin, pinHash);
-    }
+    if (!ok && pinHash) ok = await bcrypt.compare(pin, pinHash);
 
     if (!ok) return res.status(401).json({ ok: false, error: "invalid_pin" });
     if (isPanic && !consumeEmergencyDispatchQuota(userId, res)) return;
 
     const row = await getVerificationSettingsRow(userId);
-
     const paidFrequency = await getPaidCheckinFrequency(userId);
     const frequency = paidFrequency || row?.frequency || "weekly";
     const gracePeriodHours = row ? Number(row.grace_period_hours) : 24;
     const reminders = row ? Number(row.reminders) : 3;
-
     const now = nowUtc();
     const nextDue = addDays(now, daysForFrequency(frequency));
 
@@ -1168,30 +1166,45 @@ router.post(
     try {
       await conn.beginTransaction();
 
-      await conn.query("INSERT INTO verification_checkins (user_id, method) VALUES (?, 'manual')", [String(userId)]);
+      // Serialize successful check-ins against scheduled emergency dispatch.
+      await conn.query(
+        "SELECT user_id FROM verification_settings WHERE user_id = ? LIMIT 1 FOR UPDATE",
+        [String(userId)]
+      );
 
+      await conn.query(
+        "INSERT INTO verification_checkins (user_id, method) VALUES (?, 'manual')",
+        [String(userId)]
+      );
       await conn.query(
         "INSERT INTO verification_settings (user_id, frequency, grace_period_hours, reminders, last_checkin_at, next_due_at) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE frequency = VALUES(frequency), last_checkin_at = VALUES(last_checkin_at), next_due_at = VALUES(next_due_at)",
         [String(userId), frequency, gracePeriodHours, reminders, now, nextDue]
       );
 
-      if (isPanic) {
-        const out = await dispatchEmergencyForUser(conn, userId, req);
-        if (!out?.ok) {
-          await conn.rollback();
-          return res.status(500).json({ ok: false, error: out?.error || "server_error" });
-        }
-      }
-
       await conn.commit();
     } catch (e) {
-      try {
-        await conn.rollback();
-      } catch {}
+      try { await conn.rollback(); } catch {}
       logError("verification-check-in", e);
       return res.status(500).json({ ok: false, error: "server_error" });
     } finally {
       conn.release();
+    }
+
+    if (isPanic) {
+      try {
+        await queueAndDeliverEmergency(pool, {
+          userId,
+          reason: "panic_checkin",
+          requestMeta: {
+            ip: req.ip,
+            userAgent: req.headers["user-agent"],
+          },
+        });
+      } catch (error) {
+        // A panic PIN must remain visually indistinguishable from a normal check-in.
+        // The durable queue is retried by the dispatcher when queuing succeeded.
+        logError("verification-check-in:panic-dispatch", error);
+      }
     }
 
     const saved = await getVerificationSettingsRow(userId);
@@ -1882,94 +1895,6 @@ router.post(
   })
 );
 
-async function dispatchEmergencyForUser(conn, userId, req) {
-  const transporter = getMailer();
-  const from = emailSender();
-  if (!transporter) {
-    return { ok: false, error: "mailer_not_configured", emailedContacts: 0, linksCreated: 0 };
-  }
-
-  const publicBase = String(process.env.PUBLIC_APP_BASE_URL || "https://anycircumstances.com").replace(/\/+$/, "");
-
-  let emailedContacts = 0;
-  let linksCreated = 0;
-
-  await conn.query("INSERT INTO verification_panic_dispatches (user_id, ip, user_agent) VALUES (?, ?, ?)", [
-    String(userId),
-    String(req.ip || "").slice(0, 64),
-    String(req.headers["user-agent"] || "").slice(0, 255),
-  ]);
-
-  const [urows] = await conn.query("SELECT email FROM users WHERE id = ? LIMIT 1", [String(userId)]);
-  const ownerEmail = urows?.[0]?.email ? String(urows[0].email) : "";
-
-  const [contacts] = await conn.query(
-    "SELECT id, email, name, verified_at, public_key FROM emergency_contacts WHERE user_id = ? AND verified_at IS NOT NULL",
-    [String(userId)]
-  );
-
-  if (!contacts.length) {
-    return { ok: true, emailedContacts: 0, linksCreated: 0, note: "no_contacts" };
-  }
-
-  const [assignments] = await conn.query(
-    `
-      SELECT a.contact_id, a.file_id
-      FROM emergency_contact_file_assignments a
-      JOIN emergency_contacts c ON c.id = a.contact_id
-      JOIN files f ON f.id = a.file_id
-      WHERE c.user_id = ? AND f.user_id = c.user_id
-    `,
-    [String(userId)]
-  );
-
-  const filesByContact = new Map();
-  for (const a of assignments) {
-    const cid = Number(a.contact_id);
-    const arr = filesByContact.get(cid) || [];
-    arr.push(String(a.file_id));
-    filesByContact.set(cid, arr);
-  }
-
-  for (const c of contacts) {
-    const contactId = Number(c.id);
-    const email = String(c.email);
-    const name = String(c.name || "");
-    const list = filesByContact.get(contactId) || [];
-    if (!list.length) continue;
-
-    const missingSetup = !c.public_key;
-
-    const links = [];
-    for (const fileId of list) {
-      const token = crypto.randomBytes(32).toString("hex");
-      const tokenHash = sha256Hex(token);
-
-      await conn.query(
-        "INSERT INTO contact_file_share_tokens (contact_id, file_id, token_hash, expires_at) VALUES (?, ?, ?, ?)",
-        [contactId, fileId, tokenHash, shareExpiresAt()]
-      );
-links.push(publicBase + "/share#token=" + encodeURIComponent(token));
-      linksCreated += 1;
-    }
-
-    const subject = "AnyCircumstances: Emergency access link (manual trigger)";
-    const rendered = renderEmergencyEmail({ name, ownerEmail, links, missingSetup });
-
-await transporter.sendMail({
-  from,
-  to: email,
-  subject,
-  text: rendered.text,
-  html: rendered.html,
-});
-    emailedContacts += 1;
-  }
-
-  return { ok: true, emailedContacts, linksCreated };
-}
-
-
 router.post(
   "/trigger-emergency",
   asyncHandler(async (req, res) => {
@@ -1979,115 +1904,40 @@ router.post(
     const pin = String(req.body?.pin || "");
     if (!/^\d{4,6}$/.test(pin)) return res.status(400).json({ ok: false, error: "invalid_pin" });
 
-    const [urows] = await pool.query("SELECT email, panic_pin_hash FROM users WHERE id = ? LIMIT 1", [String(userId)]);
+    const [urows] = await pool.query(
+      "SELECT panic_pin_hash FROM users WHERE id = ? LIMIT 1",
+      [String(userId)]
+    );
     const panicHash = urows?.[0]?.panic_pin_hash ? String(urows[0].panic_pin_hash) : "";
-    const ownerEmail = urows?.[0]?.email ? String(urows[0].email) : "";
-
     if (!panicHash) return res.status(400).json({ ok: false, error: "panic_pin_not_set" });
 
     const ok = await bcrypt.compare(pin, panicHash);
     if (!ok) return res.status(401).json({ ok: false, error: "invalid_pin" });
     if (!consumeEmergencyDispatchQuota(userId, res)) return;
 
-    const transporter = getMailer();
-    const from = emailSender();
-    if (!transporter) return res.status(500).json({ ok: false, error: "mailer_not_configured" });
-
-    const publicBase = String(process.env.PUBLIC_APP_BASE_URL || "https://anycircumstances.com").replace(/\/+$/, "");
-
-    const conn = await pool.getConnection();
-    let emailedContacts = 0;
-    let linksCreated = 0;
-
     try {
-      await conn.beginTransaction();
-
-      await conn.query("INSERT INTO verification_panic_dispatches (user_id, ip, user_agent) VALUES (?, ?, ?)", [
-        String(userId),
-        String(req.ip || "").slice(0, 64),
-        String(req.headers["user-agent"] || "").slice(0, 255),
-      ]);
-
-      const [contacts] = await conn.query(
-        "SELECT id, email, name, verified_at, public_key FROM emergency_contacts WHERE user_id = ? AND verified_at IS NOT NULL",
-        [String(userId)]
-      );
-
-      if (!contacts.length) {
-        await conn.commit();
-        return res.json({ ok: true, emailedContacts: 0, linksCreated: 0, note: "no_contacts" });
-      }
-
-      const [assignments] = await conn.query(
-        `
-        SELECT a.contact_id, a.file_id
-        FROM emergency_contact_file_assignments a
-        JOIN emergency_contacts c ON c.id = a.contact_id
-        JOIN files f ON f.id = a.file_id
-        WHERE c.user_id = ? AND f.user_id = c.user_id
-        `,
-        [String(userId)]
-      );
-
-      const filesByContact = new Map();
-      for (const a of assignments) {
-        const cid = Number(a.contact_id);
-        const arr = filesByContact.get(cid) || [];
-        arr.push(String(a.file_id));
-        filesByContact.set(cid, arr);
-      }
-
-      for (const c of contacts) {
-        const contactId = Number(c.id);
-        const email = String(c.email);
-        const name = String(c.name || "");
-        const list = filesByContact.get(contactId) || [];
-        if (!list.length) continue;
-
-        const missingSetup = !c.public_key;
-
-        const links = [];
-        for (const fileId of list) {
-          const token = crypto.randomBytes(32).toString("hex");
-          const tokenHash = sha256Hex(token);
-
-          await conn.query(
-        "INSERT INTO contact_file_share_tokens (contact_id, file_id, token_hash, expires_at) VALUES (?, ?, ?, ?)",
-        [contactId, fileId, tokenHash, shareExpiresAt()]
-      );
-links.push(publicBase + "/share#token=" + encodeURIComponent(token));
-          linksCreated += 1;
-        }
-
-        const subject = "AnyCircumstances: Emergency access link (manual trigger)";
-    const rendered = renderEmergencyEmail({ name, ownerEmail, links, missingSetup });
-
-await transporter.sendMail({
-  from,
-  to: email,
-  subject,
-  text: rendered.text,
-  html: rendered.html,
-});
-        emailedContacts += 1;
-      }
-
-      await conn.commit();
-    } catch (e) {
-      try {
-        await conn.rollback();
-      } catch {}
-      logError("trigger-emergency", e);
+      const out = await queueAndDeliverEmergency(pool, {
+        userId,
+        reason: "manual",
+        requestMeta: {
+          ip: req.ip,
+          userAgent: req.headers["user-agent"],
+        },
+      });
+      return res.json({
+        ok: true,
+        queuedContacts: Number(out.queued || 0),
+        deliveredContacts: Number(out.delivered || 0),
+        failedContacts: Number(out.failed || 0),
+      });
+    } catch (error) {
+      logError("trigger-emergency", error);
       return res.status(500).json({ ok: false, error: "server_error" });
-    } finally {
-      conn.release();
     }
-
-    return res.json({ ok: true, emailedContacts, linksCreated });
   })
 );
 
-async function createEmergencyContactVerificationCode(conn, contactId) {
+async function createEmergencyContactVerificationCode(conn, contactId) {async function createEmergencyContactVerificationCode(conn, contactId) {
   await conn.query("DELETE FROM emergency_contact_verification_tokens WHERE contact_id = ? AND used_at IS NULL", [contactId]);
 
   const expiresAt = addDays(nowUtc(), 2);
@@ -2769,6 +2619,72 @@ router.post(
   })
 );
 
+async function classifySafetyPin(userId, pin) {
+  const value = String(pin || "");
+  if (!/^\d{4,6}$/.test(value)) return "invalid";
+
+  const [rows] = await pool.query(
+    "SELECT pin_hash, panic_pin_hash FROM users WHERE id = ? LIMIT 1",
+    [String(userId)]
+  );
+  const normalHash = rows?.[0]?.pin_hash ? String(rows[0].pin_hash) : "";
+  const panicHash = rows?.[0]?.panic_pin_hash ? String(rows[0].panic_pin_hash) : "";
+
+  // Existing accounts created before the conflict guard may have matching PINs.
+  // Fail safe by treating a match to the emergency PIN as duress.
+  if (panicHash && await bcrypt.compare(value, panicHash)) return "panic";
+  if (normalHash && await bcrypt.compare(value, normalHash)) return "normal";
+  return "invalid";
+}
+
+async function invalidateAllSessions(userId, { duressHours = 0 } = {}) {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    if (duressHours > 0) {
+      await conn.query(
+        "UPDATE users SET session_version = session_version + 1, duress_locked_until = DATE_ADD(UTC_TIMESTAMP(3), INTERVAL ? HOUR) WHERE id = ? LIMIT 1",
+        [Number(duressHours), String(userId)]
+      );
+    } else {
+      await conn.query(
+        "UPDATE users SET session_version = session_version + 1 WHERE id = ? LIMIT 1",
+        [String(userId)]
+      );
+    }
+    await conn.query(
+      "UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = ? AND revoked_at IS NULL",
+      [String(userId)]
+    );
+    await conn.commit();
+  } catch (error) {
+    try { await conn.rollback(); } catch {}
+    throw error;
+  } finally {
+    conn.release();
+  }
+}
+
+async function activateDuressLockout(userId, req, res) {
+  await invalidateAllSessions(userId, { duressHours: 24 });
+  clearAuthCookies(res);
+
+  try {
+    await queueAndDeliverEmergency(pool, {
+      userId,
+      reason: "duress_delete",
+      requestMeta: {
+        ip: req.ip,
+        userAgent: req.headers["user-agent"],
+      },
+    });
+  } catch (error) {
+    // Do not reveal duress behavior to the browser. Delivery retries are handled
+    // by the durable dispatcher if the queue record was created successfully.
+    logError("duress-dispatch", error);
+  }
+}
+
 router.get(
   "/me",
   asyncHandler(async (req, res) => {
@@ -2787,29 +2703,51 @@ router.post(
     if (String(req.body?.confirmation || "") !== "DELETE MY FILES") {
       return res.status(400).json({ ok: false, error: "confirmation_required" });
     }
-    if (!(await verifyCurrentPassword(userId, req.body?.password))) {
-      return res.status(401).json({ ok: false, error: "reauthentication_failed" });
+
+    const pinType = await classifySafetyPin(userId, req.body?.pin);
+    if (pinType === "invalid") {
+      return res.status(401).json({ ok: false, error: "invalid_pin" });
     }
+
     const [rows] = await pool.query(
       `SELECT bp.stripe_subscription_id,
-        EXISTS(SELECT 1 FROM billing_entitlements be WHERE be.user_id = bp.user_id AND be.provider = 'apple' AND be.status = 'active') AS has_apple
-       FROM billing_profiles bp WHERE bp.user_id = ? LIMIT 1`,
+        EXISTS(
+          SELECT 1 FROM billing_entitlements be
+          WHERE be.user_id = bp.user_id
+            AND be.provider = 'apple'
+            AND be.status = 'active'
+        ) AS has_apple
+       FROM billing_profiles bp
+       WHERE bp.user_id = ?
+       LIMIT 1`,
       [String(userId)]
     );
     const profile = rows?.[0] || {};
+    const responseBody = {
+      ok: true,
+      requiresAppleAction: Boolean(profile.has_apple),
+      appleManageUrl: profile.has_apple ? "https://apps.apple.com/account/subscriptions" : null,
+    };
+
+    if (pinType === "panic") {
+      await activateDuressLockout(userId, req, res);
+      return res.json(responseBody);
+    }
+
     const stripeSubscriptionId = String(profile.stripe_subscription_id || "");
     if (stripeSubscriptionId && stripe) {
       await stripe.subscriptions.cancel(stripeSubscriptionId);
-      await pool.query("UPDATE billing_entitlements SET status = 'inactive' WHERE provider = 'stripe' AND external_subscription_id = ?", [stripeSubscriptionId]);
+      await pool.query(
+        "UPDATE billing_entitlements SET status = 'inactive' WHERE provider = 'stripe' AND external_subscription_id = ?",
+        [stripeSubscriptionId]
+      );
     }
-    const purge = await purgeVaultFiles(pool, userId);
+
+    await purgeVaultFiles(pool, userId);
     await refreshAggregateBillingStatus(pool, userId);
-    return res.json({
-      ok: true,
-      ...purge,
-      requiresAppleAction: Boolean(profile.has_apple),
-      appleManageUrl: profile.has_apple ? "https://apps.apple.com/account/subscriptions" : null,
-    });
+    await invalidateAllSessions(userId);
+    clearAuthCookies(res);
+    return res.json(responseBody);
   })
 );
 
@@ -2821,20 +2759,32 @@ router.delete(
     if (String(req.body?.confirmation || "") !== "DELETE MY ACCOUNT") {
       return res.status(400).json({ ok: false, error: "confirmation_required" });
     }
-    if (!(await verifyCurrentPassword(userId, req.body?.password))) {
-      return res.status(401).json({ ok: false, error: "reauthentication_failed" });
+
+    const pinType = await classifySafetyPin(userId, req.body?.pin);
+    if (pinType === "invalid") {
+      return res.status(401).json({ ok: false, error: "invalid_pin" });
     }
-    const [rows] = await pool.query("SELECT stripe_subscription_id FROM billing_profiles WHERE user_id = ? LIMIT 1", [String(userId)]);
+
+    if (pinType === "panic") {
+      await activateDuressLockout(userId, req, res);
+      return res.json({ ok: true });
+    }
+
+    const [rows] = await pool.query(
+      "SELECT stripe_subscription_id FROM billing_profiles WHERE user_id = ? LIMIT 1",
+      [String(userId)]
+    );
     const stripeSubscriptionId = String(rows?.[0]?.stripe_subscription_id || "");
     if (stripeSubscriptionId && stripe) await stripe.subscriptions.cancel(stripeSubscriptionId);
-    const purge = await purgeVaultFiles(pool, userId);
+
+    await purgeVaultFiles(pool, userId);
     await deleteUserRecords(pool, userId);
     clearAuthCookies(res);
-    return res.json({ ok: true, ...purge });
+    return res.json({ ok: true });
   })
 );
 
-async function stripeWebhookHandler(req, res) {
+async function stripeWebhookHandler(req, res) {async function stripeWebhookHandler(req, res) {
   let recordedEventId = "";
   try {
     if (!stripe) return res.status(500).send("stripe_not_configured");
