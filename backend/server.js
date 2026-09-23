@@ -215,7 +215,14 @@ app.use("/files", filesLimiter, filesRouter);
 
 // API_404_GUARD
 app.use((req, res, next) => {
-  if (req.path === "/health" || req.path.startsWith("/auth") || req.path.startsWith("/api")) {
+  if (
+    req.path === "/health" ||
+    req.path.startsWith("/auth") ||
+    req.path.startsWith("/files") ||
+    req.path.startsWith("/api") ||
+    req.path.startsWith("/stripe") ||
+    req.path.startsWith("/apple")
+  ) {
     return res.status(404).json({ ok: false, error: "not_found" });
   }
   next();
