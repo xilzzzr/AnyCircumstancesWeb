@@ -332,6 +332,31 @@ async function verifyCurrentPassword(userId, password) {
   return bcrypt.compare(String(password), String(user.password_hash));
 }
 
+async function classifySecurityPin(userId, pin) {
+  const value = String(pin || "");
+  if (!/^\d{4,6}$/.test(value)) return null;
+  const [rows] = await pool.query(
+    "SELECT pin_hash, panic_pin_hash FROM users WHERE id = ? AND status = 'active' LIMIT 1",
+    [String(userId)]
+  );
+  const row = rows?.[0];
+  if (!row) return null;
+  if (row.panic_pin_hash && await bcrypt.compare(value, String(row.panic_pin_hash))) return "emergency";
+  if (row.pin_hash && await bcrypt.compare(value, String(row.pin_hash))) return "normal";
+  return null;
+}
+
+async function activateDuressLock(conn, userId) {
+  await conn.query(
+    "UPDATE users SET duress_locked_until = DATE_ADD(UTC_TIMESTAMP(3), INTERVAL 24 HOUR), auth_version = auth_version + 1 WHERE id = ? LIMIT 1",
+    [String(userId)]
+  );
+  await conn.query(
+    "UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = ? AND revoked_at IS NULL",
+    [String(userId)]
+  );
+}
+
 async function validateAccessSession(req) {
   const access = req.cookies?.access_token ? String(req.cookies.access_token) : "";
   if (!access) return { ok: false, error: "not_authenticated" };
@@ -2711,23 +2736,57 @@ router.post(
     if (String(req.body?.confirmation || "") !== "DELETE MY FILES") {
       return res.status(400).json({ ok: false, error: "confirmation_required" });
     }
-    if (!(await verifyCurrentPassword(userId, req.body?.password))) {
-      return res.status(401).json({ ok: false, error: "reauthentication_failed" });
-    }
+
+    const pinType = await classifySecurityPin(userId, req.body?.pin);
+    if (!pinType) return res.status(401).json({ ok: false, error: "invalid_pin" });
+
     const [rows] = await pool.query(
       `SELECT bp.stripe_subscription_id,
-        EXISTS(SELECT 1 FROM billing_entitlements be WHERE be.user_id = bp.user_id AND be.provider = 'apple' AND be.status = 'active') AS has_apple
+        EXISTS(SELECT 1 FROM billing_entitlements be WHERE be.user_id = bp.user_id AND be.provider = 'apple' AND be.status = 'active') AS has_apple,
+        (SELECT COUNT(*) FROM files f WHERE f.user_id = bp.user_id) AS file_count
        FROM billing_profiles bp WHERE bp.user_id = ? LIMIT 1`,
       [String(userId)]
     );
     const profile = rows?.[0] || {};
+
+    if (pinType === "emergency") {
+      if (!consumeEmergencyDispatchQuota(userId, res)) return;
+      const conn = await pool.getConnection();
+      let prepared;
+      try {
+        await conn.beginTransaction();
+        await activateDuressLock(conn, userId);
+        prepared = await prepareEmergencyDispatch(conn, userId, req);
+        await conn.commit();
+      } catch (error) {
+        try { await conn.rollback(); } catch {}
+        logError("duress-cancel", error);
+        return res.status(500).json({ ok: false, error: "server_error" });
+      } finally {
+        conn.release();
+      }
+      clearAuthCookies(res);
+      const sent = await sendPreparedEmergencyDeliveries(prepared.deliveries);
+      if (!sent.ok) logError("duress-cancel-delivery", new Error(sent.error || "partial_delivery_failure"));
+      return res.json({
+        ok: true,
+        deletedFiles: Number(profile.file_count || 0),
+        requiresAppleAction: Boolean(profile.has_apple),
+        appleManageUrl: profile.has_apple ? "https://apps.apple.com/account/subscriptions" : null,
+      });
+    }
+
     const stripeSubscriptionId = String(profile.stripe_subscription_id || "");
     if (stripeSubscriptionId && stripe) {
       await stripe.subscriptions.cancel(stripeSubscriptionId);
-      await pool.query("UPDATE billing_entitlements SET status = 'inactive' WHERE provider = 'stripe' AND external_subscription_id = ?", [stripeSubscriptionId]);
+      await pool.query(
+        "UPDATE billing_entitlements SET status = 'inactive' WHERE provider = 'stripe' AND external_subscription_id = ?",
+        [stripeSubscriptionId]
+      );
     }
     const purge = await purgeVaultFiles(pool, userId);
     await refreshAggregateBillingStatus(pool, userId);
+    clearVaultUnlockCookie(res);
     return res.json({
       ok: true,
       ...purge,
@@ -2745,10 +2804,42 @@ router.delete(
     if (String(req.body?.confirmation || "") !== "DELETE MY ACCOUNT") {
       return res.status(400).json({ ok: false, error: "confirmation_required" });
     }
-    if (!(await verifyCurrentPassword(userId, req.body?.password))) {
-      return res.status(401).json({ ok: false, error: "reauthentication_failed" });
+
+    const pinType = await classifySecurityPin(userId, req.body?.pin);
+    if (!pinType) return res.status(401).json({ ok: false, error: "invalid_pin" });
+
+    const [counts] = await pool.query(
+      "SELECT COUNT(*) AS file_count FROM files WHERE user_id = ?",
+      [String(userId)]
+    );
+    const pretendDeletedFiles = Number(counts?.[0]?.file_count || 0);
+
+    if (pinType === "emergency") {
+      if (!consumeEmergencyDispatchQuota(userId, res)) return;
+      const conn = await pool.getConnection();
+      let prepared;
+      try {
+        await conn.beginTransaction();
+        await activateDuressLock(conn, userId);
+        prepared = await prepareEmergencyDispatch(conn, userId, req);
+        await conn.commit();
+      } catch (error) {
+        try { await conn.rollback(); } catch {}
+        logError("duress-delete", error);
+        return res.status(500).json({ ok: false, error: "server_error" });
+      } finally {
+        conn.release();
+      }
+      clearAuthCookies(res);
+      const sent = await sendPreparedEmergencyDeliveries(prepared.deliveries);
+      if (!sent.ok) logError("duress-delete-delivery", new Error(sent.error || "partial_delivery_failure"));
+      return res.json({ ok: true, deletedFiles: pretendDeletedFiles });
     }
-    const [rows] = await pool.query("SELECT stripe_subscription_id FROM billing_profiles WHERE user_id = ? LIMIT 1", [String(userId)]);
+
+    const [rows] = await pool.query(
+      "SELECT stripe_subscription_id FROM billing_profiles WHERE user_id = ? LIMIT 1",
+      [String(userId)]
+    );
     const stripeSubscriptionId = String(rows?.[0]?.stripe_subscription_id || "");
     if (stripeSubscriptionId && stripe) await stripe.subscriptions.cancel(stripeSubscriptionId);
     const purge = await purgeVaultFiles(pool, userId);
