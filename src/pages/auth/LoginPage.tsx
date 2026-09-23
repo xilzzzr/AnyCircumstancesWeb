@@ -36,11 +36,21 @@ export function LoginPage() {
   const location = useLocation();
   const [noticeDismissed, setNoticeDismissed] = useState(false);
   const signOutReason = location.state?.signOutReason;
-  const signOutNotice = signOutReason === 'incorrect-check-in-pin'
-    ? 'The PIN you entered is incorrect. You’ve been logged out. Please sign in again to retry your check-in.'
-    : signOutReason === 'session-expired'
-      ? 'Your session has expired. You’ve been logged out. Please sign in again.'
+  const completedAction = location.state?.destructiveActionCompleted;
+  const completedActionNotice = completedAction === 'delete'
+    ? 'Your account has been deleted.'
+    : completedAction === 'cancel'
+      ? 'Your subscription has been cancelled and your vault files have been deleted.'
       : null;
+  const appleNotice = location.state?.requiresAppleAction
+    ? 'Your Apple subscription must be cancelled separately in Apple subscription settings.'
+    : null;
+  const signOutNotice = completedActionNotice ||
+    (signOutReason === 'incorrect-check-in-pin'
+      ? 'The PIN you entered is incorrect. You’ve been logged out. Please sign in again to retry your check-in.'
+      : signOutReason === 'session-expired'
+        ? 'Your session has expired. You’ve been logged out. Please sign in again.'
+        : null);
   const { toast } = useToast();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -142,6 +152,7 @@ export function LoginPage() {
           {signOutNotice && !noticeDismissed && (
             <div role="alert" className="mb-6 rounded-lg border border-warning/50 bg-warning/10 p-4 text-foreground">
               <p className="text-sm">{signOutNotice}</p>
+              {appleNotice && <p className="mt-2 text-sm">{appleNotice}</p>}
               <Button type="button" variant="ghost" size="sm" className="mt-2" onClick={() => setNoticeDismissed(true)}>
                 Dismiss
               </Button>
