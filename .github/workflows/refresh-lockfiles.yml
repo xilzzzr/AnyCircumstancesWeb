@@ -18,9 +18,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm ci
+      - run: npm install --package-lock-only
       - run: npm audit fix || true
-      - run: npm ci
+      - run: npm install --package-lock-only
         working-directory: backend
       - run: npm audit fix || true
         working-directory: backend
