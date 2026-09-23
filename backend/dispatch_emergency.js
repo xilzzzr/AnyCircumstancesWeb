@@ -268,7 +268,7 @@ async function claimScheduledDispatch(pool, userId, dueAt) {
 
 async function deliverScheduledAttempts(pool, mail, userId, dueAt) {
   const [jobs] = await pool.query(
-    `SELECT id, contact_id, recipient_email, recipient_name, file_ids_json, attempt_count
+    `SELECT id, contact_id, recipient_email, recipient_name, file_ids_json, delivery_kind, attempt_count
      FROM emergency_delivery_attempts
      WHERE user_id = ? AND due_at = ? AND status <> 'delivered'
      ORDER BY id`,
@@ -334,17 +334,20 @@ async function deliverScheduledAttempts(pool, mail, userId, dueAt) {
     }
     tx.release();
 
+    const scheduled = String(job.delivery_kind || "scheduled") === "scheduled";
     const rendered = renderEmergencyEmail({
       name: String(job.recipient_name || ""),
       ownerEmail,
       links,
-      scheduled: true,
+      scheduled,
     });
     try {
       await mail.transporter.sendMail({
         from: mail.from,
         to: String(job.recipient_email),
-        subject: "AnyCircumstances: Emergency access link",
+        subject: scheduled
+          ? "AnyCircumstances: Emergency access link"
+          : "AnyCircumstances: Emergency access link (manual trigger)",
         ...rendered,
       });
       await pool.query(
