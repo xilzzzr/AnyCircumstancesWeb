@@ -45,6 +45,17 @@ function validateBackendEnvironment(environment = process.env) {
   ) {
     throw new Error("JWT_ACCESS_SECRET must be at least 32 bytes in production");
   }
+
+  if (environment.NODE_ENV === "production") {
+    const kmsKeyId = String(environment.ESCROW_KMS_KEY_ID || "").trim();
+    const allowLegacyEscrow =
+      String(environment.ALLOW_LEGACY_ESCROW_PRIVATE_KEY || "").toLowerCase() === "true";
+    if (!kmsKeyId && !allowLegacyEscrow) {
+      throw new Error(
+        "Production requires ESCROW_KMS_KEY_ID; raw ESCROW_PRIVATE_KEY_PEM requires explicit ALLOW_LEGACY_ESCROW_PRIVATE_KEY=true"
+      );
+    }
+  }
 }
 
 module.exports = {
