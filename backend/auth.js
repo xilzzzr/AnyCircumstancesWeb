@@ -15,7 +15,7 @@ const {
   upsertAppleEntitlement,
   verifyTransaction,
 } = require("./apple_subscriptions");
-const { purgeVaultFiles, deleteUserRecords } = require("./account_lifecycle");
+const { attemptAccountLifecycleJob, queueAccountLifecycleJob } = require("./account_actions");
 const { queueAndDeliverEmergency } = require("./emergency_delivery");
 const { createFixedWindowGate, positiveInt } = require("./security");
 const { consumeEmailVerificationByTokenOnly } = require("./email_verification");
@@ -2747,18 +2747,15 @@ router.post(
     }
 
     const stripeSubscriptionId = String(profile.stripe_subscription_id || "");
-    if (stripeSubscriptionId && stripe) {
-      await stripe.subscriptions.cancel(stripeSubscriptionId);
-      await pool.query(
-        "UPDATE billing_entitlements SET status = 'inactive' WHERE provider = 'stripe' AND external_subscription_id = ?",
-        [stripeSubscriptionId]
-      );
-    }
-
-    await purgeVaultFiles(pool, userId);
-    await refreshAggregateBillingStatus(pool, userId);
-    await invalidateAllSessions(userId);
+    await queueAccountLifecycleJob(pool, {
+      userId,
+      action: "cancel_files",
+      stripeSubscriptionId,
+    });
     clearAuthCookies(res);
+
+    const cleanup = await attemptAccountLifecycleJob(pool, stripe, userId);
+    if (!cleanup.ok) logError("account-cancel:cleanup-pending", cleanup.error);
     return res.json(responseBody);
   })
 );
@@ -2783,16 +2780,36 @@ router.delete(
     }
 
     const [rows] = await pool.query(
-      "SELECT stripe_subscription_id FROM billing_profiles WHERE user_id = ? LIMIT 1",
+      `SELECT bp.stripe_subscription_id,
+        EXISTS(
+          SELECT 1 FROM billing_entitlements be
+          WHERE be.user_id = bp.user_id
+            AND be.provider = 'apple'
+            AND be.status = 'active'
+        ) AS has_apple
+       FROM billing_profiles bp
+       WHERE bp.user_id = ?
+       LIMIT 1`,
       [String(userId)]
     );
-    const stripeSubscriptionId = String(rows?.[0]?.stripe_subscription_id || "");
-    if (stripeSubscriptionId && stripe) await stripe.subscriptions.cancel(stripeSubscriptionId);
+    const profile = rows?.[0] || {};
+    const stripeSubscriptionId = String(profile.stripe_subscription_id || "");
 
-    await purgeVaultFiles(pool, userId);
-    await deleteUserRecords(pool, userId);
+    await queueAccountLifecycleJob(pool, {
+      userId,
+      action: "delete_account",
+      stripeSubscriptionId,
+    });
     clearAuthCookies(res);
-    return res.json({ ok: true });
+
+    const cleanup = await attemptAccountLifecycleJob(pool, stripe, userId);
+    if (!cleanup.ok) logError("account-delete:cleanup-pending", cleanup.error);
+
+    return res.json({
+      ok: true,
+      requiresAppleAction: Boolean(profile.has_apple),
+      appleManageUrl: profile.has_apple ? "https://apps.apple.com/account/subscriptions" : null,
+    });
   })
 );
 
