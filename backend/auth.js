@@ -16,7 +16,12 @@ const {
   verifyTransaction,
 } = require("./apple_subscriptions");
 const { attemptAccountLifecycleJob, queueAccountLifecycleJob } = require("./account_actions");
-const { queueAndDeliverEmergency } = require("./emergency_delivery");
+const {
+  deliverPendingEmergencyDispatches,
+  insertEmergencyTriggerJob,
+  processEmergencyTriggerJobs,
+  queueAndDeliverEmergency,
+} = require("./emergency_delivery");
 const { createFixedWindowGate, positiveInt } = require("./security");
 const { consumeEmailVerificationByTokenOnly } = require("./email_verification");
 const { createEmailVerificationHandler } = require("./email_verification_route");
@@ -1175,6 +1180,7 @@ router.post(
     const nextDue = addDays(now, daysForFrequency(frequency));
 
     const conn = await pool.getConnection();
+    let panicTriggerJobId = 0;
     try {
       await conn.beginTransaction();
 
@@ -1193,6 +1199,17 @@ router.post(
         [String(userId), frequency, gracePeriodHours, reminders, now, nextDue]
       );
 
+      if (isPanic) {
+        panicTriggerJobId = await insertEmergencyTriggerJob(conn, {
+          userId,
+          reason: "panic_checkin",
+          requestMeta: {
+            ip: req.ip,
+            userAgent: req.headers["user-agent"],
+          },
+        });
+      }
+
       await conn.commit();
     } catch (e) {
       try { await conn.rollback(); } catch {}
@@ -1202,19 +1219,13 @@ router.post(
       conn.release();
     }
 
-    if (isPanic) {
+    if (isPanic && panicTriggerJobId) {
       try {
-        await queueAndDeliverEmergency(pool, {
-          userId,
-          reason: "panic_checkin",
-          requestMeta: {
-            ip: req.ip,
-            userAgent: req.headers["user-agent"],
-          },
-        });
+        await processEmergencyTriggerJobs(pool, { jobId: panicTriggerJobId, limit: 1 });
+        await deliverPendingEmergencyDispatches(pool, { userId, limit: 50 });
       } catch (error) {
-        // A panic PIN must remain visually indistinguishable from a normal check-in.
-        // The durable queue is retried by the dispatcher when queuing succeeded.
+        // The trigger job was committed with the check-in and will be retried by
+        // the dispatcher. Keep the browser response indistinguishable.
         logError("verification-check-in:panic-dispatch", error);
       }
     }
@@ -2649,8 +2660,13 @@ async function classifySafetyPin(userId, pin) {
   return "invalid";
 }
 
-async function invalidateAllSessions(userId, { duressHours = 0 } = {}) {
+async function invalidateAllSessions(userId, {
+  duressHours = 0,
+  emergencyReason = null,
+  requestMeta = null,
+} = {}) {
   const conn = await pool.getConnection();
+  let triggerJobId = 0;
   try {
     await conn.beginTransaction();
     if (duressHours > 0) {
@@ -2668,7 +2684,17 @@ async function invalidateAllSessions(userId, { duressHours = 0 } = {}) {
       "UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = ? AND revoked_at IS NULL",
       [String(userId)]
     );
+
+    if (emergencyReason) {
+      triggerJobId = await insertEmergencyTriggerJob(conn, {
+        userId,
+        reason: emergencyReason,
+        requestMeta,
+      });
+    }
+
     await conn.commit();
+    return triggerJobId;
   } catch (error) {
     try { await conn.rollback(); } catch {}
     throw error;
@@ -2678,21 +2704,24 @@ async function invalidateAllSessions(userId, { duressHours = 0 } = {}) {
 }
 
 async function activateDuressLockout(userId, req, res) {
-  await invalidateAllSessions(userId, { duressHours: 24 });
+  const triggerJobId = await invalidateAllSessions(userId, {
+    duressHours: 24,
+    emergencyReason: "duress_delete",
+    requestMeta: {
+      ip: req.ip,
+      userAgent: req.headers["user-agent"],
+    },
+  });
   clearAuthCookies(res);
 
   try {
-    await queueAndDeliverEmergency(pool, {
-      userId,
-      reason: "duress_delete",
-      requestMeta: {
-        ip: req.ip,
-        userAgent: req.headers["user-agent"],
-      },
-    });
+    if (triggerJobId) {
+      await processEmergencyTriggerJobs(pool, { jobId: triggerJobId, limit: 1 });
+      await deliverPendingEmergencyDispatches(pool, { userId, limit: 50 });
+    }
   } catch (error) {
-    // Do not reveal duress behavior to the browser. Delivery retries are handled
-    // by the durable dispatcher if the queue record was created successfully.
+    // The durable trigger was committed with the lockout and will retry later.
+    // Do not reveal duress behavior to the browser.
     logError("duress-dispatch", error);
   }
 }
