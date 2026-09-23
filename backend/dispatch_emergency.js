@@ -10,6 +10,7 @@ const mysql = require("mysql2/promise");
 const nodemailer = require("nodemailer");
 const { emailSender, renderAnyCircumstancesEmail, renderEmergencyEmail } = require("./emails");
 const { sendPushToUser } = require("./push_notifications");
+const { processPendingAccountJobs } = require("./account_jobs");
 
 function sha256Hex(input) {
   return crypto.createHash("sha256").update(String(input)).digest("hex");
@@ -390,6 +391,7 @@ async function main() {
 
   const conn = await pool.getConnection();
   try {
+    await processPendingAccountJobs(pool, 20);
     await sendGraceReminders(conn, mail);
 
     const [overdue] = await conn.query(
