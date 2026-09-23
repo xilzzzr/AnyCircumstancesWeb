@@ -54,12 +54,14 @@ async function deleteUserRecords(pool, userId) {
   try {
     await conn.beginTransaction();
     await conn.query("DELETE ecvt FROM emergency_contact_verification_tokens ecvt JOIN emergency_contacts ec ON ec.id = ecvt.contact_id WHERE ec.user_id = ?", [uid]);
+    await conn.query("DELETE FROM verification_emergency_contact_dispatches WHERE user_id = ?", [uid]);
+    await conn.query("DELETE FROM emergency_trigger_jobs WHERE user_id = ?", [uid]);
     await conn.query("DELETE FROM emergency_contacts WHERE user_id = ?", [uid]);
     for (const table of [
       "verification_reminder_emails", "verification_emergency_dispatches", "verification_panic_dispatches",
       "verification_checkins", "verification_settings", "user_device_tokens", "password_reset_tokens",
       "email_verification_tokens", "refresh_tokens", "billing_invoices", "billing_entitlements",
-      "apple_account_links", "billing_profiles", "user_vault_keys",
+      "apple_account_links", "billing_profiles", "user_vault_keys", "account_lifecycle_jobs",
     ]) {
       await conn.query(`DELETE FROM ${table} WHERE user_id = ?`, [uid]);
     }
