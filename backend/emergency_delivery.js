@@ -38,6 +38,25 @@ function sameInstant(a, b) {
   return new Date(a).getTime() === new Date(b).getTime();
 }
 
+async function insertEmergencyTriggerJob(db, {
+  userId,
+  reason,
+  requestMeta = null,
+}) {
+  const [result] = await db.query(
+    `INSERT INTO emergency_trigger_jobs
+      (user_id, reason, request_ip, request_user_agent, status)
+     VALUES (?, ?, ?, ?, 'pending')`,
+    [
+      String(userId),
+      String(reason || "manual").slice(0, 32),
+      requestMeta?.ip ? String(requestMeta.ip).slice(0, 64) : null,
+      requestMeta?.userAgent ? String(requestMeta.userAgent).slice(0, 255) : null,
+    ]
+  );
+  return Number(result?.insertId || 0);
+}
+
 async function queueEmergencyDispatch(pool, {
   userId,
   dueAt = null,
@@ -188,6 +207,81 @@ async function maybeMarkDispatchComplete(pool, userId, dueAt) {
   );
 }
 
+async function processEmergencyTriggerJobs(pool, { jobId = null, userId = null, limit = 50 } = {}) {
+  const params = [];
+  const where = [
+    "(status IN ('pending','failed') OR (status='processing' AND updated_at < DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 10 MINUTE)))",
+    "attempts < 10",
+  ];
+  if (jobId !== null) {
+    where.push("id = ?");
+    params.push(Number(jobId));
+  }
+  if (userId !== null) {
+    where.push("user_id = ?");
+    params.push(String(userId));
+  }
+  params.push(Math.max(1, Math.min(200, Number(limit) || 50)));
+
+  const [jobs] = await pool.query(
+    `SELECT id, user_id, reason, request_ip, request_user_agent, created_at
+     FROM emergency_trigger_jobs
+     WHERE ${where.join(" AND ")}
+     ORDER BY created_at, id
+     LIMIT ?`,
+    params
+  );
+
+  let completed = 0;
+  let failed = 0;
+  let queued = 0;
+
+  for (const job of jobs || []) {
+    const [claim] = await pool.query(
+      `UPDATE emergency_trigger_jobs
+       SET status='processing', attempts=attempts+1, last_error=NULL
+       WHERE id = ?
+         AND attempts < 10
+         AND (
+           status IN ('pending','failed')
+           OR (status='processing' AND updated_at < DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 10 MINUTE))
+         )`,
+      [job.id]
+    );
+    if (!claim?.affectedRows) continue;
+
+    try {
+      const out = await queueEmergencyDispatch(pool, {
+        userId: job.user_id,
+        dueAt: job.created_at,
+        reason: job.reason,
+        requireOverdue: false,
+        requestMeta: {
+          ip: job.request_ip,
+          userAgent: job.request_user_agent,
+        },
+      });
+      queued += Number(out?.queued || 0);
+
+      await pool.query(
+        "UPDATE emergency_trigger_jobs SET status='completed', last_error=NULL WHERE id = ? AND status='processing'",
+        [job.id]
+      );
+      completed += 1;
+    } catch (error) {
+      await pool.query(
+        `UPDATE emergency_trigger_jobs
+         SET status='failed', last_error=?
+         WHERE id = ? AND status='processing'`,
+        [String(error?.message || error || "trigger_failed").slice(0, 255), job.id]
+      );
+      failed += 1;
+    }
+  }
+
+  return { completed, failed, queued };
+}
+
 async function deliverPendingEmergencyDispatches(pool, { userId = null, dueAt = null, limit = 50 } = {}) {
   const params = [];
   const where = [
@@ -302,18 +396,35 @@ async function deliverPendingEmergencyDispatches(pool, { userId = null, dueAt = 
 }
 
 async function queueAndDeliverEmergency(pool, options) {
-  const queued = await queueEmergencyDispatch(pool, options);
-  if (!queued?.dueAt) return { ...queued, delivered: 0, failed: 0 };
+  const jobId = await insertEmergencyTriggerJob(pool, {
+    userId: options.userId,
+    reason: options.reason || "manual",
+    requestMeta: options.requestMeta || null,
+  });
+  if (!jobId) throw new Error("emergency_trigger_job_not_created");
+
+  const trigger = await processEmergencyTriggerJobs(pool, {
+    jobId,
+    limit: 1,
+  });
   const delivery = await deliverPendingEmergencyDispatches(pool, {
     userId: options.userId,
-    dueAt: queued.dueAt,
     limit: 50,
   });
-  return { ...queued, ...delivery };
+
+  return {
+    ok: trigger.failed === 0 && delivery.failed === 0,
+    triggerJobId: jobId,
+    queued: trigger.queued,
+    delivered: delivery.delivered,
+    failed: trigger.failed + delivery.failed,
+  };
 }
 
 module.exports = {
   deliverPendingEmergencyDispatches,
+  insertEmergencyTriggerJob,
+  processEmergencyTriggerJobs,
   queueAndDeliverEmergency,
   queueEmergencyDispatch,
 };
