@@ -734,11 +734,30 @@ router.post(
   asyncHandler(async (req, res) => {
     res.set("Cache-Control", "no-store");
     const token = String(req.body?.token || "");
-    if (!isValidShareToken(token)) return res.status(400).json({ ok: false, error: "invalid_token" });
-
-    const tokenHash = sha256Hex(token);
     const pool = getPool();
     const existingSession = getShareSession(req);
+
+    if (!isValidShareToken(token) && existingSession) {
+      const [rows] = await pool.query(
+        `SELECT t.id, t.contact_id, t.file_id, t.expires_at, t.used_at, f.content_type
+         FROM contact_file_share_tokens t
+         JOIN emergency_contacts c ON c.id = t.contact_id
+         JOIN files f ON f.id = t.file_id AND f.user_id = c.user_id
+         WHERE t.id = ? AND t.contact_id = ? AND t.file_id = ? LIMIT 1`,
+        [String(existingSession.tid || ""), String(existingSession.cid || ""), String(existingSession.fid || "")]
+      );
+      const row = rows?.[0];
+      if (row && row.used_at && new Date(row.expires_at).getTime() >= Date.now()) {
+        return res.json({
+          ok: true,
+          file: { id: String(row.file_id), content_type: String(row.content_type) },
+          token: { expires_at: row.expires_at, redeemed: true },
+        });
+      }
+    }
+
+    if (!isValidShareToken(token)) return res.status(400).json({ ok: false, error: "invalid_token" });
+    const tokenHash = sha256Hex(token);
 
     if (existingSession && String(existingSession.th || "") === tokenHash) {
       const [rows] = await pool.query(
