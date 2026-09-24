@@ -218,7 +218,7 @@ Use accounts/files created specifically for testing. Do not use a real customer'
 Verify all of the following:
 
 1. Normal vault PIN creates a short-lived server authorization and permits download.
-2. Direct `/files/list`, `/files/presign-download`, `/files/get-user-envelope`, `/files/delete`, and GET `/files/vault-keys` fail with `vault_locked` before PIN unlock.
+2. Direct `/files/list`, `/files/presign-upload`, `/files/confirm-upload`, `/files/save-file-escrow`, `/files/save-user-envelope`, `/files/presign-download`, `/files/get-user-envelope`, `/files/delete`, and both GET/POST `/files/vault-keys` fail with `vault_locked` before PIN unlock.
 3. A wrong PIN is rate-limited.
 4. Normal and emergency PIN cannot be configured to the same value.
 5. Normal safety PIN + Delete Account really queues deletion, signs the account out, and cleanup completes.
