@@ -90,6 +90,7 @@ The migration adds:
 - retry/claim state for reminders
 - per-recipient emergency delivery jobs
 - durable account cleanup jobs
+- PIN-reset email challenge storage
 - escrow key identifiers
 
 ## 5. Rewrap every existing escrowed file key to KMS
