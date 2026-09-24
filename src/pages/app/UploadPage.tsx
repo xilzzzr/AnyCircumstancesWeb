@@ -19,6 +19,8 @@ async function saveEscrowForFile(fileId: string, rawAesKey: Uint8Array) {
   }
 
   const pem: string = String(pubJson.public_key_pem);
+  const keyRef: string = String(pubJson.key_ref || "");
+  if (!keyRef) throw new Error("escrow_key_ref_missing");
   const b64 = pem.replace(/-----BEGIN PUBLIC KEY-----/g, "")
     .replace(/-----END PUBLIC KEY-----/g, "")
     .replace(/\s+/g, "");
@@ -45,6 +47,7 @@ async function saveEscrowForFile(fileId: string, rawAesKey: Uint8Array) {
       file_id: fileId,
       alg: "rsa-oaep-sha256",
       enc_key_b64: wrappedB64,
+      key_ref: keyRef,
     }),
   });
 
