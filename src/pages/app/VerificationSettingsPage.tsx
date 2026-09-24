@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
 import { Calendar, Clock, Bell, Shield, Loader2, Save, AlertTriangle, KeyRound } from "lucide-react";
 
 type Frequency = "daily" | "weekly" | "monthly";
@@ -56,6 +57,7 @@ export function VerificationSettingsPage() {
   const [pinResetBusy, setPinResetBusy] = useState(false);
 
   const { toast } = useToast();
+  const { lockVault } = useAuth();
 
   useEffect(() => {
     let cancelled = false;
@@ -276,6 +278,7 @@ export function VerificationSettingsPage() {
         return;
       }
 
+      lockVault();
       setPinDialogOpen(false);
       resetPinDialog();
       toast({
