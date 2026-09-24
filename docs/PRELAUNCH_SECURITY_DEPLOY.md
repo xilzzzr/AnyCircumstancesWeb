@@ -232,6 +232,9 @@ Verify all of the following:
 13. A last-second successful check-in prevents a stale scheduled dispatcher run from creating release jobs.
 14. Make one emergency recipient SMTP delivery fail and verify successful recipients stay complete while only the failed recipient retries.
 15. Temporarily fail Stripe or S3 during deletion and verify `account_lifecycle_jobs` retries rather than losing cleanup state.
+16. In Verification Settings, use **Change PIN** and verify the flow requires the current account password, then a fresh 6-digit email code, then requires both a new safety PIN and a different emergency PIN.
+17. Verify the email code expires after 10 minutes, locks after five wrong code attempts, and cannot be reused after a successful PIN change.
+18. Verify direct calls to the legacy `/auth/set-pin` and `/auth/set-panic-pin` routes cannot overwrite an already-configured PIN and return `use_pin_reset_flow` instead.
 
 ## 11. Protect the release process
 
