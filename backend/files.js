@@ -2,6 +2,7 @@
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
+const { decryptEscrowedKey, escrowKeyId, getEscrowPublicKeyInfo } = require("./escrow_keys");
 
 const { S3Client, GetObjectCommand, DeleteObjectCommand, HeadObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
@@ -64,6 +65,46 @@ function isValidShareToken(token) {
   return /^[a-f0-9]{64}$/i.test(String(token || ""));
 }
 
+function shareSessionCookieOptions(maxAgeMs = 20 * 60 * 1000) {
+  return {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production" || String(process.env.COOKIE_SECURE || "").toLowerCase() === "true",
+    sameSite: "strict",
+    domain: process.env.COOKIE_DOMAIN || undefined,
+    path: "/",
+    maxAge: maxAgeMs,
+  };
+}
+
+function setShareSessionCookie(res, shareRow, tokenHash) {
+  const secret = String(process.env.JWT_ACCESS_SECRET || "");
+  if (!secret) throw new Error("server_misconfig");
+  const session = jwt.sign(
+    {
+      purpose: "share",
+      tid: String(shareRow.id),
+      cid: String(shareRow.contact_id),
+      fid: String(shareRow.file_id),
+      th: String(tokenHash),
+    },
+    secret,
+    { algorithm: "HS256", expiresIn: 20 * 60 }
+  );
+  res.cookie("share_session", session, shareSessionCookieOptions());
+}
+
+function getShareSession(req) {
+  const raw = req.cookies?.share_session ? String(req.cookies.share_session) : "";
+  const secret = String(process.env.JWT_ACCESS_SECRET || "");
+  if (!raw || !secret) return null;
+  try {
+    const payload = jwt.verify(raw, secret, { algorithms: ["HS256"] });
+    return payload?.purpose === "share" ? payload : null;
+  } catch {
+    return null;
+  }
+}
+
 function shareExpiresAt() {
   const requested = Number(process.env.SHARE_LINK_TTL_DAYS || 30);
   const days = Number.isInteger(requested) ? Math.max(1, Math.min(requested, 90)) : 30;
@@ -88,21 +129,65 @@ function safeFilename(name) {
   return cleaned || "upload.bin";
 }
 
-function requireUser(req, res, next) {
+async function requireUser(req, res, next) {
   const access = req.cookies?.access_token ? String(req.cookies.access_token) : "";
   if (!access) return res.status(401).json({ ok: false, error: "not_authenticated" });
 
   const secret = process.env.JWT_ACCESS_SECRET || "";
   if (!secret) return res.status(500).json({ ok: false, error: "server_misconfig" });
 
+  let payload;
   try {
-    const payload = jwt.verify(access, secret, { algorithms: ["HS256"] });
-    const userId = payload?.sub ? String(payload.sub) : "";
-    if (!userId) return res.status(401).json({ ok: false, error: "invalid_session" });
-    req.userId = userId;
-    next();
+    payload = jwt.verify(access, secret, { algorithms: ["HS256"] });
   } catch {
     return res.status(401).json({ ok: false, error: "invalid_session" });
+  }
+
+  const userId = payload?.sub ? String(payload.sub) : "";
+  if (!userId) return res.status(401).json({ ok: false, error: "invalid_session" });
+
+  const pool = getPool();
+  const [rows] = await pool.query(
+    "SELECT status, email_verified_at, session_version, duress_locked_until FROM users WHERE id = ? LIMIT 1",
+    [userId]
+  );
+  const user = rows?.[0];
+  const locked = Boolean(
+    user?.duress_locked_until &&
+    new Date(user.duress_locked_until).getTime() > Date.now()
+  );
+  if (
+    !user ||
+    user.status !== "active" ||
+    !user.email_verified_at ||
+    locked ||
+    Number(payload.sv || 0) !== Number(user.session_version || 1)
+  ) {
+    return res.status(401).json({ ok: false, error: locked ? "account_temporarily_locked" : "invalid_session" });
+  }
+
+  req.userId = userId;
+  req.sessionVersion = Number(user.session_version || 1);
+  return next();
+}
+
+function requireVaultAuthorization(req, res, next) {
+  const token = req.cookies?.vault_auth ? String(req.cookies.vault_auth) : "";
+  const secret = process.env.JWT_ACCESS_SECRET || "";
+  if (!token || !secret) return res.status(423).json({ ok: false, error: "vault_locked" });
+
+  try {
+    const payload = jwt.verify(token, secret, { algorithms: ["HS256"] });
+    if (
+      payload?.purpose !== "vault" ||
+      String(payload?.sub || "") !== String(req.userId || "") ||
+      Number(payload?.sv || 0) !== Number(req.sessionVersion || 0)
+    ) {
+      return res.status(423).json({ ok: false, error: "vault_locked" });
+    }
+    return next();
+  } catch {
+    return res.status(423).json({ ok: false, error: "vault_locked" });
   }
 }
 
@@ -141,10 +226,6 @@ function requirePaid(req, res, next) {
       res.status(500).json({ ok: false, error: "server_error" });
     });
 }
-function getEscrowPrivateKeyPem() {
-  return String(process.env.ESCROW_PRIVATE_KEY_PEM || "").replace(/\\n/g, "\n").trim();
-}
-
 function normalizePublicKeyPem(input) {
   const raw = String(input || "").trim();
   if (!raw) return null;
@@ -179,22 +260,21 @@ function isBoundedBase64(input, maxLength = 4096) {
 }
 
 
-function getEscrowPublicKeyPem() {
-  const privPem = getEscrowPrivateKeyPem();
-  if (!privPem) return null;
-
-  const privKeyObj = crypto.createPrivateKey(privPem);
-  const pubKeyObj = crypto.createPublicKey(privKeyObj);
-
-  return pubKeyObj.export({ type: "spki", format: "pem" }).toString();
-}
-
 router.get(
   "/escrow-public-key",
+  requireUser,
+  requirePaid,
+  requireVaultAuthorization,
   asyncHandler(async (req, res) => {
-    const pub = getEscrowPublicKeyPem();
-    if (!pub) return res.status(500).json({ ok: false, error: "escrow_private_key_missing" });
-    return res.json({ ok: true, public_key_pem: pub });
+    const info = await getEscrowPublicKeyInfo();
+    if (!info?.publicKeyPem || !info?.keyId) {
+      return res.status(500).json({ ok: false, error: "escrow_key_missing" });
+    }
+    return res.json({
+      ok: true,
+      public_key_pem: info.publicKeyPem,
+      key_ref: info.keyId,
+    });
   })
 );
 
@@ -202,10 +282,12 @@ router.post(
   "/save-file-escrow",
   requireUser,
   requirePaid,
+  requireVaultAuthorization,
   asyncHandler(async (req, res) => {
     const fileId = String(req.body?.file_id || "");
     const alg = String(req.body?.alg || "").trim();
     const encKeyB64 = String(req.body?.enc_key_b64 || "").trim();
+    const keyRef = String(req.body?.key_ref || "").trim();
 
     if (!fileId) return res.status(400).json({ ok: false, error: "missing_file_id" });
 
@@ -214,6 +296,12 @@ router.post(
 
     if (alg !== "rsa-oaep-sha256") return res.status(400).json({ ok: false, error: "invalid_alg" });
     if (!isBoundedBase64(encKeyB64)) return res.status(400).json({ ok: false, error: "invalid_enc_key" });
+    if (!keyRef || keyRef.length > 255) return res.status(400).json({ ok: false, error: "invalid_key_ref" });
+
+    const currentKeyRef = escrowKeyId();
+    if (keyRef !== currentKeyRef) {
+      return res.status(409).json({ ok: false, error: "escrow_key_rotated" });
+    }
 
     const pool = getPool();
 
@@ -221,8 +309,8 @@ router.post(
     if (!frows || !frows.length) return res.status(404).json({ ok: false, error: "file_not_found" });
 
     await pool.query(
-      "INSERT INTO file_key_escrows (file_id, alg, enc_key_b64) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE alg=VALUES(alg), enc_key_b64=VALUES(enc_key_b64)",
-      [fileId, alg, encKeyB64]
+      "INSERT INTO file_key_escrows (file_id, alg, enc_key_b64, escrow_key_id) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE alg=VALUES(alg), enc_key_b64=VALUES(enc_key_b64), escrow_key_id=VALUES(escrow_key_id)",
+      [fileId, alg, encKeyB64, keyRef]
     );
 
     return res.json({ ok: true });
@@ -231,50 +319,32 @@ router.post(
 
 
 /**
- * Decrypt escrowed per-file key using ESCROW_PRIVATE_KEY_PEM and re-encrypt for a contact public key.
- * Returns { alg, enc_key_b64 } or throws.
+ * Decrypt the escrowed per-file key through AWS KMS in production and
+ * re-encrypt it to the recipient's temporary RSA public key.
  */
-function buildContactEnvelopeFromEscrow({ escrowAlg, escrowEncKeyB64, contactPublicKeyPem, escrowPrivateKeyPem }) {
-  const encEscrowBuf = Buffer.from(String(escrowEncKeyB64), "base64");
-
-  const plainKeyBuf = crypto.privateDecrypt(
-    { key: escrowPrivateKeyPem, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING, oaepHash: "sha256" },
-    encEscrowBuf
-  );
-
-  let pubInput = String(contactPublicKeyPem || "").trim();
-  if (!pubInput) throw new Error("contact_public_key_missing");
-
-  if (!pubInput.includes("BEGIN")) {
-    pubInput = "-----BEGIN PUBLIC KEY-----\n" + pubInput.match(/.{1,64}/g).join("\n") + "\n-----END PUBLIC KEY-----\n";
-  }
-
-  const pubKeyObj = crypto.createPublicKey(pubInput);
-
+async function buildContactEnvelopeFromEscrow({ escrowAlg, escrowEncKeyB64, escrowKeyId: storedEscrowKeyId, contactPublicKeyPem }) {
   const normalizedContactPem = normalizePublicKeyPem(contactPublicKeyPem);
   if (!normalizedContactPem) throw new Error("invalid_contact_public_key");
 
-const contactKeyStr = String(contactPublicKeyPem || "").trim();
+  const contactKeyObj = crypto.createPublicKey(normalizedContactPem);
+  if (contactKeyObj.asymmetricKeyType !== "rsa") {
+    throw new Error("contact_public_key_must_be_rsa");
+  }
 
-const contactKeyObj = contactKeyStr.includes("BEGIN PUBLIC KEY")
-  ? crypto.createPublicKey(contactKeyStr.replace(/\\n/g, "\n"))
-  : crypto.createPublicKey({ key: Buffer.from(contactKeyStr, "base64"), format: "der", type: "spki" });
+  const plainKeyBuf = await decryptEscrowedKey(escrowEncKeyB64, storedEscrowKeyId);
+  const encForContactBuf = crypto.publicEncrypt(
+    {
+      key: contactKeyObj,
+      padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+      oaepHash: "sha256",
+    },
+    plainKeyBuf
+  );
 
-const encForContactBuf = crypto.publicEncrypt(
-  { key: contactKeyObj, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING, oaepHash: "sha256" },
-  plainKeyBuf
-);
-
-  return { alg: String(escrowAlg || "rsa-oaep-sha256"), enc_key_b64: encForContactBuf.toString("base64") };
-}
-
-/**
- * Loads ESCROW_PRIVATE_KEY_PEM from env. Supports multiline pasted PEM via \n.
- */
-function getEscrowPrivateKeyPemOrNull() {
-  const raw = String(process.env.ESCROW_PRIVATE_KEY_PEM || "").trim();
-  if (!raw) return null;
-  return raw.replace(/\\n/g, "\n").trim();
+  return {
+    alg: String(escrowAlg || "rsa-oaep-sha256"),
+    enc_key_b64: encForContactBuf.toString("base64"),
+  };
 }
 
 router.get(
@@ -284,12 +354,13 @@ router.get(
   })
 );
 
-require("./vault_keys").registerVaultKeyRoutes(router, requireUser, getPool, asyncHandler);
+require("./vault_keys").registerVaultKeyRoutes(router, requireUser, requireVaultAuthorization, getPool, asyncHandler);
 
 router.post(
   "/set-user-public-key",
   requireUser,
   requirePaid,
+  requireVaultAuthorization,
   asyncHandler(async (req, res) => {
 	const publicKey = String(req.body?.public_key || "").replace(/\\n/g, "\n").trim();
     if (!publicKey) return res.status(400).json({ ok: false, error: "missing_public_key" });
@@ -311,6 +382,7 @@ router.get(
   "/me-public-key",
   requireUser,
   requirePaid,
+  requireVaultAuthorization,
   asyncHandler(async (req, res) => {
     const pool = getPool();
     const [rows] = await pool.query("SELECT public_key FROM users WHERE id = ? LIMIT 1", [req.userId]);
@@ -323,6 +395,7 @@ router.post(
   "/presign-upload",
   requireUser,
   requirePaid,
+  requireVaultAuthorization,
   presignUploadLimiter,
 
   asyncHandler(async (req, res) => {
@@ -417,6 +490,7 @@ router.post(
   "/delete",
   requireUser,
   requirePaid,
+  requireVaultAuthorization,
   deleteLimiter,
 
   asyncHandler(async (req, res) => {
@@ -456,6 +530,7 @@ router.post(
   "/confirm-upload",
   requireUser,
   requirePaid,
+  requireVaultAuthorization,
   confirmUploadLimiter,
 
   asyncHandler(async (req, res) => {
@@ -500,6 +575,7 @@ router.post(
   "/presign-download",
   requireUser,
   requirePaid,
+  requireVaultAuthorization,
   presignDownloadLimiter,
 
   asyncHandler(async (req, res) => {
@@ -530,6 +606,7 @@ router.post(
   "/save-user-envelope",
   requireUser,
   requirePaid,
+  requireVaultAuthorization,
   asyncHandler(async (req, res) => {
     const fileId = String(req.body?.file_id || "");
     const alg = String(req.body?.alg || "");
@@ -561,6 +638,7 @@ router.post(
   "/get-user-envelope",
   requireUser,
   requirePaid,
+  requireVaultAuthorization,
   asyncHandler(async (req, res) => {
     const fileId = String(req.body?.file_id || "");
     if (!fileId) return res.status(400).json({ ok: false, error: "missing_file_id" });
@@ -596,6 +674,7 @@ router.post(
   "/create-contact-share-link",
   requireUser,
   requirePaid,
+  requireVaultAuthorization,
   asyncHandler(async (req, res) => {
     const contactId = Number(req.body?.contact_id || 0);
     const fileId = String(req.body?.file_id || "");
@@ -644,65 +723,63 @@ router.post(
 router.post(
   "/share-lookup",
   asyncHandler(async (req, res) => {
+    res.set("Cache-Control", "no-store");
     const token = String(req.body?.token || "");
-    if (!isValidShareToken(token)) return res.status(400).json({ ok: false, error: "invalid_token" });
-
-    const tokenHash = sha256Hex(token);
     const pool = getPool();
+    const existingSession = getShareSession(req);
 
-    const [rows] = await pool.query(
-      `SELECT t.contact_id, t.file_id, t.expires_at, t.used_at,
-              f.content_type
-       FROM contact_file_share_tokens t
-       JOIN emergency_contacts c ON c.id = t.contact_id
-       JOIN files f ON f.id = t.file_id AND f.user_id = c.user_id
-       WHERE t.token_hash = ? LIMIT 1`,
-      [tokenHash]
-    );
-
-    if (!rows || !rows.length) return res.status(404).json({ ok: false, error: "invalid_token" });
-
-    const r = rows[0];
-    if (new Date(r.expires_at).getTime() < Date.now()) return res.status(410).json({ ok: false, error: "token_expired" });
-
-    return res.json({
-      ok: true,
-      file: {
-        id: String(r.file_id),
-        content_type: String(r.content_type),
-      },
-      token: {
-        expires_at: r.expires_at,
-        used_at: r.used_at,
-      },
-    });
-  })
-);
-
-// Legacy recipient key-registration endpoint.
-// New emergency access uses ephemeral per-download keys.
-// Remove after old clients are no longer supported.
-router.post(
-  "/share-set-contact-public-key",
-  asyncHandler(async (req, res) => {
-    const token = String(req.body?.token || "");
-    const publicKey = String(req.body?.public_key || "").trim();
+    if (!isValidShareToken(token) && existingSession) {
+      const [rows] = await pool.query(
+        `SELECT t.id, t.contact_id, t.file_id, t.expires_at, t.used_at, f.content_type
+         FROM contact_file_share_tokens t
+         JOIN emergency_contacts c ON c.id = t.contact_id
+         JOIN files f ON f.id = t.file_id AND f.user_id = c.user_id
+         WHERE t.id = ? AND t.contact_id = ? AND t.file_id = ? LIMIT 1`,
+        [String(existingSession.tid || ""), String(existingSession.cid || ""), String(existingSession.fid || "")]
+      );
+      const row = rows?.[0];
+      if (row && row.used_at && new Date(row.expires_at).getTime() >= Date.now()) {
+        return res.json({
+          ok: true,
+          file: { id: String(row.file_id), content_type: String(row.content_type) },
+          token: { expires_at: row.expires_at, redeemed: true },
+        });
+      }
+    }
 
     if (!isValidShareToken(token)) return res.status(400).json({ ok: false, error: "invalid_token" });
-    if (!publicKey) return res.status(400).json({ ok: false, error: "missing_public_key" });
-    if (publicKey.length > 20000) return res.status(400).json({ ok: false, error: "public_key_too_large" });
-    const normalizedPublicKey = normalizePublicKeyPem(publicKey);
-    if (!normalizedPublicKey) return res.status(400).json({ ok: false, error: "invalid_public_key" });
-
     const tokenHash = sha256Hex(token);
-    const pool = getPool();
+
+    if (existingSession && String(existingSession.th || "") === tokenHash) {
+      const [rows] = await pool.query(
+        `SELECT t.id, t.contact_id, t.file_id, t.expires_at, t.used_at, f.content_type
+         FROM contact_file_share_tokens t
+         JOIN emergency_contacts c ON c.id = t.contact_id
+         JOIN files f ON f.id = t.file_id AND f.user_id = c.user_id
+         WHERE t.id = ? AND t.token_hash = ? LIMIT 1`,
+        [String(existingSession.tid || ""), tokenHash]
+      );
+      const row = rows?.[0];
+      if (
+        row &&
+        row.used_at &&
+        new Date(row.expires_at).getTime() >= Date.now() &&
+        String(row.contact_id) === String(existingSession.cid || "") &&
+        String(row.file_id) === String(existingSession.fid || "")
+      ) {
+        return res.json({
+          ok: true,
+          file: { id: String(row.file_id), content_type: String(row.content_type) },
+          token: { expires_at: row.expires_at, redeemed: true },
+        });
+      }
+    }
 
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
-
-      const [trows] = await conn.query(
-        `SELECT t.id, t.contact_id, t.file_id, t.expires_at, t.used_at, c.public_key
+      const [rows] = await conn.query(
+        `SELECT t.id, t.contact_id, t.file_id, t.expires_at, t.used_at, f.content_type
          FROM contact_file_share_tokens t
          JOIN emergency_contacts c ON c.id = t.contact_id
          JOIN files f ON f.id = t.file_id AND f.user_id = c.user_id
@@ -710,39 +787,35 @@ router.post(
         [tokenHash]
       );
 
-      if (!trows || !trows.length) {
+      const row = rows?.[0];
+      if (!row) {
         await conn.rollback();
         return res.status(404).json({ ok: false, error: "invalid_token" });
       }
-
-      const t = trows[0];
-      if (new Date(t.expires_at).getTime() < Date.now()) {
+      if (new Date(row.expires_at).getTime() < Date.now()) {
         await conn.rollback();
         return res.status(410).json({ ok: false, error: "token_expired" });
       }
-
-      const existingContactKey = t.public_key ? normalizePublicKeyPem(t.public_key) : null;
-      if (existingContactKey && existingContactKey !== normalizedPublicKey) {
+      if (row.used_at) {
         await conn.rollback();
-        return res.status(409).json({ ok: false, error: "contact_key_already_set" });
+        return res.status(410).json({ ok: false, error: "token_already_redeemed" });
       }
 
       await conn.query(
-        "UPDATE emergency_contacts SET public_key = COALESCE(public_key, ?), verified_at = COALESCE(verified_at, NOW()) WHERE id = ? LIMIT 1",
-        [normalizedPublicKey, t.contact_id]
+        "UPDATE contact_file_share_tokens SET used_at = UTC_TIMESTAMP(3) WHERE id = ? AND used_at IS NULL",
+        [row.id]
       );
-
-      // Keep legacy registration, but never create permanent contact envelopes.
-
-      await conn.query("UPDATE contact_file_share_tokens SET used_at = COALESCE(used_at, NOW()) WHERE id = ? LIMIT 1", [t.id]);
-
       await conn.commit();
-      return res.json({ ok: true, contact_id: Number(t.contact_id), file_id: String(t.file_id) });
-    } catch (e) {
-      try {
-        await conn.rollback();
-      } catch {}
-      throw e;
+
+      setShareSessionCookie(res, row, tokenHash);
+      return res.json({
+        ok: true,
+        file: { id: String(row.file_id), content_type: String(row.content_type) },
+        token: { expires_at: row.expires_at, redeemed: true },
+      });
+    } catch (error) {
+      try { await conn.rollback(); } catch {}
+      throw error;
     } finally {
       conn.release();
     }
@@ -753,6 +826,7 @@ router.get(
   "/contact-public-key",
   requireUser,
   requirePaid,
+  requireVaultAuthorization,
   asyncHandler(async (req, res) => {
     const contactId = Number(req.query?.contact_id || 0);
     if (!contactId) return res.status(400).json({ ok: false, error: "missing_contact_id" });
@@ -781,6 +855,7 @@ router.post(
   "/save-contact-envelope",
   requireUser,
   requirePaid,
+  requireVaultAuthorization,
   asyncHandler(async (req, res) => {
     const contactId = Number(req.body?.contact_id || 0);
     const fileId = String(req.body?.file_id || "");
@@ -819,10 +894,9 @@ router.post(
 router.post(
   "/share-get-contact-envelope",
   asyncHandler(async (req, res) => {
-    // The unexpired bearer token authorizes re-wrapping to this request's key.
     res.set("Cache-Control", "no-store");
-    const token = String(req.body?.token || "");
-    if (!isValidShareToken(token)) return res.status(400).json({ ok: false, error: "invalid_token" });
+    const shareSession = getShareSession(req);
+    if (!shareSession) return res.status(401).json({ ok: false, error: "share_session_required" });
 
     const publicKey = String(req.body?.public_key || "").trim();
     if (!publicKey) return res.status(400).json({ ok: false, error: "missing_public_key" });
@@ -834,24 +908,25 @@ router.post(
 
     const pool = getPool();
     const [rows] = await pool.query(
-      `SELECT t.contact_id, t.file_id, t.expires_at
+      `SELECT t.contact_id, t.file_id, t.expires_at, t.used_at
        FROM contact_file_share_tokens t
        JOIN emergency_contacts c ON c.id = t.contact_id
        JOIN files f ON f.id = t.file_id AND f.user_id = c.user_id
-       WHERE t.token_hash = ? LIMIT 1`,
-      [sha256Hex(token)]
+       WHERE t.id = ? AND t.contact_id = ? AND t.file_id = ? LIMIT 1`,
+      [String(shareSession.tid || ""), String(shareSession.cid || ""), String(shareSession.fid || "")]
     );
-    if (!rows?.length) return res.status(404).json({ ok: false, error: "invalid_token" });
+    if (!rows?.length || !rows[0].used_at) return res.status(404).json({ ok: false, error: "invalid_share_session" });
     const share = rows[0];
     if (new Date(share.expires_at).getTime() < Date.now()) return res.status(410).json({ ok: false, error: "token_expired" });
 
     const [escrowRows] = await pool.query(
-      "SELECT alg, enc_key_b64 FROM file_key_escrows WHERE file_id = ? LIMIT 1", [share.file_id]
+      "SELECT alg, enc_key_b64, escrow_key_id FROM file_key_escrows WHERE file_id = ? LIMIT 1", [share.file_id]
     );
     if (!escrowRows?.[0]?.enc_key_b64) return res.status(500).json({ ok: false, error: "missing_file_escrow" });
-    const escrowPrivateKeyPem = getEscrowPrivateKeyPemOrNull();
-    if (!escrowPrivateKeyPem) return res.status(500).json({ ok: false, error: "escrow_private_key_missing" });
-
+    const storedEscrowKeyId = String(escrowRows[0].escrow_key_id || "").trim();
+    if (process.env.NODE_ENV === "production" && (!storedEscrowKeyId || storedEscrowKeyId === "legacy-local")) {
+      return res.status(503).json({ ok: false, error: "escrow_key_migration_required" });
+    }
     const [ownerRows] = await pool.query("SELECT user_id FROM files WHERE id = ? LIMIT 1", [share.file_id]);
     if (!ownerRows?.[0]?.user_id) return res.status(500).json({ ok: false, error: "missing_envelope_meta" });
     const [metaRows] = await pool.query(
@@ -860,9 +935,9 @@ router.post(
     );
     const storedMeta = metaRows?.[0]?.meta_json;
     if (!storedMeta) return res.status(500).json({ ok: false, error: "missing_envelope_meta" });
+
     let meta;
     try {
-      // MySQL JSON columns may already be decoded by the driver.
       meta = typeof storedMeta === "string" ? JSON.parse(storedMeta) : storedMeta;
       if (!meta || typeof meta !== "object" || Array.isArray(meta)) throw new Error("invalid_envelope_meta");
     } catch {
@@ -871,16 +946,16 @@ router.post(
 
     let envelope;
     try {
-      envelope = buildContactEnvelopeFromEscrow({
+      envelope = await buildContactEnvelopeFromEscrow({
         escrowAlg: String(escrowRows[0].alg || "rsa-oaep-sha256"),
         escrowEncKeyB64: String(escrowRows[0].enc_key_b64),
+        escrowKeyId: storedEscrowKeyId,
         contactPublicKeyPem: normalizedPublicKey,
-        escrowPrivateKeyPem,
       });
     } catch {
-      // Do not forward crypto exceptions or key material to logs/responses.
       return res.status(500).json({ ok: false, error: "envelope_create_failed" });
     }
+
     return res.json({
       ok: true,
       contact_id: Number(share.contact_id),
@@ -895,48 +970,44 @@ router.post(
 router.post(
   "/share-presign-download",
   asyncHandler(async (req, res) => {
-    const token = String(req.body?.token || "");
-    if (!isValidShareToken(token)) return res.status(400).json({ ok: false, error: "invalid_token" });
+    const shareSession = getShareSession(req);
+    if (!shareSession) return res.status(401).json({ ok: false, error: "share_session_required" });
 
-    const tokenHash = sha256Hex(token);
     const pool = getPool();
-
     const [trows] = await pool.query(
-      `SELECT t.contact_id, t.file_id, t.expires_at
+      `SELECT t.contact_id, t.file_id, t.expires_at, t.used_at
        FROM contact_file_share_tokens t
        JOIN emergency_contacts c ON c.id = t.contact_id
        JOIN files f ON f.id = t.file_id AND f.user_id = c.user_id
-       WHERE t.token_hash = ? LIMIT 1`,
-      [tokenHash]
+       WHERE t.id = ? AND t.contact_id = ? AND t.file_id = ? LIMIT 1`,
+      [String(shareSession.tid || ""), String(shareSession.cid || ""), String(shareSession.fid || "")]
     );
-    if (!trows || !trows.length) return res.status(404).json({ ok: false, error: "invalid_token" });
+    if (!trows?.length || !trows[0].used_at) return res.status(404).json({ ok: false, error: "invalid_share_session" });
 
     const t = trows[0];
     if (new Date(t.expires_at).getTime() < Date.now()) return res.status(410).json({ ok: false, error: "token_expired" });
 
-    const [frows] = await pool.query("SELECT bucket, content_type FROM files WHERE id = ? LIMIT 1", [String(t.file_id)]);
-    if (!frows || !frows.length) return res.status(404).json({ ok: false, error: "file_not_found" });
-
-    const f = frows[0];
+    const [frows] = await pool.query(
+      "SELECT bucket, content_type FROM files WHERE id = ? AND user_id = (SELECT user_id FROM emergency_contacts WHERE id = ? LIMIT 1) LIMIT 1",
+      [String(t.file_id), String(t.contact_id)]
+    );
+    if (!frows?.length) return res.status(404).json({ ok: false, error: "file_not_found" });
 
     const region = String(process.env.AWS_REGION || "").trim();
     if (!region) return res.status(500).json({ ok: false, error: "AWS_REGION missing" });
 
-    const s3 = new S3Client({ region });
-
-    const bucket = String(f.bucket || "").trim();
+    const bucket = String(frows[0].bucket || "").trim();
     if (!bucket) return res.status(500).json({ ok: false, error: "missing_bucket" });
 
     const fileId = String(t.file_id);
     const basename = fileId.split("/").pop() || "download.bin";
-
+    const s3 = new S3Client({ region });
     const cmd = new GetObjectCommand({
       Bucket: bucket,
       Key: fileId,
-      ResponseContentType: String(f.content_type || "application/octet-stream").slice(0, 255),
-      ResponseContentDisposition: `attachment; filename="${basename}"`,
+      ResponseContentType: String(frows[0].content_type || "application/octet-stream").slice(0, 255),
+      ResponseContentDisposition: `attachment; filename="${basename.replace(/["\\\r\n]/g, "_")}"`,
     });
-
     const url = await getSignedUrl(s3, cmd, { expiresIn: 600 });
 
     return res.json({ ok: true, url, file_id: fileId, contact_id: Number(t.contact_id) });
@@ -947,6 +1018,7 @@ router.get(
   "/list",
   requireUser,
   requirePaid,
+  requireVaultAuthorization,
   asyncHandler(async (req, res) => {
     const pool = getPool();
 

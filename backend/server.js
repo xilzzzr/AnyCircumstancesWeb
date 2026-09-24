@@ -175,7 +175,16 @@ app.use(
 );
 app.use("/auth/login", loginAccountLimiter);
 app.use(["/auth/verify-email", "/auth/verify-email-code", "/auth/emergency-contacts/verify"], verificationAccountLimiter);
-app.use(["/auth/unlock-vault", "/auth/verification-check-in"], pinUserLimiter);
+app.use(
+  [
+    "/auth/unlock-vault",
+    "/auth/verification-check-in",
+    "/auth/trigger-emergency",
+    "/auth/account/cancel-subscription",
+    "/auth/account",
+  ],
+  pinUserLimiter
+);
 app.use(
   [
     "/auth/billing/create-checkout-session",
@@ -195,7 +204,6 @@ app.use("/auth/emergency-contacts", (req, res, next) => {
 app.use(
   [
     "/files/share-lookup",
-    "/files/share-set-contact-public-key",
     "/files/share-get-contact-envelope",
     "/files/share-presign-download",
   ],
@@ -215,7 +223,14 @@ app.use("/files", filesLimiter, filesRouter);
 
 // API_404_GUARD
 app.use((req, res, next) => {
-  if (req.path === "/health" || req.path.startsWith("/auth") || req.path.startsWith("/api")) {
+  if (
+    req.path === "/health" ||
+    req.path.startsWith("/auth") ||
+    req.path.startsWith("/files") ||
+    req.path.startsWith("/api") ||
+    req.path.startsWith("/stripe") ||
+    req.path.startsWith("/apple")
+  ) {
     return res.status(404).json({ ok: false, error: "not_found" });
   }
   next();

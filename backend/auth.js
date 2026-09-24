@@ -15,7 +15,13 @@ const {
   upsertAppleEntitlement,
   verifyTransaction,
 } = require("./apple_subscriptions");
-const { purgeVaultFiles, deleteUserRecords } = require("./account_lifecycle");
+const { attemptAccountLifecycleJob, queueAccountLifecycleJob } = require("./account_actions");
+const {
+  deliverPendingEmergencyDispatches,
+  insertEmergencyTriggerJob,
+  processEmergencyTriggerJobs,
+  queueAndDeliverEmergency,
+} = require("./emergency_delivery");
 const { createFixedWindowGate, positiveInt } = require("./security");
 const { consumeEmailVerificationByTokenOnly } = require("./email_verification");
 const { createEmailVerificationHandler } = require("./email_verification_route");
@@ -172,6 +178,44 @@ function signAccessToken(payload) {
   return jwt.sign(payload, JWT_ACCESS_SECRET, { algorithm: "HS256", expiresIn: accessTtlSeconds });
 }
 
+function signAccessTokenForUser(user) {
+  return signAccessToken({
+    sub: String(user.id),
+    email: user.email,
+    sv: Number(user.session_version || 1),
+  });
+}
+
+function vaultCookieOptions(maxAgeMs) {
+  return {
+    httpOnly: true,
+    secure: cookieSecure,
+    sameSite: "strict",
+    domain: cookieDomain,
+    path: "/",
+    maxAge: maxAgeMs,
+  };
+}
+
+function setVaultAuthorizationCookie(res, userId, sessionVersion) {
+  const token = jwt.sign(
+    { sub: String(userId), sv: Number(sessionVersion || 1), purpose: "vault" },
+    JWT_ACCESS_SECRET,
+    { algorithm: "HS256", expiresIn: 10 * 60 }
+  );
+  res.cookie("vault_auth", token, vaultCookieOptions(10 * 60 * 1000));
+}
+
+function clearVaultAuthorizationCookie(res) {
+  res.clearCookie("vault_auth", {
+    httpOnly: true,
+    secure: cookieSecure,
+    sameSite: "strict",
+    domain: cookieDomain,
+    path: "/",
+  });
+}
+
 function cookieOptions(maxAgeMs) {
   return {
     httpOnly: true,
@@ -192,6 +236,7 @@ function clearAuthCookies(res) {
   const options = { httpOnly: true, secure: cookieSecure, sameSite: "lax", domain: cookieDomain, path: "/" };
   res.clearCookie("access_token", options);
   res.clearCookie("refresh_token", options);
+  clearVaultAuthorizationCookie(res);
 }
 
 let _mailer = null;
@@ -272,15 +317,25 @@ async function sendPasswordResetEmail(toEmail, resetUrl) {
 
 async function getUserByEmail(email) {
   const [rows] = await pool.query(
-    "SELECT id, email, password_hash, email_verified_at, status FROM users WHERE email = ? LIMIT 1",
+    "SELECT id, email, password_hash, email_verified_at, status, session_version, duress_locked_until FROM users WHERE email = ? LIMIT 1",
     [email]
   );
   return rows[0] || null;
 }
 
 async function getUserById(userId) {
-  const [rows] = await pool.query("SELECT id, email, email_verified_at, status FROM users WHERE id = ? LIMIT 1", [userId]);
+  const [rows] = await pool.query(
+    "SELECT id, email, email_verified_at, status, session_version, duress_locked_until FROM users WHERE id = ? LIMIT 1",
+    [userId]
+  );
   return rows[0] || null;
+}
+
+function isDuressLocked(user) {
+  return Boolean(
+    user?.duress_locked_until &&
+    new Date(user.duress_locked_until).getTime() > Date.now()
+  );
 }
 
 async function verifyCurrentPassword(userId, password) {
@@ -291,31 +346,45 @@ async function verifyCurrentPassword(userId, password) {
   return bcrypt.compare(String(password), String(user.password_hash));
 }
 
-function getUserIdFromAccessCookie(req) {
+function getAccessPayload(req) {
   const access = req.cookies?.access_token ? String(req.cookies.access_token) : "";
   if (!access) return null;
-
   try {
-    const payload = jwt.verify(access, JWT_ACCESS_SECRET, { algorithms: ["HS256"] });
-    const userId = payload?.sub ? String(payload.sub) : null;
-    return userId || null;
+    return jwt.verify(access, JWT_ACCESS_SECRET, { algorithms: ["HS256"] });
   } catch {
     return null;
   }
 }
 
-function requireUserId(req, res) {
-  const userId = getUserIdFromAccessCookie(req);
+async function requireUserId(req, res) {
+  const payload = getAccessPayload(req);
+  const userId = payload?.sub ? String(payload.sub) : "";
   if (!userId) {
     res.status(401).json({ ok: false, error: "not_authenticated" });
     return null;
   }
+
+  const user = await getUserById(userId);
+  if (
+    !user ||
+    user.status !== "active" ||
+    !user.email_verified_at ||
+    isDuressLocked(user) ||
+    Number(payload.sv || 0) !== Number(user.session_version || 1)
+  ) {
+    clearAuthCookies(res);
+    res.status(401).json({ ok: false, error: isDuressLocked(user) ? "account_temporarily_locked" : "invalid_session" });
+    return null;
+  }
+
   req.userId = userId;
+  req.sessionVersion = Number(user.session_version || 1);
+  req.authUser = user;
   return userId;
 }
 
 async function requireActiveSubscription(req, res) {
-  const userId = requireUserId(req, res);
+  const userId = await requireUserId(req, res);
   if (!userId) return null;
 
   const [rows] = await pool.query(
@@ -436,6 +505,7 @@ async function rotateRefreshToken(conn, raw) {
   if (!row) return { ok: false, reason: "invalid_refresh" };
   if (row.revoked_at) {
     await conn.query("UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = ? AND revoked_at IS NULL", [row.user_id]);
+    await conn.query("UPDATE users SET session_version = session_version + 1 WHERE id = ? LIMIT 1", [row.user_id]);
     return { ok: false, reason: "refresh_reuse_detected" };
   }
   if (new Date(row.expires_at).getTime() < nowUtc().getTime()) return { ok: false, reason: "expired_refresh" };
@@ -490,7 +560,10 @@ async function consumePasswordResetToken(conn, rawToken, newPassword) {
   const passwordHash = await bcrypt.hash(newPassword, 12);
 
   await conn.query("UPDATE password_reset_tokens SET used_at = NOW() WHERE id = ?", [row.id]);
-  await conn.query("UPDATE users SET password_hash = ? WHERE id = ? LIMIT 1", [passwordHash, row.user_id]);
+  await conn.query(
+    "UPDATE users SET password_hash = ?, session_version = session_version + 1 WHERE id = ? LIMIT 1",
+    [passwordHash, row.user_id]
+  );
   await conn.query("UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = ? AND revoked_at IS NULL", [row.user_id]);
 
   return { ok: true, userId: row.user_id };
@@ -595,7 +668,7 @@ router.post(
       }
 
       const refresh = await issueRefreshToken(conn, user.id);
-      const access = signAccessToken({ sub: String(user.id), email: user.email });
+      const access = signAccessTokenForUser(user);
 
       await conn.commit();
 
@@ -628,6 +701,7 @@ router.post(
     const passwordOk = await bcrypt.compare(password, user?.password_hash || DUMMY_PASSWORD_HASH);
     if (!user || !passwordOk) return res.status(401).json({ ok: false, error: "invalid_credentials" });
     if (user.status !== "active") return res.status(403).json({ ok: false, error: "account_disabled" });
+    if (isDuressLocked(user)) return res.status(423).json({ ok: false, error: "account_temporarily_locked" });
     if (!user.email_verified_at) return res.status(403).json({ ok: false, error: "email_not_verified" });
 
     const conn = await pool.getConnection();
@@ -635,7 +709,7 @@ router.post(
       await conn.beginTransaction();
 
       const refresh = await issueRefreshToken(conn, user.id);
-      const access = signAccessToken({ sub: String(user.id), email: user.email });
+      const access = signAccessTokenForUser(user);
 
       await conn.commit();
 
@@ -671,13 +745,13 @@ router.post(
       }
 
       const user = await getUserById(rotated.userId);
-      if (!user || user.status !== "active" || !user.email_verified_at) {
+      if (!user || user.status !== "active" || !user.email_verified_at || isDuressLocked(user)) {
         await conn.rollback();
         clearAuthCookies(res);
-        return res.status(401).json({ ok: false, error: "invalid_user" });
+        return res.status(401).json({ ok: false, error: isDuressLocked(user) ? "account_temporarily_locked" : "invalid_user" });
       }
 
-      const access = signAccessToken({ sub: String(user.id), email: user.email });
+      const access = signAccessTokenForUser(user);
 
       await conn.commit();
 
@@ -699,16 +773,27 @@ router.post(
   "/logout",
   asyncHandler(async (req, res) => {
     const raw = req.cookies?.refresh_token ? String(req.cookies.refresh_token) : "";
+    const payload = getAccessPayload(req);
+    const userId = payload?.sub ? String(payload.sub) : "";
     const conn = await pool.getConnection();
 
     try {
       await conn.beginTransaction();
-      if (raw) await revokeRefreshToken(conn, raw);
+      if (userId) {
+        await conn.query(
+          "UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = ? AND revoked_at IS NULL",
+          [userId]
+        );
+        await conn.query(
+          "UPDATE users SET session_version = session_version + 1 WHERE id = ? LIMIT 1",
+          [userId]
+        );
+      } else if (raw) {
+        await revokeRefreshToken(conn, raw);
+      }
       await conn.commit();
     } catch (e) {
-      try {
-        await conn.rollback();
-      } catch {}
+      try { await conn.rollback(); } catch {}
       logError("logout-tx", e);
     } finally {
       conn.release();
@@ -770,7 +855,7 @@ router.post(
 router.post(
   "/set-pin",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
     if (!(await verifyCurrentPassword(userId, req.body?.password))) {
       return res.status(401).json({ ok: false, error: "reauthentication_failed" });
@@ -778,6 +863,12 @@ router.post(
 
     const pin = String(req.body?.pin || "");
     if (!/^\d{4,6}$/.test(pin)) return res.status(400).json({ ok: false, error: "invalid_pin" });
+
+    const [otherRows] = await pool.query("SELECT panic_pin_hash FROM users WHERE id = ? LIMIT 1", [String(userId)]);
+    const panicHash = otherRows?.[0]?.panic_pin_hash ? String(otherRows[0].panic_pin_hash) : "";
+    if (panicHash && await bcrypt.compare(pin, panicHash)) {
+      return res.status(409).json({ ok: false, error: "pin_conflicts_with_emergency_pin" });
+    }
 
     const pinHash = await bcrypt.hash(pin, 12);
     await pool.query("UPDATE users SET pin_hash = ? WHERE id = ? LIMIT 1", [pinHash, String(userId)]);
@@ -789,7 +880,7 @@ router.post(
 router.post(
   "/set-panic-pin",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
     if (!(await verifyCurrentPassword(userId, req.body?.password))) {
       return res.status(401).json({ ok: false, error: "reauthentication_failed" });
@@ -797,6 +888,12 @@ router.post(
 
     const pin = String(req.body?.pin || "");
     if (!/^\d{4,6}$/.test(pin)) return res.status(400).json({ ok: false, error: "invalid_pin" });
+
+    const [otherRows] = await pool.query("SELECT pin_hash FROM users WHERE id = ? LIMIT 1", [String(userId)]);
+    const normalHash = otherRows?.[0]?.pin_hash ? String(otherRows[0].pin_hash) : "";
+    if (normalHash && await bcrypt.compare(pin, normalHash)) {
+      return res.status(409).json({ ok: false, error: "emergency_pin_conflicts_with_pin" });
+    }
 
     const pinHash = await bcrypt.hash(pin, 12);
     await pool.query("UPDATE users SET panic_pin_hash = ? WHERE id = ? LIMIT 1", [pinHash, String(userId)]);
@@ -980,7 +1077,7 @@ function settingsDto(row) {
 router.get(
   "/verification-settings",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
 
     await syncVerificationFromBilling(userId);
@@ -1000,7 +1097,7 @@ const row = await getVerificationSettingsRow(userId);
 router.put(
   "/verification-settings",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
 
 const requestedFrequency = String(req.body?.frequency || "");
@@ -1047,13 +1144,16 @@ if (existing?.last_checkin_at) {
 router.post(
   "/verification-check-in",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
 
     const pin = String(req.body?.pin || "");
     if (!/^\d{4,6}$/.test(pin)) return res.status(400).json({ ok: false, error: "invalid_pin" });
 
-    const [urows] = await pool.query("SELECT pin_hash, panic_pin_hash FROM users WHERE id = ? LIMIT 1", [String(userId)]);
+    const [urows] = await pool.query(
+      "SELECT pin_hash, panic_pin_hash FROM users WHERE id = ? LIMIT 1",
+      [String(userId)]
+    );
     const pinHash = urows?.[0]?.pin_hash ? String(urows[0].pin_hash) : "";
     const panicHash = urows?.[0]?.panic_pin_hash ? String(urows[0].panic_pin_hash) : "";
 
@@ -1066,52 +1166,68 @@ router.post(
       isPanic = await bcrypt.compare(pin, panicHash);
       if (isPanic) ok = true;
     }
-
-    if (!ok && pinHash) {
-      ok = await bcrypt.compare(pin, pinHash);
-    }
+    if (!ok && pinHash) ok = await bcrypt.compare(pin, pinHash);
 
     if (!ok) return res.status(401).json({ ok: false, error: "invalid_pin" });
     if (isPanic && !consumeEmergencyDispatchQuota(userId, res)) return;
 
     const row = await getVerificationSettingsRow(userId);
-
     const paidFrequency = await getPaidCheckinFrequency(userId);
     const frequency = paidFrequency || row?.frequency || "weekly";
     const gracePeriodHours = row ? Number(row.grace_period_hours) : 24;
     const reminders = row ? Number(row.reminders) : 3;
-
     const now = nowUtc();
     const nextDue = addDays(now, daysForFrequency(frequency));
 
     const conn = await pool.getConnection();
+    let panicTriggerJobId = 0;
     try {
       await conn.beginTransaction();
 
-      await conn.query("INSERT INTO verification_checkins (user_id, method) VALUES (?, 'manual')", [String(userId)]);
+      // Serialize successful check-ins against scheduled emergency dispatch.
+      await conn.query(
+        "SELECT user_id FROM verification_settings WHERE user_id = ? LIMIT 1 FOR UPDATE",
+        [String(userId)]
+      );
 
+      await conn.query(
+        "INSERT INTO verification_checkins (user_id, method) VALUES (?, 'manual')",
+        [String(userId)]
+      );
       await conn.query(
         "INSERT INTO verification_settings (user_id, frequency, grace_period_hours, reminders, last_checkin_at, next_due_at) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE frequency = VALUES(frequency), last_checkin_at = VALUES(last_checkin_at), next_due_at = VALUES(next_due_at)",
         [String(userId), frequency, gracePeriodHours, reminders, now, nextDue]
       );
 
       if (isPanic) {
-        const out = await dispatchEmergencyForUser(conn, userId, req);
-        if (!out?.ok) {
-          await conn.rollback();
-          return res.status(500).json({ ok: false, error: out?.error || "server_error" });
-        }
+        panicTriggerJobId = await insertEmergencyTriggerJob(conn, {
+          userId,
+          reason: "panic_checkin",
+          requestMeta: {
+            ip: req.ip,
+            userAgent: req.headers["user-agent"],
+          },
+        });
       }
 
       await conn.commit();
     } catch (e) {
-      try {
-        await conn.rollback();
-      } catch {}
+      try { await conn.rollback(); } catch {}
       logError("verification-check-in", e);
       return res.status(500).json({ ok: false, error: "server_error" });
     } finally {
       conn.release();
+    }
+
+    if (isPanic && panicTriggerJobId) {
+      try {
+        await processEmergencyTriggerJobs(pool, { jobId: panicTriggerJobId, limit: 1 });
+        await deliverPendingEmergencyDispatches(pool, { userId, limit: 50 });
+      } catch (error) {
+        // The trigger job was committed with the check-in and will be retried by
+        // the dispatcher. Keep the browser response indistinguishable.
+        logError("verification-check-in:panic-dispatch", error);
+      }
     }
 
     const saved = await getVerificationSettingsRow(userId);
@@ -1123,7 +1239,7 @@ router.post(
 router.get(
   "/verification-checkins",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
 
     let limit = Number(req.query?.limit);
@@ -1149,7 +1265,7 @@ router.get(
 router.get(
   "/verification-status",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
 	await syncVerificationFromBilling(userId);
 
@@ -1197,7 +1313,7 @@ async function listInvoices(userId, limit) {
 router.get(
   "/billing/summary",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
 
     await ensureBillingProfile(userId);
@@ -1284,7 +1400,7 @@ async function createBillingPortalUrl(userId, returnUrl) {
 router.post(
   "/billing/portal",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
 
     await ensureBillingProfile(userId);
@@ -1306,7 +1422,7 @@ router.post(
 router.post(
   "/billing/update-plan",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
     if (!stripe) return res.status(503).json({ ok: false, error: "billing_unavailable" });
 
@@ -1429,7 +1545,7 @@ router.post(
 router.post(
   "/billing/choose-plan",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
 
     await ensureBillingProfile(userId);
@@ -1483,7 +1599,7 @@ router.post(
 router.get(
   "/billing/invoices",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
 
     const invoices = await listInvoices(userId, Number(req.query?.limit));
@@ -1553,7 +1669,7 @@ function validatePlanInput(body) {
 router.post(
   "/billing/quote",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
 
     const plan = validatePlanInput(req.body);
@@ -1582,7 +1698,7 @@ router.post(
 router.post(
   "/billing/create-checkout-session",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
 
     if (!stripe) return res.status(500).json({ ok: false, error: "stripe_not_configured" });
@@ -1690,7 +1806,7 @@ router.post(
 router.post(
   "/billing/create-portal-session",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
 
     if (!stripe) return res.status(500).json({ ok: false, error: "stripe_not_configured" });
@@ -1715,7 +1831,7 @@ router.post(
 router.get(
   "/billing/status",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
 
     const [rows] = await pool.query(
@@ -1742,7 +1858,7 @@ router.get(
 router.get(
   "/billing/apple/account-token",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
     await ensureBillingProfile(userId);
     const appAccountToken = await ensureAppleAccountToken(pool, userId);
@@ -1753,7 +1869,7 @@ router.get(
 router.post(
   "/billing/apple/sync",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
     const signedTransactionInfo = String(req.body?.signedTransactionInfo || "");
     if (!signedTransactionInfo) return res.status(400).json({ ok: false, error: "missing_signed_transaction" });
@@ -1785,104 +1901,22 @@ router.post(
     const pin = String(req.body?.pin || "").trim();
     if (!/^\d{4,6}$/.test(pin)) return res.status(400).json({ ok: false, error: "invalid_pin" });
 
-    const [urows] = await pool.query("SELECT pin_hash FROM users WHERE id = ? LIMIT 1", [String(userId)]);
+    const [urows] = await pool.query("SELECT pin_hash, panic_pin_hash, session_version FROM users WHERE id = ? LIMIT 1", [String(userId)]);
     const pinHash = urows?.[0]?.pin_hash ? String(urows[0].pin_hash) : "";
+    const panicHash = urows?.[0]?.panic_pin_hash ? String(urows[0].panic_pin_hash) : "";
     if (!pinHash) return res.status(400).json({ ok: false, error: "no_pin_set" });
+
+    if (panicHash && await bcrypt.compare(pin, panicHash)) {
+      return res.status(401).json({ ok: false, error: "invalid_pin" });
+    }
 
     const ok = await bcrypt.compare(pin, pinHash);
     if (!ok) return res.status(401).json({ ok: false, error: "invalid_pin" });
 
-    return res.json({ ok: true });
+    setVaultAuthorizationCookie(res, userId, urows?.[0]?.session_version || req.sessionVersion || 1);
+    return res.json({ ok: true, expiresInSeconds: 600 });
   })
 );
-
-async function dispatchEmergencyForUser(conn, userId, req) {
-  const transporter = getMailer();
-  const from = emailSender();
-  if (!transporter) {
-    return { ok: false, error: "mailer_not_configured", emailedContacts: 0, linksCreated: 0 };
-  }
-
-  const publicBase = String(process.env.PUBLIC_APP_BASE_URL || "https://anycircumstances.com").replace(/\/+$/, "");
-
-  let emailedContacts = 0;
-  let linksCreated = 0;
-
-  await conn.query("INSERT INTO verification_panic_dispatches (user_id, ip, user_agent) VALUES (?, ?, ?)", [
-    String(userId),
-    String(req.ip || "").slice(0, 64),
-    String(req.headers["user-agent"] || "").slice(0, 255),
-  ]);
-
-  const [urows] = await conn.query("SELECT email FROM users WHERE id = ? LIMIT 1", [String(userId)]);
-  const ownerEmail = urows?.[0]?.email ? String(urows[0].email) : "";
-
-  const [contacts] = await conn.query(
-    "SELECT id, email, name, verified_at, public_key FROM emergency_contacts WHERE user_id = ? AND verified_at IS NOT NULL",
-    [String(userId)]
-  );
-
-  if (!contacts.length) {
-    return { ok: true, emailedContacts: 0, linksCreated: 0, note: "no_contacts" };
-  }
-
-  const [assignments] = await conn.query(
-    `
-      SELECT a.contact_id, a.file_id
-      FROM emergency_contact_file_assignments a
-      JOIN emergency_contacts c ON c.id = a.contact_id
-      JOIN files f ON f.id = a.file_id
-      WHERE c.user_id = ? AND f.user_id = c.user_id
-    `,
-    [String(userId)]
-  );
-
-  const filesByContact = new Map();
-  for (const a of assignments) {
-    const cid = Number(a.contact_id);
-    const arr = filesByContact.get(cid) || [];
-    arr.push(String(a.file_id));
-    filesByContact.set(cid, arr);
-  }
-
-  for (const c of contacts) {
-    const contactId = Number(c.id);
-    const email = String(c.email);
-    const name = String(c.name || "");
-    const list = filesByContact.get(contactId) || [];
-    if (!list.length) continue;
-
-    const missingSetup = !c.public_key;
-
-    const links = [];
-    for (const fileId of list) {
-      const token = crypto.randomBytes(32).toString("hex");
-      const tokenHash = sha256Hex(token);
-
-      await conn.query(
-        "INSERT INTO contact_file_share_tokens (contact_id, file_id, token_hash, expires_at) VALUES (?, ?, ?, ?)",
-        [contactId, fileId, tokenHash, shareExpiresAt()]
-      );
-links.push(publicBase + "/share#token=" + encodeURIComponent(token));
-      linksCreated += 1;
-    }
-
-    const subject = "AnyCircumstances: Emergency access link (manual trigger)";
-    const rendered = renderEmergencyEmail({ name, ownerEmail, links, missingSetup });
-
-await transporter.sendMail({
-  from,
-  to: email,
-  subject,
-  text: rendered.text,
-  html: rendered.html,
-});
-    emailedContacts += 1;
-  }
-
-  return { ok: true, emailedContacts, linksCreated };
-}
-
 
 router.post(
   "/trigger-emergency",
@@ -1893,111 +1927,36 @@ router.post(
     const pin = String(req.body?.pin || "");
     if (!/^\d{4,6}$/.test(pin)) return res.status(400).json({ ok: false, error: "invalid_pin" });
 
-    const [urows] = await pool.query("SELECT email, panic_pin_hash FROM users WHERE id = ? LIMIT 1", [String(userId)]);
+    const [urows] = await pool.query(
+      "SELECT panic_pin_hash FROM users WHERE id = ? LIMIT 1",
+      [String(userId)]
+    );
     const panicHash = urows?.[0]?.panic_pin_hash ? String(urows[0].panic_pin_hash) : "";
-    const ownerEmail = urows?.[0]?.email ? String(urows[0].email) : "";
-
     if (!panicHash) return res.status(400).json({ ok: false, error: "panic_pin_not_set" });
 
     const ok = await bcrypt.compare(pin, panicHash);
     if (!ok) return res.status(401).json({ ok: false, error: "invalid_pin" });
     if (!consumeEmergencyDispatchQuota(userId, res)) return;
 
-    const transporter = getMailer();
-    const from = emailSender();
-    if (!transporter) return res.status(500).json({ ok: false, error: "mailer_not_configured" });
-
-    const publicBase = String(process.env.PUBLIC_APP_BASE_URL || "https://anycircumstances.com").replace(/\/+$/, "");
-
-    const conn = await pool.getConnection();
-    let emailedContacts = 0;
-    let linksCreated = 0;
-
     try {
-      await conn.beginTransaction();
-
-      await conn.query("INSERT INTO verification_panic_dispatches (user_id, ip, user_agent) VALUES (?, ?, ?)", [
-        String(userId),
-        String(req.ip || "").slice(0, 64),
-        String(req.headers["user-agent"] || "").slice(0, 255),
-      ]);
-
-      const [contacts] = await conn.query(
-        "SELECT id, email, name, verified_at, public_key FROM emergency_contacts WHERE user_id = ? AND verified_at IS NOT NULL",
-        [String(userId)]
-      );
-
-      if (!contacts.length) {
-        await conn.commit();
-        return res.json({ ok: true, emailedContacts: 0, linksCreated: 0, note: "no_contacts" });
-      }
-
-      const [assignments] = await conn.query(
-        `
-        SELECT a.contact_id, a.file_id
-        FROM emergency_contact_file_assignments a
-        JOIN emergency_contacts c ON c.id = a.contact_id
-        JOIN files f ON f.id = a.file_id
-        WHERE c.user_id = ? AND f.user_id = c.user_id
-        `,
-        [String(userId)]
-      );
-
-      const filesByContact = new Map();
-      for (const a of assignments) {
-        const cid = Number(a.contact_id);
-        const arr = filesByContact.get(cid) || [];
-        arr.push(String(a.file_id));
-        filesByContact.set(cid, arr);
-      }
-
-      for (const c of contacts) {
-        const contactId = Number(c.id);
-        const email = String(c.email);
-        const name = String(c.name || "");
-        const list = filesByContact.get(contactId) || [];
-        if (!list.length) continue;
-
-        const missingSetup = !c.public_key;
-
-        const links = [];
-        for (const fileId of list) {
-          const token = crypto.randomBytes(32).toString("hex");
-          const tokenHash = sha256Hex(token);
-
-          await conn.query(
-        "INSERT INTO contact_file_share_tokens (contact_id, file_id, token_hash, expires_at) VALUES (?, ?, ?, ?)",
-        [contactId, fileId, tokenHash, shareExpiresAt()]
-      );
-links.push(publicBase + "/share#token=" + encodeURIComponent(token));
-          linksCreated += 1;
-        }
-
-        const subject = "AnyCircumstances: Emergency access link (manual trigger)";
-    const rendered = renderEmergencyEmail({ name, ownerEmail, links, missingSetup });
-
-await transporter.sendMail({
-  from,
-  to: email,
-  subject,
-  text: rendered.text,
-  html: rendered.html,
-});
-        emailedContacts += 1;
-      }
-
-      await conn.commit();
-    } catch (e) {
-      try {
-        await conn.rollback();
-      } catch {}
-      logError("trigger-emergency", e);
+      const out = await queueAndDeliverEmergency(pool, {
+        userId,
+        reason: "manual",
+        requestMeta: {
+          ip: req.ip,
+          userAgent: req.headers["user-agent"],
+        },
+      });
+      return res.json({
+        ok: true,
+        queuedContacts: Number(out.queued || 0),
+        deliveredContacts: Number(out.delivered || 0),
+        failedContacts: Number(out.failed || 0),
+      });
+    } catch (error) {
+      logError("trigger-emergency", error);
       return res.status(500).json({ ok: false, error: "server_error" });
-    } finally {
-      conn.release();
     }
-
-    return res.json({ ok: true, emailedContacts, linksCreated });
   })
 );
 
@@ -2631,7 +2590,7 @@ router.get(
 router.post(
   "/device-token",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
 
     const token = String(req.body?.token || "").trim();
@@ -2683,25 +2642,96 @@ router.post(
   })
 );
 
+async function classifySafetyPin(userId, pin) {
+  const value = String(pin || "");
+  if (!/^\d{4,6}$/.test(value)) return "invalid";
+
+  const [rows] = await pool.query(
+    "SELECT pin_hash, panic_pin_hash FROM users WHERE id = ? LIMIT 1",
+    [String(userId)]
+  );
+  const normalHash = rows?.[0]?.pin_hash ? String(rows[0].pin_hash) : "";
+  const panicHash = rows?.[0]?.panic_pin_hash ? String(rows[0].panic_pin_hash) : "";
+
+  // Existing accounts created before the conflict guard may have matching PINs.
+  // Fail safe by treating a match to the emergency PIN as duress.
+  if (panicHash && await bcrypt.compare(value, panicHash)) return "panic";
+  if (normalHash && await bcrypt.compare(value, normalHash)) return "normal";
+  return "invalid";
+}
+
+async function invalidateAllSessions(userId, {
+  duressHours = 0,
+  emergencyReason = null,
+  requestMeta = null,
+} = {}) {
+  const conn = await pool.getConnection();
+  let triggerJobId = 0;
+  try {
+    await conn.beginTransaction();
+    if (duressHours > 0) {
+      await conn.query(
+        "UPDATE users SET session_version = session_version + 1, duress_locked_until = DATE_ADD(UTC_TIMESTAMP(3), INTERVAL ? HOUR) WHERE id = ? LIMIT 1",
+        [Number(duressHours), String(userId)]
+      );
+    } else {
+      await conn.query(
+        "UPDATE users SET session_version = session_version + 1 WHERE id = ? LIMIT 1",
+        [String(userId)]
+      );
+    }
+    await conn.query(
+      "UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = ? AND revoked_at IS NULL",
+      [String(userId)]
+    );
+
+    if (emergencyReason) {
+      triggerJobId = await insertEmergencyTriggerJob(conn, {
+        userId,
+        reason: emergencyReason,
+        requestMeta,
+      });
+    }
+
+    await conn.commit();
+    return triggerJobId;
+  } catch (error) {
+    try { await conn.rollback(); } catch {}
+    throw error;
+  } finally {
+    conn.release();
+  }
+}
+
+async function activateDuressLockout(userId, req, res) {
+  const triggerJobId = await invalidateAllSessions(userId, {
+    duressHours: 24,
+    emergencyReason: "duress_delete",
+    requestMeta: {
+      ip: req.ip,
+      userAgent: req.headers["user-agent"],
+    },
+  });
+  clearAuthCookies(res);
+
+  try {
+    if (triggerJobId) {
+      await processEmergencyTriggerJobs(pool, { jobId: triggerJobId, limit: 1 });
+      await deliverPendingEmergencyDispatches(pool, { userId, limit: 50 });
+    }
+  } catch (error) {
+    // The durable trigger was committed with the lockout and will retry later.
+    // Do not reveal duress behavior to the browser.
+    logError("duress-dispatch", error);
+  }
+}
+
 router.get(
   "/me",
   asyncHandler(async (req, res) => {
-    const access = req.cookies?.access_token ? String(req.cookies.access_token) : "";
-    if (!access) return res.json({ ok: false });
-
-    let payload;
-    try {
-      payload = jwt.verify(access, JWT_ACCESS_SECRET, { algorithms: ["HS256"] });
-    } catch {
-      return res.json({ ok: false });
-    }
-
-    const userId = payload?.sub ? String(payload.sub) : "";
-    if (!userId) return res.json({ ok: false });
-
-    const user = await getUserById(userId);
-    if (!user || user.status !== "active" || !user.email_verified_at) return res.json({ ok: false });
-
+    const userId = await requireUserId(req, res);
+    if (!userId) return;
+    const user = req.authUser || await getUserById(userId);
     return res.json({ ok: true, role: "user", userId, user: { id: String(user.id), email: user.email } });
   })
 );
@@ -2709,55 +2739,106 @@ router.get(
 router.post(
   "/account/cancel-subscription",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
     if (String(req.body?.confirmation || "") !== "DELETE MY FILES") {
       return res.status(400).json({ ok: false, error: "confirmation_required" });
     }
-    if (!(await verifyCurrentPassword(userId, req.body?.password))) {
-      return res.status(401).json({ ok: false, error: "reauthentication_failed" });
+
+    const pinType = await classifySafetyPin(userId, req.body?.pin);
+    if (pinType === "invalid") {
+      return res.status(401).json({ ok: false, error: "invalid_pin" });
     }
+
     const [rows] = await pool.query(
       `SELECT bp.stripe_subscription_id,
-        EXISTS(SELECT 1 FROM billing_entitlements be WHERE be.user_id = bp.user_id AND be.provider = 'apple' AND be.status = 'active') AS has_apple
-       FROM billing_profiles bp WHERE bp.user_id = ? LIMIT 1`,
+        EXISTS(
+          SELECT 1 FROM billing_entitlements be
+          WHERE be.user_id = bp.user_id
+            AND be.provider = 'apple'
+            AND be.status = 'active'
+        ) AS has_apple
+       FROM billing_profiles bp
+       WHERE bp.user_id = ?
+       LIMIT 1`,
       [String(userId)]
     );
     const profile = rows?.[0] || {};
-    const stripeSubscriptionId = String(profile.stripe_subscription_id || "");
-    if (stripeSubscriptionId && stripe) {
-      await stripe.subscriptions.cancel(stripeSubscriptionId);
-      await pool.query("UPDATE billing_entitlements SET status = 'inactive' WHERE provider = 'stripe' AND external_subscription_id = ?", [stripeSubscriptionId]);
-    }
-    const purge = await purgeVaultFiles(pool, userId);
-    await refreshAggregateBillingStatus(pool, userId);
-    return res.json({
+    const responseBody = {
       ok: true,
-      ...purge,
       requiresAppleAction: Boolean(profile.has_apple),
       appleManageUrl: profile.has_apple ? "https://apps.apple.com/account/subscriptions" : null,
+    };
+
+    if (pinType === "panic") {
+      await activateDuressLockout(userId, req, res);
+      return res.json(responseBody);
+    }
+
+    const stripeSubscriptionId = String(profile.stripe_subscription_id || "");
+    await queueAccountLifecycleJob(pool, {
+      userId,
+      action: "cancel_files",
+      stripeSubscriptionId,
     });
+    clearAuthCookies(res);
+
+    const cleanup = await attemptAccountLifecycleJob(pool, stripe, userId);
+    if (!cleanup.ok) logError("account-cancel:cleanup-pending", cleanup.error);
+    return res.json(responseBody);
   })
 );
 
 router.delete(
   "/account",
   asyncHandler(async (req, res) => {
-    const userId = requireUserId(req, res);
+    const userId = await requireUserId(req, res);
     if (!userId) return;
     if (String(req.body?.confirmation || "") !== "DELETE MY ACCOUNT") {
       return res.status(400).json({ ok: false, error: "confirmation_required" });
     }
-    if (!(await verifyCurrentPassword(userId, req.body?.password))) {
-      return res.status(401).json({ ok: false, error: "reauthentication_failed" });
+
+    const pinType = await classifySafetyPin(userId, req.body?.pin);
+    if (pinType === "invalid") {
+      return res.status(401).json({ ok: false, error: "invalid_pin" });
     }
-    const [rows] = await pool.query("SELECT stripe_subscription_id FROM billing_profiles WHERE user_id = ? LIMIT 1", [String(userId)]);
-    const stripeSubscriptionId = String(rows?.[0]?.stripe_subscription_id || "");
-    if (stripeSubscriptionId && stripe) await stripe.subscriptions.cancel(stripeSubscriptionId);
-    const purge = await purgeVaultFiles(pool, userId);
-    await deleteUserRecords(pool, userId);
+
+    if (pinType === "panic") {
+      await activateDuressLockout(userId, req, res);
+      return res.json({ ok: true });
+    }
+
+    const [rows] = await pool.query(
+      `SELECT bp.stripe_subscription_id,
+        EXISTS(
+          SELECT 1 FROM billing_entitlements be
+          WHERE be.user_id = bp.user_id
+            AND be.provider = 'apple'
+            AND be.status = 'active'
+        ) AS has_apple
+       FROM billing_profiles bp
+       WHERE bp.user_id = ?
+       LIMIT 1`,
+      [String(userId)]
+    );
+    const profile = rows?.[0] || {};
+    const stripeSubscriptionId = String(profile.stripe_subscription_id || "");
+
+    await queueAccountLifecycleJob(pool, {
+      userId,
+      action: "delete_account",
+      stripeSubscriptionId,
+    });
     clearAuthCookies(res);
-    return res.json({ ok: true, ...purge });
+
+    const cleanup = await attemptAccountLifecycleJob(pool, stripe, userId);
+    if (!cleanup.ok) logError("account-delete:cleanup-pending", cleanup.error);
+
+    return res.json({
+      ok: true,
+      requiresAppleAction: Boolean(profile.has_apple),
+      appleManageUrl: profile.has_apple ? "https://apps.apple.com/account/subscriptions" : null,
+    });
   })
 );
 

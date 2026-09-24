@@ -1,0 +1,19 @@
+[Unit]
+Description=AnyCircumstances emergency and lifecycle dispatcher
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/srv/uac-web/backend
+EnvironmentFile=/srv/uac-web/backend/.env
+ExecStart=/usr/bin/env node /srv/uac-web/backend/dispatch_emergency.js
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/srv/uac-web
+UMask=0077
+TimeoutStartSec=50

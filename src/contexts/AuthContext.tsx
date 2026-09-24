@@ -144,7 +144,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             "Vault unlock requires a plan",
             "Unlocking the vault and downloading files requires an active plan. Build your plan to unlock it."
           );
-          return true;
+          return false;
         }
 
         return false;

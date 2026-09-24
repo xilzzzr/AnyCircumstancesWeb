@@ -62,7 +62,7 @@ export const quickGuideContent: Record<GuideLanguage, GuideContent> = {
         "label": "CHECK-INS",
         "headline": "Check in to keep the timer running",
         "body": "Your schedule tells AnyCircumstances how often you need to confirm that you're okay. When a check-in is due, enter your regular check-in PIN to reset the timer. If you instead enter the emergency PIN you created during signup, AnyCircumstances immediately starts delivering the files you assigned to your verified emergency contacts.",
-        "callout": "Use your regular check-in PIN when you are safe. Your emergency PIN is an emergency trigger and does not wait for a missed check-in or grace period. Any other incorrect PIN logs you out.",
+        "callout": "Use your regular check-in PIN when you are safe. Your emergency PIN triggers immediate emergency delivery. In Account settings it also acts as a duress PIN: Cancel/Delete appears to succeed, but your account and files are kept, you are signed out for 24 hours, and emergency delivery starts. Any other incorrect check-in PIN logs you out.",
         "cta": "Check in now"
       },
       {
@@ -109,7 +109,7 @@ export const quickGuideContent: Record<GuideLanguage, GuideContent> = {
         "label": "VERIFICACIONES",
         "headline": "Regístrate para mantener activo el temporizador",
         "body": "Tu horario indica a AnyCircumstances con qué frecuencia debes confirmar que estás bien. Cuando llegue el momento, introduce tu PIN normal de verificación para reiniciar el temporizador. Si introduces el PIN de emergencia que creaste al registrarte, AnyCircumstances comienza inmediatamente a enviar los archivos que asignaste a tus contactos de emergencia verificados.",
-        "callout": "Usa tu PIN normal de verificación cuando estés a salvo. Tu PIN de emergencia activa una entrega inmediata y no espera a que pierdas una verificación ni a que termine el período de gracia. Cualquier otro PIN incorrecto cerrará tu sesión.",
+        "callout": "Usa tu PIN normal cuando estés a salvo. Tu PIN de emergencia activa la entrega inmediata. En la configuración de la cuenta también funciona como PIN de coacción: Cancelar/Eliminar parece completarse, pero la cuenta y los archivos se conservan, se cierra la sesión durante 24 horas y comienza la entrega de emergencia. Cualquier otro PIN incorrecto de verificación cerrará tu sesión.",
         "cta": "Verificarme ahora"
       },
       {
@@ -156,7 +156,7 @@ export const quickGuideContent: Record<GuideLanguage, GuideContent> = {
         "label": "ОТМЕТКИ",
         "headline": "Отмечайтесь вовремя, чтобы обновлять таймер",
         "body": "Ваш график определяет, как часто AnyCircumstances просит подтвердить, что с вами всё в порядке. Когда наступает время отметки, введите обычный PIN для отметки, чтобы сбросить таймер. Если вместо него ввести экстренный PIN, созданный при регистрации, AnyCircumstances немедленно начнёт передачу назначенных файлов вашим подтверждённым экстренным контактам.",
-        "callout": "Когда вы в безопасности, используйте обычный PIN для отметки. Экстренный PIN немедленно запускает передачу и не ждёт пропущенной отметки или окончания льготного периода. При вводе любого другого неправильного PIN вы выйдете из аккаунта.",
+        "callout": "Когда вы в безопасности, используйте обычный PIN. Экстренный PIN немедленно запускает передачу. В настройках аккаунта он также работает как PIN под принуждением: отмена подписки или удаление выглядят успешными, но аккаунт и файлы сохраняются, вход блокируется на 24 часа и запускается экстренная передача. Любой другой неверный PIN при отметке выводит вас из аккаунта.",
         "cta": "Отметиться сейчас"
       },
       {
@@ -203,7 +203,7 @@ export const quickGuideContent: Record<GuideLanguage, GuideContent> = {
         "label": "CONFIRMATIONS",
         "headline": "Confirmez votre présence pour relancer le minuteur",
         "body": "Votre calendrier indique à AnyCircumstances à quelle fréquence vous devez confirmer que tout va bien. Lorsqu'une confirmation est attendue, saisissez votre PIN habituel pour relancer le minuteur. Si vous saisissez plutôt le PIN d'urgence créé lors de l'inscription, AnyCircumstances commence immédiatement à transmettre les fichiers attribués à vos contacts d'urgence vérifiés.",
-        "callout": "Lorsque vous êtes en sécurité, utilisez votre PIN habituel. Le PIN d'urgence déclenche une transmission immédiate, sans attendre une confirmation manquée ni la fin du délai de grâce. Tout autre PIN incorrect vous déconnecte.",
+        "callout": "Lorsque vous êtes en sécurité, utilisez votre PIN habituel. Le PIN d'urgence déclenche immédiatement la transmission. Dans les paramètres du compte, il sert aussi de PIN sous contrainte : Annuler/Supprimer semble réussir, mais le compte et les fichiers sont conservés, la connexion est bloquée pendant 24 heures et la transmission d'urgence démarre. Tout autre PIN de confirmation incorrect vous déconnecte.",
         "cta": "Confirmer maintenant"
       },
       {
@@ -250,7 +250,7 @@ export const quickGuideContent: Record<GuideLanguage, GuideContent> = {
         "label": "签到",
         "headline": "按时签到以重新开始计时",
         "body": "您的签到计划决定 AnyCircumstances 多久需要您确认一次安全状态。需要签到时，请输入普通签到 PIN 来重新开始计时。如果您改为输入注册时创建的紧急 PIN，AnyCircumstances 会立即开始向已验证的紧急联系人发送您分配给他们的文件。",
-        "callout": "确认安全时，请使用普通签到 PIN。紧急 PIN 会立即触发发送，不会等待错过签到或宽限期结束。输入任何其他错误 PIN 都会让您退出登录。",
+        "callout": "确认安全时，请使用普通 PIN。紧急 PIN 会立即触发紧急发送。在账户设置中，它也可作为受胁迫 PIN：取消或删除操作看起来会成功，但账户和文件不会被删除，您会在 24 小时内无法登录，并会启动紧急发送。签到时输入其他错误 PIN 会让您退出登录。",
         "cta": "立即签到"
       },
       {

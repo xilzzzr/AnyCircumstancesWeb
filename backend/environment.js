@@ -45,6 +45,18 @@ function validateBackendEnvironment(environment = process.env) {
   ) {
     throw new Error("JWT_ACCESS_SECRET must be at least 32 bytes in production");
   }
+
+  if (environment.NODE_ENV === "production") {
+    if (!String(environment.ESCROW_KMS_KEY_ID || "").trim()) {
+      throw new Error("ESCROW_KMS_KEY_ID is required in production");
+    }
+    if (!String(environment.AWS_REGION || environment.ESCROW_KMS_REGION || "").trim()) {
+      throw new Error("AWS_REGION or ESCROW_KMS_REGION is required for production escrow");
+    }
+    if (String(environment.ESCROW_PRIVATE_KEY_PEM || "").trim()) {
+      throw new Error("ESCROW_PRIVATE_KEY_PEM must not be used in production; use AWS KMS");
+    }
+  }
 }
 
 module.exports = {

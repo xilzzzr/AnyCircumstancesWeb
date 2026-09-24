@@ -37,15 +37,19 @@ test('key backup routes isolate accounts, prevent replacement, and resolve setup
     req.userId = req.headers['x-test-user'];
     if (!req.userId) return res.status(401).json({ ok: false });
     next();
+  }, (req, res, next) => {
+    if (req.headers['x-vault-unlocked'] !== 'yes') return res.status(423).json({ ok: false, error: 'vault_locked' });
+    next();
   }, () => pool, (fn) => (req, res, next) => Promise.resolve(fn(req, res)).catch(next));
   const server = app.listen(0, '127.0.0.1');
   await new Promise((resolve) => server.once('listening', resolve));
   t.after(() => server.close());
-  const request = (user, body) => fetch(`http://127.0.0.1:${server.address().port}/vault-keys`, {
-    headers: { ...(user ? { 'x-test-user': user } : {}), 'Content-Type': 'application/json' },
+  const request = (user, body, unlocked = true) => fetch(`http://127.0.0.1:${server.address().port}/vault-keys`, {
+    headers: { ...(user ? { 'x-test-user': user } : {}), ...(unlocked ? { 'x-vault-unlocked': 'yes' } : {}), 'Content-Type': 'application/json' },
     ...(body ? { method: 'POST', body: JSON.stringify(body) } : {}),
   });
   assert.equal((await request(null)).status, 401);
+  assert.equal((await request('a', undefined, false)).status, 423);
   assert.equal((await request('a', { bundle, initialize: true, user_id: 'b' })).status, 200);
   assert.deepEqual((await (await request('b')).json()).keys, []);
   const first = (await (await request('a')).json()).keys[0];

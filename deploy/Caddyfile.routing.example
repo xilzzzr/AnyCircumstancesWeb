@@ -5,7 +5,17 @@ anycircumstances.com, www.anycircumstances.com {
 	encode zstd gzip
 	root * /var/www/anycircumstances/dist
 
-	@backend path /auth /auth/* /files /files/* /apple /apple/* /health
+	header {
+		-Server
+		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(self)"
+		Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: blob: https:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://*.amazonaws.com https://*.stripe.com; worker-src 'self' blob:"
+	}
+
+	@backend path /auth /auth/* /files /files/* /apple /apple/* /stripe/webhook /health
 	handle @backend {
 		reverse_proxy 127.0.0.1:3002
 	}

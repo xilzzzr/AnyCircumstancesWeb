@@ -17,10 +17,15 @@ async function purgeVaultFiles(pool, userId) {
     const s3 = new S3Client({ region });
     for (const [bucket, keys] of byBucket) {
       for (let i = 0; i < keys.length; i += 1000) {
-        await s3.send(new DeleteObjectsCommand({
+        const result = await s3.send(new DeleteObjectsCommand({
           Bucket: bucket,
           Delete: { Objects: keys.slice(i, i + 1000).map((Key) => ({ Key })), Quiet: true },
         }));
+        if (Array.isArray(result.Errors) && result.Errors.length) {
+          const error = new Error("s3_delete_incomplete");
+          error.failedKeys = result.Errors.map((entry) => String(entry.Key || "")).filter(Boolean);
+          throw error;
+        }
       }
     }
   }
@@ -49,12 +54,14 @@ async function deleteUserRecords(pool, userId) {
   try {
     await conn.beginTransaction();
     await conn.query("DELETE ecvt FROM emergency_contact_verification_tokens ecvt JOIN emergency_contacts ec ON ec.id = ecvt.contact_id WHERE ec.user_id = ?", [uid]);
+    await conn.query("DELETE FROM verification_emergency_contact_dispatches WHERE user_id = ?", [uid]);
+    await conn.query("DELETE FROM emergency_trigger_jobs WHERE user_id = ?", [uid]);
     await conn.query("DELETE FROM emergency_contacts WHERE user_id = ?", [uid]);
     for (const table of [
       "verification_reminder_emails", "verification_emergency_dispatches", "verification_panic_dispatches",
       "verification_checkins", "verification_settings", "user_device_tokens", "password_reset_tokens",
       "email_verification_tokens", "refresh_tokens", "billing_invoices", "billing_entitlements",
-      "apple_account_links", "billing_profiles", "user_vault_keys",
+      "apple_account_links", "billing_profiles", "user_vault_keys", "account_lifecycle_jobs",
     ]) {
       await conn.query(`DELETE FROM ${table} WHERE user_id = ?`, [uid]);
     }

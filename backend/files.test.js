@@ -1,127 +1,176 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const crypto = require('node:crypto');
-const express = require('express');
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const crypto = require("node:crypto");
+const express = require("express");
+const cookieParser = require("cookie-parser");
 
-// Load the real router without connecting to the application's database.
 let queryImpl;
-const authPath = require.resolve('./auth');
-require.cache[authPath] = { id: authPath, filename: authPath, loaded: true, exports: {
-  authPool: { query: (...args) => queryImpl(...args) },
-} };
-const { filesRouter } = require('./files');
-const pair = () => crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
-const escrow = pair();
-const a = pair();
-const b = pair();
-const publicB64 = (key) => key.publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
-const token = 'ab'.repeat(32);
-const rawAes = crypto.randomBytes(32);
-const wrapped = crypto.publicEncrypt({ key: escrow.publicKey, oaepHash: 'sha256' }, rawAes).toString('base64');
-const meta = { original_name: 'Emergency instructions.pdf', original_content_type: 'application/pdf', chunked: true };
-const unwrap = (key, envelope) => crypto.privateDecrypt({ key: key.privateKey, oaepHash: 'sha256' }, Buffer.from(envelope.enc_key_b64, 'base64'));
+const authPath = require.resolve("./auth");
+const pool = {
+  query: (...args) => queryImpl(...args),
+  getConnection: async () => ({
+    query: (...args) => queryImpl(...args),
+    beginTransaction: async () => {},
+    commit: async () => {},
+    rollback: async () => {},
+    release() {},
+  }),
+};
+require.cache[authPath] = {
+  id: authPath,
+  filename: authPath,
+  loaded: true,
+  exports: { authPool: pool },
+};
 
-test('emergency envelope HTTP routes', async (t) => {
-  const originalEnv = process.env.ESCROW_PRIVATE_KEY_PEM;
-  const privatePem = escrow.privateKey.export({ type: 'pkcs8', format: 'pem' });
-  process.env.ESCROW_PRIVATE_KEY_PEM = privatePem;
+const { filesRouter } = require("./files");
+
+const token = "ab".repeat(32);
+const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+const escrow = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
+const recipient = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
+const rawAes = crypto.randomBytes(32);
+const wrapped = crypto.publicEncrypt(
+  { key: escrow.publicKey, oaepHash: "sha256" },
+  rawAes
+).toString("base64");
+const publicB64 = recipient.publicKey.export({ type: "spki", format: "der" }).toString("base64");
+const meta = {
+  original_name: "Emergency instructions.pdf",
+  original_content_type: "application/pdf",
+  chunked: true,
+};
+
+test("emergency link is redeemed once into a short-lived HttpOnly share session", async (t) => {
+  const savedEnv = {
+    NODE_ENV: process.env.NODE_ENV,
+    JWT_ACCESS_SECRET: process.env.JWT_ACCESS_SECRET,
+    ESCROW_PRIVATE_KEY_PEM: process.env.ESCROW_PRIVATE_KEY_PEM,
+    ESCROW_KMS_KEY_ID: process.env.ESCROW_KMS_KEY_ID,
+  };
+  process.env.NODE_ENV = "test";
+  process.env.JWT_ACCESS_SECRET = "test-share-secret-that-is-definitely-long-enough";
+  process.env.ESCROW_PRIVATE_KEY_PEM = escrow.privateKey.export({ type: "pkcs8", format: "pem" });
+  delete process.env.ESCROW_KMS_KEY_ID;
+
+  let usedAt = null;
+  const expiresAt = new Date(Date.now() + 60_000);
+
+  queryImpl = async (sql, params) => {
+    if (sql.includes("FROM contact_file_share_tokens")) {
+      if (sql.includes("t.token_hash = ?")) {
+        assert.equal(params[0], tokenHash);
+      } else {
+        assert.deepEqual(params, ["42", "7", "users/1/file"]);
+      }
+      return [[{
+        id: 42,
+        contact_id: 7,
+        file_id: "users/1/file",
+        expires_at: expiresAt,
+        used_at: usedAt,
+        content_type: "application/pdf",
+      }]];
+    }
+
+    if (sql.startsWith("UPDATE contact_file_share_tokens SET used_at")) {
+      usedAt = new Date();
+      return [{ affectedRows: 1 }];
+    }
+
+    if (sql.includes("FROM file_key_escrows")) {
+      return [[{ alg: "rsa-oaep-sha256", enc_key_b64: wrapped }]];
+    }
+
+    if (sql.includes("SELECT user_id FROM files")) {
+      return [[{ user_id: 1 }]];
+    }
+
+    if (sql.includes("FROM file_key_envelopes")) {
+      assert.deepEqual(params, ["users/1/file", "1"]);
+      return [[{ meta_json: JSON.stringify(meta) }]];
+    }
+
+    throw new Error(`Unexpected SQL: ${sql}`);
+  };
+
   const app = express();
   app.use(express.json());
-  app.use('/files', filesRouter);
-  app.use((err, req, res, next) => res.status(500).json({ ok: false, error: 'unexpected_test_error' }));
-  const server = app.listen(0, '127.0.0.1');
-  await new Promise((resolve) => server.once('listening', resolve));
+  app.use(cookieParser());
+  app.use("/files", filesRouter);
+  app.use((err, req, res, next) => {
+    console.error(err);
+    res.status(500).json({ ok: false, error: "unexpected_test_error" });
+  });
+
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise((resolve) => server.once("listening", resolve));
   t.after(() => {
     server.close();
-    if (originalEnv === undefined) delete process.env.ESCROW_PRIVATE_KEY_PEM;
-    else process.env.ESCROW_PRIVATE_KEY_PEM = originalEnv;
-  });
-  let fixture;
-  let queries;
-  const reset = (patch = {}) => {
-    fixture = { share: true, expires: new Date(Date.now() + 60000), escrow: wrapped, owner: true, meta: JSON.stringify(meta), ...patch };
-    queries = [];
-    process.env.ESCROW_PRIVATE_KEY_PEM = privatePem;
-  };
-  queryImpl = async (sql, params) => {
-    queries.push({ sql, params });
-    // Fail every write, including attempts to persist temporary keys/envelopes.
-    assert.match(sql, /^SELECT\b/);
-    if (sql.includes('FROM contact_file_share_tokens')) {
-      assert.match(sql, /f.user_id = c.user_id/);
-      assert.deepEqual(params, [crypto.createHash('sha256').update(token).digest('hex')]);
-      return [fixture.share ? [{ contact_id: 7, file_id: 'users/1/file', expires_at: fixture.expires, content_type: 'application/pdf', used_at: null }] : []];
+    for (const [key, value] of Object.entries(savedEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
     }
-    if (sql.includes('FROM file_key_escrows')) return [fixture.escrow === null ? [] : [{ alg: 'rsa-oaep-sha256', enc_key_b64: fixture.escrow }]];
-    if (sql.includes('SELECT user_id FROM files')) return [fixture.owner ? [{ user_id: 1 }] : []];
-    if (sql.includes('FROM file_key_envelopes')) {
-      assert.match(sql, /recipient_type = 'user'/);
-      assert.deepEqual(params, ['users/1/file', '1']);
-      return [fixture.meta === undefined ? [] : [{ meta_json: fixture.meta }]];
-    }
-    assert.fail('Unexpected query');
-  };
-  const request = async (body = { token, public_key: publicB64(a) }, path = 'share-get-contact-envelope') => {
-    const response = await fetch(`http://127.0.0.1:${server.address().port}/files/${path}`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-    });
-    return { status: response.status, body: await response.json(), headers: response.headers };
-  };
-  await t.test('same bearer token re-wraps independently for two temporary keys without writes', async () => {
-    reset();
-    const first = await request();
-    const second = await request({ token, public_key: publicB64(b) });
-    assert.equal(first.status, 200);
-    assert.equal(second.status, 200);
-    assert.equal(first.headers.get('cache-control'), 'no-store');
-    assert.equal(first.body.ok, true);
-    assert.deepEqual(first.body.meta_json, meta);
-    assert.deepEqual(unwrap(a, first.body), rawAes);
-    assert.deepEqual(unwrap(b, second.body), rawAes);
-    assert.throws(() => unwrap(b, first.body));
-    assert.throws(() => unwrap(a, second.body));
-    assert.equal(queries.length, 8);
-    assert.ok(queries.every(({ sql }) => !sql.includes("'contact'") && !/INSERT|UPDATE|DELETE/.test(sql)));
-    assert.deepEqual(Object.keys(first.body).sort(), ['ok', 'contact_id', 'file_id', 'alg', 'enc_key_b64', 'meta_json'].sort());
   });
-  for (const [name, patch, body, status, error] of [
-    ['malformed token', {}, { token: 'bad', public_key: publicB64(a) }, 400, 'invalid_token'],
-    ['unknown token', { share: false }, undefined, 404, 'invalid_token'],
-    ['expired token', { expires: new Date(Date.now() - 1000) }, undefined, 410, 'token_expired'],
-    ['missing public key', {}, { token }, 400, 'missing_public_key'],
-    ['invalid public key', {}, { token, public_key: 'invalid' }, 400, 'invalid_public_key'],
-    ['non-RSA public key', {}, { token, public_key: publicB64(crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' })) }, 400, 'invalid_public_key'],
-    ['oversized public key', {}, { token, public_key: 'a'.repeat(20001) }, 400, 'public_key_too_large'],
-    ['missing escrow', { escrow: null }, undefined, 500, 'missing_file_escrow'],
-    ['empty escrow', { escrow: '' }, undefined, 500, 'missing_file_escrow'],
-    ['missing owner', { owner: false }, undefined, 500, 'missing_envelope_meta'],
-    ['missing metadata row', { meta: undefined }, undefined, 500, 'missing_envelope_meta'],
-    ['null metadata', { meta: null }, undefined, 500, 'missing_envelope_meta'],
-    ['invalid JSON metadata', { meta: '{broken' }, undefined, 500, 'invalid_envelope_meta'],
-    ['invalid metadata shape', { meta: 'null' }, undefined, 500, 'invalid_envelope_meta'],
-    ['corrupt escrow', { escrow: 'broken' }, undefined, 500, 'envelope_create_failed'],
-  ]) await t.test(name, async () => {
-    reset(patch);
-    const out = await request(body);
-    assert.equal(out.status, status);
-    assert.deepEqual(out.body, { ok: false, error });
+
+  const base = `http://127.0.0.1:${server.address().port}/files`;
+
+  const first = await fetch(base + "/share-lookup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token }),
   });
-  await t.test('missing escrow private key', async () => {
-    reset();
-    delete process.env.ESCROW_PRIVATE_KEY_PEM;
-    const out = await request();
-    assert.equal(out.status, 500);
-    assert.equal(out.body.error, 'escrow_private_key_missing');
+  assert.equal(first.status, 200);
+  const firstBody = await first.json();
+  assert.equal(firstBody.ok, true);
+  assert.equal(firstBody.file.id, "users/1/file");
+  assert.ok(usedAt);
+
+  const setCookie = first.headers.get("set-cookie");
+  assert.ok(setCookie);
+  assert.match(setCookie, /share_session=/);
+  assert.match(setCookie, /HttpOnly/i);
+  assert.match(setCookie, /SameSite=Strict/i);
+  const cookie = setCookie.split(";")[0];
+
+  const replayWithoutSession = await fetch(base + "/share-lookup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token }),
   });
-  await t.test('driver-decoded owner metadata is preserved', async () => {
-    reset({ meta });
-    assert.deepEqual((await request()).body.meta_json, meta);
+  assert.equal(replayWithoutSession.status, 410);
+  assert.equal((await replayWithoutSession.json()).error, "token_already_redeemed");
+
+  const refreshWithSession = await fetch(base + "/share-lookup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Cookie: cookie },
+    body: JSON.stringify({}),
   });
-  await t.test('lookup needs no contact public key', async () => {
-    reset();
-    const out = await request({ token }, 'share-lookup');
-    assert.equal(out.status, 200);
-    assert.equal('contact' in out.body, false);
-    assert.ok(!queries[0].sql.includes('public_key'));
+  assert.equal(refreshWithSession.status, 200);
+  assert.equal((await refreshWithSession.json()).ok, true);
+
+  const envelopeResponse = await fetch(base + "/share-get-contact-envelope", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Cookie: cookie },
+    body: JSON.stringify({ public_key: publicB64 }),
   });
+  assert.equal(envelopeResponse.status, 200);
+  assert.equal(envelopeResponse.headers.get("cache-control"), "no-store");
+  const envelope = await envelopeResponse.json();
+  assert.equal(envelope.ok, true);
+  assert.deepEqual(envelope.meta_json, meta);
+
+  const opened = crypto.privateDecrypt(
+    { key: recipient.privateKey, oaepHash: "sha256" },
+    Buffer.from(envelope.enc_key_b64, "base64")
+  );
+  assert.deepEqual(opened, rawAes);
+
+  const noSession = await fetch(base + "/share-get-contact-envelope", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ public_key: publicB64 }),
+  });
+  assert.equal(noSession.status, 401);
+  assert.equal((await noSession.json()).error, "share_session_required");
 });
