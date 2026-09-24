@@ -108,6 +108,16 @@ const emergencyUserGate = createFixedWindowGate({
   windowMs: 60 * 60 * 1000,
   limit: positiveInt(process.env.EMERGENCY_USER_LIMIT_PER_HOUR, 2),
 });
+const pinResetStartGate = createFixedWindowGate({
+  name: "pin_reset_start",
+  windowMs: 60 * 60 * 1000,
+  limit: positiveInt(process.env.PIN_RESET_START_LIMIT_PER_HOUR, 5),
+});
+const pinResetVerifyGate = createFixedWindowGate({
+  name: "pin_reset_verify",
+  windowMs: 10 * 60 * 1000,
+  limit: positiveInt(process.env.PIN_RESET_VERIFY_LIMIT_PER_10_MIN, 10),
+});
 
 function consumeEmergencyDispatchQuota(userId, res) {
   const globalResult = emergencyGlobalGate("global");
@@ -312,6 +322,29 @@ async function sendPasswordResetEmail(toEmail, resetUrl) {
   const text = rendered.text;
   const html = rendered.html;
   await transporter.sendMail({ from, to: toEmail, subject, text, html });
+  return { ok: true };
+}
+
+async function sendPinResetVerificationEmail(toEmail, code) {
+  const transporter = getMailer();
+  const from = emailSender();
+
+  if (!transporter) {
+    console.error("[MAILER] Missing SMTP env vars; skipping PIN reset verification email.");
+    return { ok: false, skipped: true };
+  }
+
+  const subject = "Verify your AnyCircumstances PIN change";
+  const rendered = renderAnyCircumstancesEmail({
+    title: "Verify PIN change",
+    preview: "Use this code to change your safety and emergency PINs.",
+    bodyText: "A request was made to change both PINs on your AnyCircumstances account.",
+    verificationCode: code,
+    info: { title: "Valid for 10 minutes", text: "This code expires in 10 minutes and can only be used for this PIN change request." },
+    footerNote: "If you did not request this change, do not share the code. Your PINs will remain unchanged."
+  });
+
+  await transporter.sendMail({ from, to: toEmail, subject, text: rendered.text, html: rendered.html });
   return { ok: true };
 }
 
@@ -849,6 +882,194 @@ router.post(
     return res.json({
       ok: true,
     });
+  })
+);
+
+router.post(
+  "/pin-reset/start",
+  asyncHandler(async (req, res) => {
+    const userId = await requireUserId(req, res);
+    if (!userId) return;
+
+    const gate = pinResetStartGate(`user:${String(userId)}`);
+    if (!gate.allowed) {
+      res.setHeader("Retry-After", String(gate.retryAfter));
+      return res.status(429).json({ ok: false, error: "pin_reset_rate_limited" });
+    }
+
+    if (!(await verifyCurrentPassword(userId, req.body?.password))) {
+      return res.status(401).json({ ok: false, error: "reauthentication_failed" });
+    }
+
+    const user = req.authUser || await getUserById(userId);
+    if (!user?.email) return res.status(400).json({ ok: false, error: "email_unavailable" });
+
+    const challenge = crypto.randomBytes(32).toString("base64url");
+    const code = genSixDigitCode();
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      await conn.query(
+        "UPDATE pin_reset_challenges SET used_at = UTC_TIMESTAMP(3) WHERE user_id = ? AND used_at IS NULL",
+        [String(userId)]
+      );
+      await conn.query(
+        `INSERT INTO pin_reset_challenges
+          (user_id, challenge_hash, code_hash, expires_at)
+         VALUES (?, ?, ?, DATE_ADD(UTC_TIMESTAMP(3), INTERVAL 10 MINUTE))`,
+        [String(userId), sha256Hex(challenge), sha256Hex(code)]
+      );
+      await conn.commit();
+    } catch (error) {
+      try { await conn.rollback(); } catch {}
+      logError("pin-reset:start", error);
+      return res.status(500).json({ ok: false, error: "server_error" });
+    } finally {
+      conn.release();
+    }
+
+    try {
+      const sent = await sendPinResetVerificationEmail(String(user.email), code);
+      if (!sent?.ok) return res.status(503).json({ ok: false, error: "email_unavailable" });
+    } catch (error) {
+      logError("pin-reset:email", error);
+      return res.status(503).json({ ok: false, error: "email_send_failed" });
+    }
+
+    return res.json({ ok: true, challenge });
+  })
+);
+
+router.post(
+  "/pin-reset/verify",
+  asyncHandler(async (req, res) => {
+    const userId = await requireUserId(req, res);
+    if (!userId) return;
+
+    const challenge = String(req.body?.challenge || "");
+    const code = String(req.body?.code || "");
+    if (!challenge || challenge.length > 128 || !isSixDigitCode(code)) {
+      return res.status(400).json({ ok: false, error: "invalid_verification" });
+    }
+
+    const gate = pinResetVerifyGate(`user:${String(userId)}`);
+    if (!gate.allowed) {
+      res.setHeader("Retry-After", String(gate.retryAfter));
+      return res.status(429).json({ ok: false, error: "pin_reset_rate_limited" });
+    }
+
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const [rows] = await conn.query(
+        `SELECT id, code_hash, expires_at, verified_at, used_at, attempts
+         FROM pin_reset_challenges
+         WHERE user_id = ? AND challenge_hash = ?
+         LIMIT 1 FOR UPDATE`,
+        [String(userId), sha256Hex(challenge)]
+      );
+      const row = rows?.[0];
+      if (!row || row.used_at) {
+        await conn.rollback();
+        return res.status(400).json({ ok: false, error: "invalid_verification" });
+      }
+      if (new Date(row.expires_at).getTime() < Date.now()) {
+        await conn.query("UPDATE pin_reset_challenges SET used_at = UTC_TIMESTAMP(3) WHERE id = ?", [row.id]);
+        await conn.commit();
+        return res.status(410).json({ ok: false, error: "verification_expired" });
+      }
+      if (Number(row.attempts || 0) >= 5) {
+        await conn.query("UPDATE pin_reset_challenges SET used_at = UTC_TIMESTAMP(3) WHERE id = ?", [row.id]);
+        await conn.commit();
+        return res.status(429).json({ ok: false, error: "verification_attempts_exceeded" });
+      }
+      if (String(row.code_hash) !== sha256Hex(code)) {
+        await conn.query("UPDATE pin_reset_challenges SET attempts = attempts + 1 WHERE id = ?", [row.id]);
+        await conn.commit();
+        return res.status(401).json({ ok: false, error: "invalid_verification_code" });
+      }
+
+      await conn.query(
+        "UPDATE pin_reset_challenges SET verified_at = UTC_TIMESTAMP(3), attempts = attempts + 1 WHERE id = ?",
+        [row.id]
+      );
+      await conn.commit();
+      return res.json({ ok: true });
+    } catch (error) {
+      try { await conn.rollback(); } catch {}
+      logError("pin-reset:verify", error);
+      return res.status(500).json({ ok: false, error: "server_error" });
+    } finally {
+      conn.release();
+    }
+  })
+);
+
+router.post(
+  "/pin-reset/complete",
+  asyncHandler(async (req, res) => {
+    const userId = await requireUserId(req, res);
+    if (!userId) return;
+
+    const challenge = String(req.body?.challenge || "");
+    const pin = String(req.body?.pin || "");
+    const emergencyPin = String(req.body?.emergencyPin || "");
+
+    if (!challenge || challenge.length > 128) {
+      return res.status(400).json({ ok: false, error: "invalid_verification" });
+    }
+    if (!/^\d{4,6}$/.test(pin) || !/^\d{4,6}$/.test(emergencyPin)) {
+      return res.status(400).json({ ok: false, error: "invalid_pin" });
+    }
+    if (pin === emergencyPin) {
+      return res.status(409).json({ ok: false, error: "pin_conflict" });
+    }
+
+    const [pinHash, emergencyPinHash] = await Promise.all([
+      bcrypt.hash(pin, 12),
+      bcrypt.hash(emergencyPin, 12),
+    ]);
+
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const [rows] = await conn.query(
+        `SELECT id, expires_at, verified_at, used_at
+         FROM pin_reset_challenges
+         WHERE user_id = ? AND challenge_hash = ?
+         LIMIT 1 FOR UPDATE`,
+        [String(userId), sha256Hex(challenge)]
+      );
+      const row = rows?.[0];
+      if (!row || row.used_at || !row.verified_at) {
+        await conn.rollback();
+        return res.status(403).json({ ok: false, error: "pin_reset_not_verified" });
+      }
+      if (new Date(row.expires_at).getTime() < Date.now()) {
+        await conn.query("UPDATE pin_reset_challenges SET used_at = UTC_TIMESTAMP(3) WHERE id = ?", [row.id]);
+        await conn.commit();
+        return res.status(410).json({ ok: false, error: "verification_expired" });
+      }
+
+      await conn.query(
+        "UPDATE users SET pin_hash = ?, panic_pin_hash = ? WHERE id = ? LIMIT 1",
+        [pinHash, emergencyPinHash, String(userId)]
+      );
+      await conn.query(
+        "UPDATE pin_reset_challenges SET used_at = UTC_TIMESTAMP(3) WHERE id = ?",
+        [row.id]
+      );
+      await conn.commit();
+
+      clearVaultAuthorizationCookie(res);
+      return res.json({ ok: true });
+    } catch (error) {
+      try { await conn.rollback(); } catch {}
+      logError("pin-reset:complete", error);
+      return res.status(500).json({ ok: false, error: "server_error" });
+    } finally {
+      conn.release();
+    }
   })
 );
 
