@@ -912,7 +912,8 @@ router.post(
       "SELECT alg, enc_key_b64, escrow_key_id FROM file_key_escrows WHERE file_id = ? LIMIT 1", [share.file_id]
     );
     if (!escrowRows?.[0]?.enc_key_b64) return res.status(500).json({ ok: false, error: "missing_file_escrow" });
-    if (process.env.NODE_ENV === "production" && String(escrowRows[0].escrow_key_id || "") !== escrowKeyId()) {
+    const storedEscrowKeyId = String(escrowRows[0].escrow_key_id || "").trim();
+    if (process.env.NODE_ENV === "production" && (!storedEscrowKeyId || storedEscrowKeyId === "legacy-local")) {
       return res.status(503).json({ ok: false, error: "escrow_key_migration_required" });
     }
     const [ownerRows] = await pool.query("SELECT user_id FROM files WHERE id = ? LIMIT 1", [share.file_id]);
@@ -937,7 +938,7 @@ router.post(
       envelope = await buildContactEnvelopeFromEscrow({
         escrowAlg: String(escrowRows[0].alg || "rsa-oaep-sha256"),
         escrowEncKeyB64: String(escrowRows[0].enc_key_b64),
-        escrowKeyId: String(escrowRows[0].escrow_key_id || ""),
+        escrowKeyId: storedEscrowKeyId,
         contactPublicKeyPem: normalizedPublicKey,
       });
     } catch {
