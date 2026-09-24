@@ -93,6 +93,12 @@ export function VaultPage() {
   useEffect(() => {
     let cancelled = false;
 
+    if (vaultLocked) {
+      setFiles([]);
+      setLoading(false);
+      return () => { cancelled = true; };
+    }
+
     (async () => {
       try {
         setLoading(true);
@@ -110,6 +116,11 @@ export function VaultPage() {
           setFiles([]);
           return;
         }
+        if (code === "vault_locked") {
+          setFiles([]);
+          setUnlockModal(true);
+          return;
+        }
 
         toast({
           title: "Could not load vault",
@@ -124,7 +135,7 @@ export function VaultPage() {
     return () => {
       cancelled = true;
     };
-  }, [toast]);
+  }, [toast, vaultLocked]);
 
   const filteredFiles = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -285,7 +296,7 @@ const handleDelete = async (fileKey: string) => {
         <div>
           <h1 className="text-2xl font-bold text-foreground">Vault</h1>
           <p className="text-muted-foreground">
-            {loading ? "Loading..." : `${files.length} encrypted file${files.length === 1 ? "" : "s"}`}
+            {vaultLocked ? "Locked" : loading ? "Loading..." : `${files.length} encrypted file${files.length === 1 ? "" : "s"}`}
           </p>
         </div>
         <Button
@@ -327,7 +338,7 @@ const handleDelete = async (fileKey: string) => {
         <Card className="bg-warning/5 border-warning/20">
           <CardContent className="flex items-center gap-3 py-3">
             <Lock className="h-5 w-5 text-warning" />
-            <span className="text-sm">Vault is locked. Enter your PIN to download files.</span>
+            <span className="text-sm">Vault is locked. Enter your PIN to view or access files.</span>
             <Button size="sm" variant="outline" className="ml-auto" onClick={() => setUnlockModal(true)}>
               Unlock
             </Button>
