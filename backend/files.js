@@ -2,7 +2,7 @@
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
-const { decryptEscrowedKey, escrowKeyId, getEscrowPublicKeyPem } = require("./escrow_keys");
+const { decryptEscrowedKey, escrowKeyId, getEscrowPublicKeyInfo } = require("./escrow_keys");
 
 const { S3Client, GetObjectCommand, DeleteObjectCommand, HeadObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
@@ -263,9 +263,15 @@ function isBoundedBase64(input, maxLength = 4096) {
 router.get(
   "/escrow-public-key",
   asyncHandler(async (req, res) => {
-    const pub = await getEscrowPublicKeyPem();
-    if (!pub) return res.status(500).json({ ok: false, error: "escrow_key_missing" });
-    return res.json({ ok: true, public_key_pem: pub });
+    const info = await getEscrowPublicKeyInfo();
+    if (!info?.publicKeyPem || !info?.keyId) {
+      return res.status(500).json({ ok: false, error: "escrow_key_missing" });
+    }
+    return res.json({
+      ok: true,
+      public_key_pem: info.publicKeyPem,
+      key_ref: info.keyId,
+    });
   })
 );
 
@@ -277,6 +283,7 @@ router.post(
     const fileId = String(req.body?.file_id || "");
     const alg = String(req.body?.alg || "").trim();
     const encKeyB64 = String(req.body?.enc_key_b64 || "").trim();
+    const keyRef = String(req.body?.key_ref || "").trim();
 
     if (!fileId) return res.status(400).json({ ok: false, error: "missing_file_id" });
 
@@ -285,6 +292,12 @@ router.post(
 
     if (alg !== "rsa-oaep-sha256") return res.status(400).json({ ok: false, error: "invalid_alg" });
     if (!isBoundedBase64(encKeyB64)) return res.status(400).json({ ok: false, error: "invalid_enc_key" });
+    if (!keyRef || keyRef.length > 255) return res.status(400).json({ ok: false, error: "invalid_key_ref" });
+
+    const currentKeyRef = escrowKeyId();
+    if (keyRef !== currentKeyRef) {
+      return res.status(409).json({ ok: false, error: "escrow_key_rotated" });
+    }
 
     const pool = getPool();
 
@@ -293,7 +306,7 @@ router.post(
 
     await pool.query(
       "INSERT INTO file_key_escrows (file_id, alg, enc_key_b64, escrow_key_id) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE alg=VALUES(alg), enc_key_b64=VALUES(enc_key_b64), escrow_key_id=VALUES(escrow_key_id)",
-      [fileId, alg, encKeyB64, escrowKeyId()]
+      [fileId, alg, encKeyB64, keyRef]
     );
 
     return res.json({ ok: true });
@@ -305,7 +318,7 @@ router.post(
  * Decrypt the escrowed per-file key through AWS KMS in production and
  * re-encrypt it to the recipient's temporary RSA public key.
  */
-async function buildContactEnvelopeFromEscrow({ escrowAlg, escrowEncKeyB64, contactPublicKeyPem }) {
+async function buildContactEnvelopeFromEscrow({ escrowAlg, escrowEncKeyB64, escrowKeyId: storedEscrowKeyId, contactPublicKeyPem }) {
   const normalizedContactPem = normalizePublicKeyPem(contactPublicKeyPem);
   if (!normalizedContactPem) throw new Error("invalid_contact_public_key");
 
@@ -314,7 +327,7 @@ async function buildContactEnvelopeFromEscrow({ escrowAlg, escrowEncKeyB64, cont
     throw new Error("contact_public_key_must_be_rsa");
   }
 
-  const plainKeyBuf = await decryptEscrowedKey(escrowEncKeyB64);
+  const plainKeyBuf = await decryptEscrowedKey(escrowEncKeyB64, storedEscrowKeyId);
   const encForContactBuf = crypto.publicEncrypt(
     {
       key: contactKeyObj,
@@ -924,6 +937,7 @@ router.post(
       envelope = await buildContactEnvelopeFromEscrow({
         escrowAlg: String(escrowRows[0].alg || "rsa-oaep-sha256"),
         escrowEncKeyB64: String(escrowRows[0].enc_key_b64),
+        escrowKeyId: String(escrowRows[0].escrow_key_id || ""),
         contactPublicKeyPem: normalizedPublicKey,
       });
     } catch {
