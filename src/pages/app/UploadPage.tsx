@@ -139,16 +139,12 @@ export function UploadPage() {
     if (isPaidCache === false) return false;
 
     try {
-      const r = await fetch("/files/list", { credentials: "include" });
-      if (r.status === 402) {
-        setIsPaidCache(false);
-        return false;
-      }
-      if (r.ok) {
-        setIsPaidCache(true);
-        return true;
-      }
-      return false;
+      const r = await fetch("/auth/billing/status", { credentials: "include" });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) return false;
+      const paid = data?.status === "active";
+      setIsPaidCache(paid);
+      return paid;
     } catch {
       return false;
     }
