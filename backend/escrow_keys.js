@@ -19,6 +19,7 @@ class NodeSha256 {
 
 let cachedPublicKey = null;
 let cachedPublicKeyAt = 0;
+let cachedPublicKeyId = "";
 
 function kmsConfig() {
   const keyId = String(process.env.ESCROW_KMS_KEY_ID || "").trim();
@@ -96,12 +97,17 @@ async function kmsRequest(target, body) {
   });
 }
 
-async function getEscrowPublicKeyPem() {
+async function getEscrowPublicKeyInfo() {
   const cfg = kmsConfig();
   if (cfg) {
-    if (cachedPublicKey && Date.now() - cachedPublicKeyAt < 6 * 60 * 60 * 1000) {
-      return cachedPublicKey;
+    if (
+      cachedPublicKey &&
+      cachedPublicKeyId === cfg.keyId &&
+      Date.now() - cachedPublicKeyAt < 6 * 60 * 60 * 1000
+    ) {
+      return { publicKeyPem: cachedPublicKey, keyId: cachedPublicKeyId };
     }
+
     const response = await kmsRequest("GetPublicKey", { KeyId: cfg.keyId });
     if (response.KeyUsage && response.KeyUsage !== "ENCRYPT_DECRYPT") {
       throw new Error("escrow_kms_key_usage_invalid");
@@ -112,30 +118,43 @@ async function getEscrowPublicKeyPem() {
     ) {
       throw new Error("escrow_kms_oaep_sha256_not_supported");
     }
+
     const der = Buffer.from(String(response.PublicKey || ""), "base64");
     if (!der.length) throw new Error("escrow_kms_public_key_missing");
     const key = crypto.createPublicKey({ key: der, format: "der", type: "spki" });
     if (key.asymmetricKeyType !== "rsa") throw new Error("escrow_kms_key_must_be_rsa");
+
     cachedPublicKey = key.export({ type: "spki", format: "pem" }).toString();
+    cachedPublicKeyId = cfg.keyId;
     cachedPublicKeyAt = Date.now();
-    return cachedPublicKey;
+    return { publicKeyPem: cachedPublicKey, keyId: cachedPublicKeyId };
   }
 
   const privateKey = legacyPrivateKey();
   if (!privateKey) return null;
-  return crypto.createPublicKey(crypto.createPrivateKey(privateKey))
-    .export({ type: "spki", format: "pem" })
-    .toString();
+  return {
+    publicKeyPem: crypto.createPublicKey(crypto.createPrivateKey(privateKey))
+      .export({ type: "spki", format: "pem" })
+      .toString(),
+    keyId: "legacy-local",
+  };
 }
 
-async function decryptEscrowedKey(encKeyB64) {
+async function getEscrowPublicKeyPem() {
+  const info = await getEscrowPublicKeyInfo();
+  return info?.publicKeyPem || null;
+}
+
+async function decryptEscrowedKey(encKeyB64, keyId = escrowKeyId()) {
   const ciphertext = Buffer.from(String(encKeyB64 || ""), "base64");
   if (!ciphertext.length) throw new Error("invalid_escrow_ciphertext");
 
-  const cfg = kmsConfig();
-  if (cfg) {
+  const requestedKeyId = String(keyId || "").trim();
+  if (requestedKeyId && requestedKeyId !== "legacy-local") {
+    const cfg = kmsConfig();
+    if (!cfg) throw new Error("escrow_kms_not_configured");
     const response = await kmsRequest("Decrypt", {
-      KeyId: cfg.keyId,
+      KeyId: requestedKeyId,
       CiphertextBlob: ciphertext.toString("base64"),
       EncryptionAlgorithm: "RSAES_OAEP_SHA_256",
     });
@@ -159,6 +178,7 @@ async function decryptEscrowedKey(encKeyB64) {
 module.exports = {
   decryptEscrowedKey,
   escrowKeyId,
+  getEscrowPublicKeyInfo,
   getEscrowPublicKeyPem,
   kmsConfig,
 };
