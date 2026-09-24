@@ -218,7 +218,7 @@ Use accounts/files created specifically for testing. Do not use a real customer'
 Verify all of the following:
 
 1. Normal vault PIN creates a short-lived server authorization and permits download.
-2. Direct `/files/presign-download`, `/files/get-user-envelope`, `/files/delete`, and GET `/files/vault-keys` fail with `vault_locked` before PIN unlock.
+2. Direct `/files/list`, `/files/presign-download`, `/files/get-user-envelope`, `/files/delete`, and GET `/files/vault-keys` fail with `vault_locked` before PIN unlock.
 3. A wrong PIN is rate-limited.
 4. Normal and emergency PIN cannot be configured to the same value.
 5. Normal safety PIN + Delete Account really queues deletion, signs the account out, and cleanup completes.
@@ -259,6 +259,7 @@ Before launch:
 - keep the EC2 role scoped to this one key
 - do not grant KMS administrative actions to the app
 - review every production path that can call emergency envelope creation
+- keep old KMS decrypt permission until every file escrow row has been rewrapped; each ciphertext is now bound to the exact KMS key ID that wrapped it, so key rotation must preserve decrypt access or rewrap old rows first
 
 ## Launch criterion
 
