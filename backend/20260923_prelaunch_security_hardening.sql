@@ -67,3 +67,19 @@ CREATE TABLE IF NOT EXISTS account_lifecycle_jobs (
   PRIMARY KEY (user_id),
   KEY idx_account_lifecycle_jobs_status (status, updated_at)
 );
+
+
+CREATE TABLE IF NOT EXISTS pin_reset_challenges (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  user_id BIGINT UNSIGNED NOT NULL,
+  challenge_hash CHAR(64) NOT NULL,
+  code_hash CHAR(64) NOT NULL,
+  expires_at DATETIME(3) NOT NULL,
+  verified_at DATETIME(3) NULL,
+  used_at DATETIME(3) NULL,
+  attempts TINYINT UNSIGNED NOT NULL DEFAULT 0,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_pin_reset_challenge_hash (challenge_hash),
+  KEY idx_pin_reset_user (user_id, created_at)
+);

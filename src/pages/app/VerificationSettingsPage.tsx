@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { useToast } from "@/hooks/use-toast";
-import { Calendar, Clock, Bell, Shield, Loader2, Save, AlertTriangle } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
+import { Calendar, Clock, Bell, Shield, Loader2, Save, AlertTriangle, KeyRound } from "lucide-react";
 
 type Frequency = "daily" | "weekly" | "monthly";
 
@@ -44,7 +47,17 @@ export function VerificationSettingsPage() {
   const [loadError, setLoadError] = useState("");
   const [attempt, setAttempt] = useState(0);
 
+  const [pinDialogOpen, setPinDialogOpen] = useState(false);
+  const [pinResetStep, setPinResetStep] = useState<"password" | "email" | "pins">("password");
+  const [pinResetPassword, setPinResetPassword] = useState("");
+  const [pinResetCode, setPinResetCode] = useState("");
+  const [newPin, setNewPin] = useState("");
+  const [newEmergencyPin, setNewEmergencyPin] = useState("");
+  const [pinResetChallenge, setPinResetChallenge] = useState("");
+  const [pinResetBusy, setPinResetBusy] = useState(false);
+
   const { toast } = useToast();
+  const { lockVault } = useAuth();
 
   useEffect(() => {
     let cancelled = false;
@@ -156,6 +169,129 @@ export function VerificationSettingsPage() {
     }
   };
 
+  const resetPinDialog = () => {
+    setPinResetStep("password");
+    setPinResetPassword("");
+    setPinResetCode("");
+    setNewPin("");
+    setNewEmergencyPin("");
+    setPinResetChallenge("");
+    setPinResetBusy(false);
+  };
+
+  const startPinReset = async () => {
+    if (!pinResetPassword || pinResetBusy) return;
+    setPinResetBusy(true);
+    try {
+      const resp = await fetch("/auth/pin-reset/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ password: pinResetPassword }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data?.ok) {
+        toast({
+          title: "Could not verify password",
+          description: data?.error === "reauthentication_failed"
+            ? "That account password is incorrect."
+            : "Could not start the PIN change. Please try again.",
+          variant: "destructive",
+        });
+        return;
+      }
+      setPinResetChallenge(String(data.challenge || ""));
+      setPinResetPassword("");
+      setPinResetStep("email");
+      toast({ title: "Verification code sent", description: "Check your account email for a 6-digit code." });
+    } catch {
+      toast({ title: "Network error", description: "Could not start the PIN change.", variant: "destructive" });
+    } finally {
+      setPinResetBusy(false);
+    }
+  };
+
+  const verifyPinResetEmail = async () => {
+    if (!/^\d{6}$/.test(pinResetCode) || !pinResetChallenge || pinResetBusy) return;
+    setPinResetBusy(true);
+    try {
+      const resp = await fetch("/auth/pin-reset/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ challenge: pinResetChallenge, code: pinResetCode }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data?.ok) {
+        toast({
+          title: "Code not accepted",
+          description: data?.error === "verification_expired"
+            ? "That code expired. Close this window and start again."
+            : "Check the code in your email and try again.",
+          variant: "destructive",
+        });
+        return;
+      }
+      setPinResetCode("");
+      setPinResetStep("pins");
+    } catch {
+      toast({ title: "Network error", description: "Could not verify the code.", variant: "destructive" });
+    } finally {
+      setPinResetBusy(false);
+    }
+  };
+
+  const completePinReset = async () => {
+    if (pinResetBusy) return;
+    if (!/^\d{4,6}$/.test(newPin) || !/^\d{4,6}$/.test(newEmergencyPin)) {
+      toast({ title: "Invalid PIN", description: "Both PINs must be 4–6 digits.", variant: "destructive" });
+      return;
+    }
+    if (newPin === newEmergencyPin) {
+      toast({ title: "PINs must be different", description: "Your safety PIN and emergency PIN cannot match.", variant: "destructive" });
+      return;
+    }
+
+    setPinResetBusy(true);
+    try {
+      const resp = await fetch("/auth/pin-reset/complete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          challenge: pinResetChallenge,
+          pin: newPin,
+          emergencyPin: newEmergencyPin,
+        }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data?.ok) {
+        toast({
+          title: "PIN change failed",
+          description: data?.error === "verification_expired"
+            ? "Your verification expired. Start the process again."
+            : data?.error === "pin_conflict"
+            ? "Your safety PIN and emergency PIN must be different."
+            : "Please start the PIN change again.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      lockVault();
+      setPinDialogOpen(false);
+      resetPinDialog();
+      toast({
+        title: "PINs changed",
+        description: "Your safety PIN and emergency PIN have both been updated.",
+      });
+    } catch {
+      toast({ title: "Network error", description: "Could not save your new PINs.", variant: "destructive" });
+    } finally {
+      setPinResetBusy(false);
+    }
+  };
+
   const graceLabel = useMemo(() => {
     if (gracePeriod < 24) return `${gracePeriod} hours`;
     if (gracePeriod === 24) return "1 day";
@@ -248,6 +384,30 @@ export function VerificationSettingsPage() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg">
+            <KeyRound className="h-5 w-5 text-primary" />
+            Security PINs
+          </CardTitle>
+          <CardDescription>
+            Change your safety PIN and emergency PIN together. For security, you’ll verify your account password and email first.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              resetPinDialog();
+              setPinDialogOpen(true);
+            }}
+          >
+            Change PIN
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-lg">
             <Clock className="h-5 w-5 text-primary" />
             Grace Period
           </CardTitle>
@@ -326,6 +486,120 @@ export function VerificationSettingsPage() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog
+        open={pinDialogOpen}
+        onOpenChange={(open) => {
+          if (pinResetBusy) return;
+          setPinDialogOpen(open);
+          if (!open) resetPinDialog();
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Change PINs</DialogTitle>
+            <DialogDescription>
+              {pinResetStep === "password"
+                ? "First, confirm your account password."
+                : pinResetStep === "email"
+                ? "Enter the 6-digit code we sent to your account email."
+                : "Set a new safety PIN and a different emergency PIN."}
+            </DialogDescription>
+          </DialogHeader>
+
+          {pinResetStep === "password" && (
+            <div className="space-y-3">
+              <Label htmlFor="pin-reset-password">Account password</Label>
+              <Input
+                id="pin-reset-password"
+                type="password"
+                autoComplete="current-password"
+                value={pinResetPassword}
+                onChange={(e) => setPinResetPassword(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") startPinReset(); }}
+              />
+            </div>
+          )}
+
+          {pinResetStep === "email" && (
+            <div className="space-y-3">
+              <Label htmlFor="pin-reset-code">Email verification code</Label>
+              <Input
+                id="pin-reset-code"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                value={pinResetCode}
+                onChange={(e) => setPinResetCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                placeholder="6-digit code"
+                onKeyDown={(e) => { if (e.key === "Enter") verifyPinResetEmail(); }}
+              />
+              <p className="text-xs text-muted-foreground">The code expires after 10 minutes.</p>
+            </div>
+          )}
+
+          {pinResetStep === "pins" && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="new-safety-pin">New safety PIN</Label>
+                <Input
+                  id="new-safety-pin"
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={newPin}
+                  onChange={(e) => setNewPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  placeholder="4–6 digits"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="new-emergency-pin">New emergency PIN</Label>
+                <Input
+                  id="new-emergency-pin"
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={newEmergencyPin}
+                  onChange={(e) => setNewEmergencyPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  placeholder="4–6 digits"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Your emergency PIN must be different from your safety PIN.
+                </p>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setPinDialogOpen(false)}
+              disabled={pinResetBusy}
+            >
+              Cancel
+            </Button>
+            {pinResetStep === "password" && (
+              <Button onClick={startPinReset} disabled={pinResetBusy || !pinResetPassword}>
+                {pinResetBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verify password"}
+              </Button>
+            )}
+            {pinResetStep === "email" && (
+              <Button onClick={verifyPinResetEmail} disabled={pinResetBusy || !/^\d{6}$/.test(pinResetCode)}>
+                {pinResetBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verify email"}
+              </Button>
+            )}
+            {pinResetStep === "pins" && (
+              <Button
+                onClick={completePinReset}
+                disabled={pinResetBusy || !/^\d{4,6}$/.test(newPin) || !/^\d{4,6}$/.test(newEmergencyPin)}
+              >
+                {pinResetBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save both PINs"}
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <div className="border-t border-border pt-6">
         <div className="max-w-3xl mx-auto flex justify-center">
