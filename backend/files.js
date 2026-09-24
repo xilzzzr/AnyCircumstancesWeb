@@ -1007,6 +1007,7 @@ router.get(
   "/list",
   requireUser,
   requirePaid,
+  requireVaultAuthorization,
   asyncHandler(async (req, res) => {
     const pool = getPool();
 
