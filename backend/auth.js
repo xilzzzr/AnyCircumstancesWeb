@@ -1085,14 +1085,18 @@ router.post(
     const pin = String(req.body?.pin || "");
     if (!/^\d{4,6}$/.test(pin)) return res.status(400).json({ ok: false, error: "invalid_pin" });
 
-    const [otherRows] = await pool.query("SELECT panic_pin_hash FROM users WHERE id = ? LIMIT 1", [String(userId)]);
+    const [otherRows] = await pool.query("SELECT pin_hash, panic_pin_hash FROM users WHERE id = ? LIMIT 1", [String(userId)]);
+    const existingPinHash = otherRows?.[0]?.pin_hash ? String(otherRows[0].pin_hash) : "";
     const panicHash = otherRows?.[0]?.panic_pin_hash ? String(otherRows[0].panic_pin_hash) : "";
+    if (existingPinHash) {
+      return res.status(409).json({ ok: false, error: "use_pin_reset_flow" });
+    }
     if (panicHash && await bcrypt.compare(pin, panicHash)) {
       return res.status(409).json({ ok: false, error: "pin_conflicts_with_emergency_pin" });
     }
 
     const pinHash = await bcrypt.hash(pin, 12);
-    await pool.query("UPDATE users SET pin_hash = ? WHERE id = ? LIMIT 1", [pinHash, String(userId)]);
+    await pool.query("UPDATE users SET pin_hash = ? WHERE id = ? AND pin_hash IS NULL LIMIT 1", [pinHash, String(userId)]);
 
     return res.json({ ok: true });
   })
@@ -1110,14 +1114,18 @@ router.post(
     const pin = String(req.body?.pin || "");
     if (!/^\d{4,6}$/.test(pin)) return res.status(400).json({ ok: false, error: "invalid_pin" });
 
-    const [otherRows] = await pool.query("SELECT pin_hash FROM users WHERE id = ? LIMIT 1", [String(userId)]);
+    const [otherRows] = await pool.query("SELECT pin_hash, panic_pin_hash FROM users WHERE id = ? LIMIT 1", [String(userId)]);
     const normalHash = otherRows?.[0]?.pin_hash ? String(otherRows[0].pin_hash) : "";
+    const existingPanicHash = otherRows?.[0]?.panic_pin_hash ? String(otherRows[0].panic_pin_hash) : "";
+    if (existingPanicHash) {
+      return res.status(409).json({ ok: false, error: "use_pin_reset_flow" });
+    }
     if (normalHash && await bcrypt.compare(pin, normalHash)) {
       return res.status(409).json({ ok: false, error: "emergency_pin_conflicts_with_pin" });
     }
 
     const pinHash = await bcrypt.hash(pin, 12);
-    await pool.query("UPDATE users SET panic_pin_hash = ? WHERE id = ? LIMIT 1", [pinHash, String(userId)]);
+    await pool.query("UPDATE users SET panic_pin_hash = ? WHERE id = ? AND panic_pin_hash IS NULL LIMIT 1", [pinHash, String(userId)]);
 
     return res.json({ ok: true });
   })
