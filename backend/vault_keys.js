@@ -35,7 +35,7 @@ function registerVaultKeyRoutes(router, requireUser, requireVaultAuthorization, 
       keys: rows.map((row) => typeof row.bundle_json === 'string' ? JSON.parse(row.bundle_json) : row.bundle_json) });
   }));
 
-  router.post('/vault-keys', requireUser, asyncHandler(async (req, res) => {
+  router.post('/vault-keys', requireUser, requireVaultAuthorization, asyncHandler(async (req, res) => {
     let bundle;
     try { bundle = validateBundle(req.body?.bundle); }
     catch { return res.status(400).json({ ok: false, error: 'invalid_vault_key' }); }
