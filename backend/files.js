@@ -262,6 +262,9 @@ function isBoundedBase64(input, maxLength = 4096) {
 
 router.get(
   "/escrow-public-key",
+  requireUser,
+  requirePaid,
+  requireVaultAuthorization,
   asyncHandler(async (req, res) => {
     const info = await getEscrowPublicKeyInfo();
     if (!info?.publicKeyPem || !info?.keyId) {
@@ -279,6 +282,7 @@ router.post(
   "/save-file-escrow",
   requireUser,
   requirePaid,
+  requireVaultAuthorization,
   asyncHandler(async (req, res) => {
     const fileId = String(req.body?.file_id || "");
     const alg = String(req.body?.alg || "").trim();
@@ -356,6 +360,7 @@ router.post(
   "/set-user-public-key",
   requireUser,
   requirePaid,
+  requireVaultAuthorization,
   asyncHandler(async (req, res) => {
 	const publicKey = String(req.body?.public_key || "").replace(/\\n/g, "\n").trim();
     if (!publicKey) return res.status(400).json({ ok: false, error: "missing_public_key" });
@@ -377,6 +382,7 @@ router.get(
   "/me-public-key",
   requireUser,
   requirePaid,
+  requireVaultAuthorization,
   asyncHandler(async (req, res) => {
     const pool = getPool();
     const [rows] = await pool.query("SELECT public_key FROM users WHERE id = ? LIMIT 1", [req.userId]);
@@ -389,6 +395,7 @@ router.post(
   "/presign-upload",
   requireUser,
   requirePaid,
+  requireVaultAuthorization,
   presignUploadLimiter,
 
   asyncHandler(async (req, res) => {
@@ -523,6 +530,7 @@ router.post(
   "/confirm-upload",
   requireUser,
   requirePaid,
+  requireVaultAuthorization,
   confirmUploadLimiter,
 
   asyncHandler(async (req, res) => {
@@ -598,6 +606,7 @@ router.post(
   "/save-user-envelope",
   requireUser,
   requirePaid,
+  requireVaultAuthorization,
   asyncHandler(async (req, res) => {
     const fileId = String(req.body?.file_id || "");
     const alg = String(req.body?.alg || "");
@@ -817,6 +826,7 @@ router.get(
   "/contact-public-key",
   requireUser,
   requirePaid,
+  requireVaultAuthorization,
   asyncHandler(async (req, res) => {
     const contactId = Number(req.query?.contact_id || 0);
     if (!contactId) return res.status(400).json({ ok: false, error: "missing_contact_id" });
@@ -845,6 +855,7 @@ router.post(
   "/save-contact-envelope",
   requireUser,
   requirePaid,
+  requireVaultAuthorization,
   asyncHandler(async (req, res) => {
     const contactId = Number(req.body?.contact_id || 0);
     const fileId = String(req.body?.file_id || "");
