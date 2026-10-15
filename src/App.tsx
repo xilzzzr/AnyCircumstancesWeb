@@ -52,6 +52,7 @@ const AccountSettingsPage = lazy(() => import("@/routes/AppSecondaryPages").then
 const HelpPage = lazy(() => import("@/routes/AppSecondaryPages").then((module) => ({ default: module.HelpPage })));
 const IdeasPage = lazy(() => import("@/routes/AppSecondaryPages").then((module) => ({ default: module.IdeasPage })));
 const SharePage = lazy(() => import("@/pages/SharePage"));
+const AdminPage = lazy(() => import("@/pages/admin/AdminPage"));
 
 function RouteFallback({ application = false }: { application?: boolean }) {
   return (
@@ -73,6 +74,8 @@ function lazyElement(Page: LazyExoticComponent<ComponentType>, application = fal
 export function AppRoutes() {
   return (
     <Routes>
+      <Route path="/admin" element={lazyElement(AdminPage)} />
+      <Route path="/admin/login" element={lazyElement(AdminPage)} />
       <Route element={<PublicLayout />}>
         <Route path="/" element={lazyElement(LandingPage)} />
         <Route path="/features" element={lazyElement(FeaturesPage)} />
