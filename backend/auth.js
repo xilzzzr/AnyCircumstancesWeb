@@ -3200,4 +3200,7 @@ async function stripeWebhookHandler(req, res) {
   }
 }
 
+const { createAdminRouter } = require("./admin");
+router.use("/admin", createAdminRouter({ pool, stripe, requireUserId, verifyCurrentPassword }));
+
 module.exports = { authRouter: router, authPool: pool, stripeWebhookHandler };
