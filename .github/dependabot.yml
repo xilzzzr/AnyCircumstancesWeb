@@ -7,6 +7,8 @@ updates:
     open-pull-requests-limit: 5
     groups:
       frontend-security-updates:
+        # Keep breaking major upgrades in separate PRs for compatibility review.
+        update-types: ["minor", "patch"]
         patterns:
           - "*"
 
@@ -17,6 +19,7 @@ updates:
     open-pull-requests-limit: 5
     groups:
       backend-security-updates:
+        update-types: ["minor", "patch"]
         patterns:
           - "*"
 
