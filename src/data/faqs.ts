@@ -4,12 +4,12 @@ export const faqs = [
     "answer": "AnyCircumstances combines encrypted file storage with recurring check-ins and conditional delivery to trusted recipients. You choose your files, recipients, check-in schedule, reminders, and grace period. If you stop checking in and the grace period expires, designated recipients can be emailed secure access to the files assigned to them."
   },
   {
-    "question": "What kinds of files can I upload?",
-    "answer": "Use the vault for important documents, emergency instructions, account information, personal records, recovery information, or other supported file types you want protected. Only upload information you are comfortable placing into your configured emergency-delivery plan."
+    "question": "Can I use an online dead man's switch to release my documents?",
+    "answer": "Yes. AnyCircumstances stores encrypted documents and releases assigned files to verified recipients if you stop checking in and your configured grace period expires. Upload documents, choose who receives each file, and configure your schedule and email reminders. Review current storage limits on the Pricing page."
   },
   {
-    "question": "Who will see my files?",
-    "answer": "Your files are intended to remain private while your release conditions have not been met. You choose the trusted recipients and decide which files are assigned to them. Recipient access begins only through the release workflow you configured."
+    "question": "Will my documents be sent privately or published online?",
+    "answer": "AnyCircumstances emails secure access links to the verified recipients you chose, for their assigned files. Its release workflow does not publish documents publicly online. Treat access links as sensitive: recipients may save or share documents after accessing them."
   },
   {
     "question": "How is my data protected?",
@@ -25,7 +25,7 @@ export const faqs = [
   },
   {
     "question": "What happens when my files are released?",
-    "answer": "When your configured grace period expires without a successful check-in, designated recipients are emailed a secure link for accessing the files assigned to them."
+    "answer": "When your configured grace period expires without a successful check-in, verified recipients are emailed secure access links to their assigned files. The documents are accessed through those links rather than sent as ordinary email attachments. Recipients do not automatically receive every file in your vault."
   },
   {
     "question": "Can I change or remove trusted contacts?",

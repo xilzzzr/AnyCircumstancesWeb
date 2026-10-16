@@ -1,3 +1,4 @@
+import content from "@/data/publicContent.json";
 import { breadcrumbSchema } from "@/components/seo/schema";
 
 const SITE_URL = "https://anycircumstances.com";
@@ -26,8 +27,8 @@ const page = (path: string, title: string, description: string): PublicRouteSeo 
 });
 
 export const publicRoutes: PublicRouteSeo[] = [
-  page("/", "Secure Emergency Digital Vault & Dead Man’s Switch | AnyCircumstances", "Store encrypted files, choose trusted recipients, and use scheduled check-ins to release important information if you become unavailable."),
-  page("/dead-mans-switch", "Dead Man's Switch Email for Encrypted Files | AnyCircumstances", "Set recurring check-ins, email reminders, a grace period, and trusted recipients. If you stop responding, AnyCircumstances can securely release assigned files."),
+  page("/", "Secure Emergency Digital Vault & Dead Man’s Switch | AnyCircumstances", "Store encrypted documents and release assigned files to chosen recipients if you stop checking in and your grace period expires. Private access by email."),
+  page("/dead-mans-switch", content.switch.title, content.switch.description),
   page("/digital-vault", "Secure Digital Vault for Important Documents | AnyCircumstances", "A personal digital vault for encrypted documents, emergency information, recovery instructions, and controlled delivery to trusted recipients."),
   page("/emergency-information-vault", "Emergency Information Vault for Family | AnyCircumstances", "Organize important documents, contacts, account instructions, insurance information, recovery details, and emergency files for trusted recipients."),
   page("/features", "Encrypted Vault, Trusted Recipients & Check-Ins | AnyCircumstances", "Explore client-side file encryption, scheduled check-ins, trusted recipients, selective sharing, and secure emergency delivery."),

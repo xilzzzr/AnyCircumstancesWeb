@@ -114,6 +114,7 @@ export function DeadMansSwitchPage() {
           <p className="mt-5 text-lg text-muted-foreground max-w-4xl">A digital dead man’s switch is an automated system that asks you to check in on a schedule. If you miss the required check-ins and do not respond during the recovery period, the system follows instructions you prepared in advance—such as notifying trusted contacts and releasing selected encrypted files.</p>
         </div></section>
       <PublicContentSection section={content.switch.sections[0]} />
+      {content.switch.sections.slice(2).map(section => <PublicContentSection key={section.heading} section={section} />)}
       <div className="container mx-auto max-w-5xl px-4 py-6"><ContentLinks links={content.switch.links} /><div className="mt-8"><ContextualCta variant="switch" /></div></div>
       <PublicContentSection section={{ heading: content.switch.sections[1].heading, paragraphs: content.switch.sections[1].paragraphs }} />
       <section className="py-14"><div className="container mx-auto max-w-5xl px-4">
