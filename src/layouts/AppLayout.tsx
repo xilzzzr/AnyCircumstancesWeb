@@ -57,7 +57,7 @@ const API_BASE = (import.meta as any).env?.VITE_API_BASE_URL ?? "";
 const sidebarItems = [
   { label: 'Dashboard', href: '/app', icon: LayoutDashboard },
   { label: 'Vault', href: '/app/vault', icon: FolderLock },
-  { label: 'Upload', href: '/app/upload', icon: Upload },
+  { label: 'Add to vault', href: '/app/upload', icon: Upload },
   { label: 'Verification', href: '/app/verification', icon: CheckCircle2 },
   { label: 'Emergency Contacts', href: '/app/emergency-contacts', icon: Users },
   { label: 'Billing', href: '/app/billing', icon: CreditCard },
@@ -292,7 +292,7 @@ export function AppLayout() {
             <Link to="/app/upload">
               <Button size="sm" className="gap-2 shadow-md">
                 <Upload className="h-4 w-4" />
-                <span className="hidden sm:inline">Upload</span>
+                <span className="hidden sm:inline">Add to vault</span>
               </Button>
             </Link>
 
@@ -339,3 +339,4 @@ export function AppLayout() {
     </div>
   );
 }
+

@@ -1,10 +1,12 @@
-import React, { useState, useCallback, useMemo, useRef } from "react";
+import React, { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
+import { Link } from "react-router-dom";
+import { VaultDocumentEditor, RecipientNoteField } from "@/components/app/VaultDocumentEditor";
+import { documentFile, sealRecipientNote, type VaultDocument } from "@/lib/vaultDocuments";
 import { Progress } from "@/components/ui/progress";
 import { Card, CardContent } from "@/components/ui/card";
-import { Upload, X, FileText, Check, Loader2, Shield, Lock, AlertTriangle } from "lucide-react";
+import { Upload, X, FileText, Check, Loader2, Lock, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -62,8 +64,9 @@ type UploadingFile = {
   id: string;
   file: File;
   progress: number;
-  status: "needs_pin" | "needs_passphrase" | "encrypting" | "uploading" | "complete" | "error";
-  includeInEmergency: boolean;
+  note: string;
+  documentTemplate?: VaultDocument["template"];
+  status: "ready" | "needs_pin" | "needs_passphrase" | "encrypting" | "uploading" | "complete" | "error";
   key?: string;
   error?: string;
 };
@@ -115,11 +118,23 @@ function xhrPostWithProgress(url: string, body: Blob, fields: Record<string, str
 
 export function UploadPage() {
   const [files, setFiles] = useState<UploadingFile[]>([]);
+  useEffect(() => {
+    const pending = files.some(file => file.status !== "complete");
+    const guard = (event: BeforeUnloadEvent) => { if (pending) { event.preventDefault(); event.returnValue = ""; } };
+    const navigation = (event: MouseEvent) => {
+      if (pending && event.target instanceof Element && event.target.closest("a[href]") && !window.confirm("Some files have not been saved. Leave this page?")) { event.preventDefault(); event.stopPropagation(); }
+    };
+    window.addEventListener("beforeunload", guard);
+    document.addEventListener("click", navigation, true);
+    return () => { window.removeEventListener("beforeunload", guard); document.removeEventListener("click", navigation, true); };
+  }, [files]);
   const [dragOver, setDragOver] = useState(false);
+  const [creating, setCreating] = useState(false);
   const { toast } = useToast();
   const { unlockVault } = useAuth();
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const runningUploads = useRef(new Set<string>());
   const [pin, setPin] = useState("");
   const [pinOpen, setPinOpen] = useState(false);
   const [unlocking, setUnlocking] = useState(false);
@@ -152,6 +167,8 @@ export function UploadPage() {
 
   const startUpload = useCallback(
     async (uf: UploadingFile) => {
+      if (runningUploads.current.has(uf.id)) return;
+      runningUploads.current.add(uf.id);
       try {
         const paid = await checkPaid();
         if (!paid) {
@@ -172,14 +189,12 @@ export function UploadPage() {
         updateFile(uf.id, { status: "encrypting", progress: 5, error: undefined });
 
         let pubKey: CryptoKey;
-        let pubSpkiB64: string;
 
         try {
           const kp = await ensureUserKeypair(passphrase.trim());
           pubKey = kp.pubKey;
-          pubSpkiB64 = kp.pubSpkiB64;
-        } catch (e: any) {
-          const msg = String(e?.message || "");
+        } catch (e: unknown) {
+          const msg = String(e instanceof Error ? e.message : "");
           if (msg === "vault_locked") {
             updateFile(uf.id, { status: "needs_pin", progress: 0, error: undefined });
             setPinOpen(true);
@@ -198,10 +213,16 @@ export function UploadPage() {
           throw e;
         }
 
+        if (uf.key) {
+          const cleanup = await fetch("/files/delete", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: uf.key }) });
+          if (!cleanup.ok && cleanup.status !== 404) throw new Error("Could not clear the incomplete upload. Please retry.");
+          updateFile(uf.id, { key: undefined });
+        }
+
         const enc = await encryptFileToAesGcm(uf.file);
         const ciphertextBlob = enc.blob as Blob;
         const rawAes = enc.rawAes as Uint8Array;
-        const chunkMeta = (enc as any).meta || null;
+        const chunkMeta = enc.meta || null;
 
         updateFile(uf.id, { progress: 15 });
 
@@ -290,6 +311,9 @@ export function UploadPage() {
               ciphertext_size_bytes: ciphertextBlob.size,
               chunked: true,
               chunk_meta: chunkMeta,
+              recipient_note: await sealRecipientNote(uf.note, rawAes),
+              document_template: uf.documentTemplate,
+              content_revision: crypto.randomUUID(),
             },
           }),
         });
@@ -308,13 +332,15 @@ export function UploadPage() {
 
         updateFile(uf.id, { status: "complete", progress: 100 });
         toast({
-          title: "File uploaded (encrypted)",
-          description: `${uf.file.name} was encrypted locally and uploaded.`,
+          title: "Saved to your vault",
+          description: `${uf.file.name} is saved. Assign it to recipients in Emergency contacts.`,
         });
-      } catch (e: any) {
-        const msg = String(e?.message || "upload_failed");
+      } catch (e: unknown) {
+        const msg = String(e instanceof Error ? e.message : "upload_failed");
         updateFile(uf.id, { status: "error", progress: 0, error: msg });
         toast({ title: "Upload failed", description: msg, variant: "destructive" });
+      } finally {
+        runningUploads.current.delete(uf.id);
       }
     },
     [checkPaid, passphraseOk, passphrase, toast, updateFile]
@@ -357,14 +383,14 @@ export function UploadPage() {
         id: `${now}-${Math.random().toString(16).slice(2)}-${file.name}`,
         file,
         progress: 0,
-        status: "encrypting",
-        includeInEmergency: true,
+        status: "ready",
+        note: "",
       }));
 
       setFiles((prev) => [...prev, ...uploadFiles]);
-      uploadFiles.forEach((uf) => startUpload(uf));
+
     },
-    [startUpload]
+    []
   );
 
   const handleDrop = useCallback(
@@ -451,11 +477,22 @@ export function UploadPage() {
       </Dialog>
 
       <div>
-        <h1 className="text-2xl font-bold text-foreground">Upload Files</h1>
-        <p className="text-muted-foreground">Files are encrypted on your device before upload. Only ciphertext is stored.</p>
+        <h1 className="text-2xl font-bold text-foreground">Add to your vault</h1>
+        <p className="text-muted-foreground">Upload a file or write down passwords, instructions, and messages. Contents and recipient notes are encrypted on your device before saving.</p>
       </div>
 
-      <div
+      <div className="grid sm:grid-cols-2 gap-3">
+        <Button variant={creating ? "outline" : "default"} onClick={() => { if (!creating || window.confirm("Leave the document editor? Unsaved changes will be lost.")) setCreating(false); }}>Upload a file</Button>
+        <Button variant={creating ? "default" : "outline"} onClick={() => setCreating(true)}>Create a file</Button>
+      </div>
+      {creating && <VaultDocumentEditor onCancel={() => setCreating(false)} onSave={async (document, note) => {
+        const uf: UploadingFile = { id: crypto.randomUUID(), file: documentFile(document), note, documentTemplate: document.template, progress: 0, status: "ready" };
+        setFiles(prev => [...prev, uf]);
+        setCreating(false);
+        void startUpload(uf);
+      }} />}
+      <p className="text-sm text-muted-foreground">Saving does not send your files. <Link className="underline" to="/app/emergency-contacts">Choose recipients and assign files</Link> after saving.</p>
+      {!creating && <div
         onDragOver={(e) => {
           e.preventDefault();
           setDragOver(true);
@@ -488,14 +525,14 @@ export function UploadPage() {
         <Button variant="outline" asChild>
           <label htmlFor="file-input">Choose files</label>
         </Button>
-      </div>
+      </div>}
 
       {files.length > 0 && (
         <div className="space-y-3">
-          <h3 className="font-medium text-foreground">Upload Queue</h3>
+          <h3 className="font-medium text-foreground">Files to save</h3>
           {files.map((uf) => (
             <Card key={uf.id}>
-              <CardContent className="flex items-center gap-4 py-3">
+              <CardContent className="flex flex-wrap items-center gap-4 py-3">
                 <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
                   {uf.status === "complete" ? (
                     <Check className="h-5 w-5 text-success" />
@@ -508,6 +545,7 @@ export function UploadPage() {
                   <p className="font-medium text-foreground truncate">{uf.file.name}</p>
 
                   <div className="flex items-center gap-2 mt-1">
+                    {uf.status === "ready" && <span className="text-xs text-muted-foreground">Ready to save</span>}
                     {uf.status === "needs_pin" && (
                       <span className="text-xs text-muted-foreground flex items-center gap-1">
                         <Lock className="h-3 w-3" /> Waiting for safety PIN...
@@ -545,20 +583,17 @@ export function UploadPage() {
                 </div>
 
                 <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-2">
-                    <Shield className={cn("h-4 w-4", uf.includeInEmergency ? "text-primary" : "text-muted-foreground")} />
-                    <Switch
-                      checked={uf.includeInEmergency}
-                      onCheckedChange={(checked) => {
-                        setFiles((prev) => prev.map((f) => (f.id === uf.id ? { ...f, includeInEmergency: checked } : f)));
-                      }}
-                    />
-                  </div>
+                  {uf.status === "ready" && <Button onClick={() => startUpload(uf)}>Save to vault</Button>}
+                  {uf.status === "error" && <Button onClick={() => startUpload(uf)}>Retry save</Button>}
+                  {uf.status === "needs_pin" && <Button onClick={() => setPinOpen(true)}>Unlock vault</Button>}
+                  {uf.status === "needs_passphrase" && <Button onClick={() => setPassphraseOpen(true)}>Enter passphrase</Button>}
+                  {uf.status === "complete" && <Link className="text-sm underline" to="/app/emergency-contacts">Choose recipients</Link>}
 
-                  <Button variant="ghost" size="icon" onClick={() => removeFile(uf.id)}>
+                  <Button variant="ghost" size="icon" aria-label={`Remove ${uf.file.name} from this list`} disabled={["encrypting", "uploading"].includes(uf.status)} onClick={() => removeFile(uf.id)}>
                     <X className="h-4 w-4" />
                   </Button>
                 </div>
+                {uf.status === "ready" && <div className="basis-full"><RecipientNoteField id={`note-${uf.id}`} value={uf.note} onChange={note => updateFile(uf.id, { note })} /></div>}
               </CardContent>
             </Card>
           ))}
@@ -567,3 +602,4 @@ export function UploadPage() {
     </div>
   );
 }
+

@@ -185,11 +185,13 @@ function makeAad(header: Uint8Array, chunkIndex: number) {
   return aad;
 }
 
-export async function encryptFileToAesGcm(file: File) {
+export async function encryptFileToAesGcm(file: File, existingRawKey?: Uint8Array) {
   const CHUNK_SIZE = 4 * 1024 * 1024; // 4 MiB
   const IV_LEN = 12;
 
-  const aesKey = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
+  const aesKey = existingRawKey
+    ? await crypto.subtle.importKey("raw", existingRawKey, { name: "AES-GCM" }, true, ["encrypt", "decrypt"])
+    : await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
   const rawAes = new Uint8Array(await crypto.subtle.exportKey("raw", aesKey));
 
   const header = makeHeader(CHUNK_SIZE, file.size, IV_LEN);
@@ -239,3 +241,4 @@ export async function wrapAesKeyForUser(pubKey: CryptoKey, rawAes: Uint8Array) {
   const wrapped = new Uint8Array(await crypto.subtle.encrypt({ name: "RSA-OAEP" }, pubKey, rawAes));
   return b64FromBytes(wrapped);
 }
+
