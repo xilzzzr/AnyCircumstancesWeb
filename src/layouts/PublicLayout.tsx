@@ -151,6 +151,30 @@ export function PublicLayout() {
           <div className="mt-12 pt-8 border-t border-border flex flex-col md:flex-row justify-between items-center gap-4 text-sm text-muted-foreground">
             <p>&copy; {new Date().getFullYear()} anycircumstances. All rights reserved.</p>
             <p>Your files are encrypted on your device before upload</p>
+            <span style={{ display: 'inline-block', textAlign: 'center', fontFamily: 'system-ui,sans-serif', lineHeight: 1 }}>
+              <a
+                href="https://tools.launchllama.co/products/anycircumstances?utm_source=badge&utm_medium=referral"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ display: 'block', lineHeight: 0 }}
+              >
+                <img
+                  src="https://tools.launchllama.co/featured-badge.png?v=2"
+                  alt="Featured on Launch"
+                  width={200}
+                  height={52}
+                  style={{ display: 'block', border: 0 }}
+                />
+              </a>
+              <a
+                href="https://launchmcp.co/?utm_source=badge&utm_medium=referral"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ display: 'block', marginTop: '-2px', paddingTop: 0, fontSize: '7px', fontWeight: 600, color: '#888', textDecoration: 'none', lineHeight: 1, letterSpacing: '0.02em' }}
+              >
+                Launch
+              </a>
+            </span>
           </div>
         </div>
       </footer>
