@@ -177,7 +177,7 @@ export function DigitalVaultPage() {
             <div className="grid md:grid-cols-3 gap-6">
               {[
                 { step: "01", icon: Lock, title: "Encrypt & upload", desc: "Files are encrypted on your device. The server stores ciphertext only." },
-                { step: "02", icon: Clock, title: "Set check-ins", desc: "Choose a schedule (daily/weekly/monthly). You stay in control." },
+                { step: "02", icon: Clock, title: "Set check-ins", desc: "Choose a schedule (daily / scheduled, weekly, or monthly). You stay in control." },
                 { step: "03", icon: Users, title: "Choose recipients", desc: "Add trusted contacts. They only get access if you stop responding." },
               ].map((s, idx) => (
                 <motion.div

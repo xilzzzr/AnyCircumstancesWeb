@@ -128,7 +128,7 @@ export default function PlanBuilderPage() {
   };
 
   const checkInLabel = (freq: "monthly" | "weekly" | "daily") => {
-    if (freq === "daily") return "Daily";
+    if (freq === "daily") return "Daily / scheduled";
     if (freq === "weekly") return "Weekly";
     return "Monthly";
   };
@@ -136,7 +136,7 @@ export default function PlanBuilderPage() {
   const checkInHint = (freq: "monthly" | "weekly" | "daily") => {
     if (freq === "monthly") return `Included`;
     if (freq === "weekly") return `+${formatMoney(1.99)}/mo`;
-    return `+${formatMoney(2.99)}/mo`;
+    return `+${formatMoney(2.99)}/mo · Choose days, times, and recurrence`;
   };
 
   return (

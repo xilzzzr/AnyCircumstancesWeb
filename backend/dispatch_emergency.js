@@ -131,9 +131,9 @@ async function sendGraceReminders(pool, mail) {
       if (!claim?.affectedRows) continue;
 
       const rendered = renderAnyCircumstancesEmail({
-        title: "Your check-in is overdue",
-        preview: "Check in before your grace period ends.",
-        bodyText: "Your check-in is overdue but still within the grace period. Sign in and check in to confirm you are safe.",
+        title: idx === 1 ? "It is time to check in" : "Your check-in is overdue",
+        preview: "Your check-in is due. Your full grace period applies.",
+        bodyText: `Your check-in is due. Sign in and check in to confirm you are safe. Your grace period ends at ${new Date(dueAt.getTime() + graceMs).toISOString()} (UTC).`,
         ctaText: "Check in",
         ctaUrl: publicAppBase() + "/app/check-in",
         info: {

@@ -224,7 +224,7 @@ export function CheckInPage() {
         : "Verification Required";
 
   const description = verified
-    ? `Next check-in due in ${scheduleFrequency === "daily" ? "24 hours" : scheduleFrequency === "weekly" ? "7 days" : "30 days"}`
+    ? (settings?.nextDueAt ? `Next check-in: ${formatDate(settings.nextDueAt)}` : "Your check-in has been recorded.")
     : status?.state === "not_configured"
       ? "Set your schedule first in Verification Settings."
       : isOverdue

@@ -1,3 +1,4 @@
+import { CheckinScheduleEditor, type CheckinSchedule } from "@/components/CheckinScheduleEditor";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -16,8 +17,11 @@ type Frequency = "daily" | "weekly" | "monthly";
 type BillingStatusResp = { ok?: boolean; status?: string };
 type SettingsResp = {
   ok?: boolean;
+  canSchedule?: boolean;
   settings?: {
     frequency?: Frequency;
+    schedule?: CheckinSchedule | null;
+    nextDueAt?: string | null;
     gracePeriodHours?: number;
     reminders?: number;
   };
@@ -25,13 +29,13 @@ type SettingsResp = {
 };
 
 function formatFrequencyLabel(freq: Frequency) {
-  if (freq === "daily") return "Daily";
+  if (freq === "daily") return "Daily / scheduled";
   if (freq === "weekly") return "Weekly";
   return "Monthly";
 }
 
 function getFrequencyDescription(freq: Frequency) {
-  if (freq === "daily") return "You will need to check in every 24 hours.";
+  if (freq === "daily") return "Check in every 24 hours, or choose specific days and times below.";
   if (freq === "weekly") return "You will need to check in once every 7 days.";
   return "You will need to check in once every 30 days.";
 }
@@ -40,6 +44,9 @@ export function VerificationSettingsPage() {
   const [frequency, setFrequency] = useState<Frequency>("weekly");
   const [gracePeriod, setGracePeriod] = useState(24);
   const [reminders, setReminders] = useState("3");
+  const [schedule, setSchedule] = useState<CheckinSchedule | null>(null);
+  const [canSchedule, setCanSchedule] = useState(false);
+  const [nextDueAt, setNextDueAt] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [loadingInitial, setLoadingInitial] = useState(true);
 
@@ -85,6 +92,9 @@ export function VerificationSettingsPage() {
           throw new Error("settings_unavailable");
         }
         setIsPaid(billing.status === "active" || billing.status === "trialing");
+        setCanSchedule(data.canSchedule === true);
+        setSchedule(data.settings.schedule || null);
+        setNextDueAt(data.settings.nextDueAt || null);
         const settings = data.settings;
         setFrequency(settings.frequency || "weekly");
         setGracePeriod(Number(settings.gracePeriodHours ?? 24));
@@ -117,6 +127,7 @@ export function VerificationSettingsPage() {
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({
+          ...(canSchedule ? { schedule } : {}),
           gracePeriodHours: gracePeriod,
           reminders: Number(reminders),
         }),
@@ -148,12 +159,15 @@ export function VerificationSettingsPage() {
 
         toast({
           title: "Save failed",
-          description: "Please try again.",
+          description: code === "check_in_before_schedule_change" ? "Complete your overdue check-in before changing the schedule or grace period."
+            : code.startsWith("invalid_") ? "Check your schedule: select valid dates, times, a time zone, and at least one day."
+            : "Please try again.",
           variant: "destructive",
         });
         return;
       }
-
+      setSchedule(data.settings?.schedule || null);
+      setNextDueAt(data.settings?.nextDueAt || null);
       toast({
         title: "Settings saved",
         description: "Your verification settings have been updated.",
@@ -329,7 +343,7 @@ export function VerificationSettingsPage() {
       <div>
         <Link to="/onboarding" className="mb-4 inline-block text-sm text-primary hover:underline">← Back to setup guide</Link>
         <h1 className="text-2xl font-bold text-foreground">Verification Settings</h1>
-        <p className="text-muted-foreground">Configure your grace period and reminder notifications</p>
+        <p className="text-muted-foreground">Configure your check-in schedule, grace period, and reminders</p>
       </div>
 
       {!isPaid && (
@@ -364,7 +378,7 @@ export function VerificationSettingsPage() {
             <Calendar className="h-5 w-5 text-primary" />
             Check-in Frequency
           </CardTitle>
-          <CardDescription>This is based on your plan and can’t be changed here</CardDescription>
+          <CardDescription>Your plan determines which check-in options are available</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex items-center justify-between rounded-lg border p-4">
@@ -378,6 +392,14 @@ export function VerificationSettingsPage() {
               </Button>
             </Link>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>Scheduled check-in</CardTitle><CardDescription>Included with Daily / scheduled check-in. Pick your own days, recurrence, times, and time zone.</CardDescription></CardHeader>
+        <CardContent className="space-y-4">
+          {canSchedule ? <CheckinScheduleEditor value={schedule} onChange={setSchedule} disabled={saving} /> : <div className="space-y-3"><p className="text-sm text-muted-foreground">Upgrade to Daily / scheduled check-in to customize your calendar.</p><Button asChild variant="outline"><Link to="/app/plan">Change plan</Link></Button></div>}
+          {nextDueAt && <p className="text-sm">Current saved due time: {new Date(nextDueAt).toLocaleString()} (your device time). Your grace period lasts {graceLabel} after this time.</p>}
         </CardContent>
       </Card>
 

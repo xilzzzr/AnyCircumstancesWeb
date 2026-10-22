@@ -23,7 +23,7 @@ const features = [
   {
     icon: Clock,
     title: 'Verification Schedule',
-    description: 'Choose daily, weekly, or monthly check-ins. If you miss one, your configured grace period begins before any recipient delivery occurs.',
+    description: 'Choose daily / scheduled, weekly, or monthly check-ins. If you miss one, your configured grace period begins before any recipient delivery occurs.',
   },
   {
     icon: Users,
@@ -185,7 +185,7 @@ export function LandingPage() {
             <div className="grid md:grid-cols-3 gap-8">
               {[
                 { step: '01', title: 'Upload & Encrypt', desc: 'Your files are encrypted locally before they ever leave your device.' },
-                { step: '02', title: 'Set Your Schedule', desc: 'Choose how often you want to check in: daily, weekly, or monthly.' },
+                { step: '02', title: 'Set Your Schedule', desc: 'Choose how often you want to check in: daily / scheduled, weekly, or monthly.' },
                 { step: '03', title: 'Add Contacts', desc: 'Designate trusted people who will receive access if you stop responding.' },
               ].map((item, index) => (
                 <motion.div

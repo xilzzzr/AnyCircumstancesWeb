@@ -222,7 +222,7 @@ export function DeadMansSwitchPage() {
                   step: "01",
                   icon: Workflow,
                   title: "Pick a schedule",
-                  desc: "Daily, weekly, or monthly. You decide what “normal” looks like.",
+                  desc: "Daily / scheduled, weekly, or monthly. You decide what “normal” looks like.",
                 },
                 {
                   step: "02",

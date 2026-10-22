@@ -15,6 +15,7 @@ const requirements = [
 ];
 
 export function SignupPage() {
+  const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -73,7 +74,7 @@ export function SignupPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ email, password, ageConfirmed: true }),
+        body: JSON.stringify({ email, password, displayName, ageConfirmed: true }),
       });
 
       let data: any = null;
@@ -178,6 +179,7 @@ export function SignupPage() {
           </section>
 
           <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2"><Label htmlFor="display-name">Your name</Label><Input id="display-name" autoComplete="name" maxLength={120} value={displayName} onChange={e => setDisplayName(e.target.value)} required disabled={loading} /><p className="text-xs text-muted-foreground">Shown in recipient email subjects so they recognize you.</p></div>
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <Input

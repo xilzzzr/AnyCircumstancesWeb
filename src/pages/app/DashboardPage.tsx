@@ -129,7 +129,7 @@ function formatRelativeTime(targetIso: string) {
 }
 
 function formatFrequencyLabel(freq: Frequency) {
-  if (freq === "daily") return "Daily";
+  if (freq === "daily") return "Daily / scheduled";
   if (freq === "weekly") return "Weekly";
   return "Monthly";
 }

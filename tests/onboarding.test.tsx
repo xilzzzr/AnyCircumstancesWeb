@@ -45,7 +45,8 @@ describe('new account routes', () => {
     const router = app('/signup');
     const navigations: string[] = [];
     const unsubscribe = router.subscribe(state => navigations.push(state.location.pathname));
-    fireEvent.change(await screen.findByLabelText('Email'), { target: { value: 'new@example.test' } });
+    fireEvent.change(await screen.findByLabelText('Your name'), { target: { value: 'Arina' } });
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'new@example.test' } });
     fireEvent.change(screen.getByLabelText('Password', { exact: true }), { target: { value: 'Password12345' } });
     fireEvent.change(screen.getByLabelText('Confirm Password'), { target: { value: 'Password12345' } });
     fireEvent.click(screen.getByRole('checkbox'));
@@ -53,6 +54,8 @@ describe('new account routes', () => {
     await screen.findByRole('heading', { name: 'Verify your email' });
     expect(navigations.filter(p => p === '/verify-email')).toHaveLength(1);
     expect(sessionStorage.getItem('pending_verify_email')).toBe('new@example.test');
+    const registration = fetchMock.mock.calls.find(([path]) => path === '/auth/register');
+    expect(JSON.parse(String(registration?.[1]?.body))).toMatchObject({ displayName: 'Arina', email: 'new@example.test' });
     await verify();
     await waitFor(() => expect(router.state.location.pathname).toBe('/create-pin'));
     expect(sessionStorage.getItem('pending_verify_email')).toBeNull();

@@ -16,7 +16,7 @@ export const addons = [
 export const checkInFrequencies = [
   { id: "monthly", label: "Monthly", price: 0.0 },
   { id: "weekly", label: "Weekly", price: 1.99 },
-  { id: "daily", label: "Daily", price: 2.99 },
+  { id: "daily", label: "Daily / scheduled", price: 2.99 },
 ];
 
 export type CheckInFrequencyId = "monthly" | "weekly" | "daily";

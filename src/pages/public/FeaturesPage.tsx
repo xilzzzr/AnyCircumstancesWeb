@@ -20,7 +20,7 @@ const featureList = [
     icon: Clock,
     title: "Automated Check-In System",
     description:
-      "Set daily, weekly, or monthly check-ins and configure email reminders. If a check-in is missed, the grace period begins before any recipient delivery occurs."
+      "Set daily / scheduled, weekly, or monthly check-ins and configure email reminders. If a check-in is missed, the grace period begins before any recipient delivery occurs."
   },
   {
     icon: Users,

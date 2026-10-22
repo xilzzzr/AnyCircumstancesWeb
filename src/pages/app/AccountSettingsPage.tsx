@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AlertTriangle, Loader2, Trash2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,10 @@ import { useAuth } from "@/contexts/AuthContext";
 type Action = "cancel" | "delete" | null;
 
 export function AccountSettingsPage() {
+  const [displayName, setDisplayName] = useState("");
+  const [profileReady, setProfileReady] = useState(false);
+  const [profileError, setProfileError] = useState(false);
+  const [profileSaving, setProfileSaving] = useState(false);
   const [action, setAction] = useState<Action>(null);
   const [confirmation, setConfirmation] = useState("");
   const [pin, setPin] = useState("");
@@ -20,6 +24,27 @@ export function AccountSettingsPage() {
   const { toast } = useToast();
   const navigate = useNavigate();
   const phrase = action === "delete" ? "DELETE MY ACCOUNT" : "DELETE MY FILES";
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/auth/profile', { credentials: 'include' }).then(async response => {
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error('profile_unavailable');
+      if (!cancelled) { setDisplayName(data.displayName || ''); setProfileReady(true); }
+    }).catch(() => { if (!cancelled) setProfileError(true); });
+    return () => { cancelled = true; };
+  }, []);
+  async function saveName() {
+    setProfileSaving(true);
+    try {
+      const response = await fetch('/auth/profile', { method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ displayName }) });
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error('save_failed');
+      setDisplayName(data.displayName);
+      toast({ title: 'Name saved', description: 'Recipient email subjects will include this name.' });
+    } catch { toast({ title: 'Could not save name', description: 'Enter a name of 1–120 characters and try again.', variant: 'destructive' }); }
+    finally { setProfileSaving(false); }
+  }
 
   async function submit() {
     if (!action || confirmation !== phrase || !/^\d{4,6}$/.test(pin)) return;
@@ -77,6 +102,11 @@ export function AccountSettingsPage() {
           Manage your subscription, stored data, and account.
         </p>
       </div>
+
+      <Card className="editorial-card">
+        <CardHeader><CardTitle>Your name</CardTitle><CardDescription>Help recipients recognize you. This name appears in emergency email subjects. Until you add a name, we use your email address.</CardDescription></CardHeader>
+        <CardContent className="space-y-3"><Label htmlFor="owner-name">Name recipients will recognize</Label><Input id="owner-name" autoComplete="name" value={displayName} maxLength={120} disabled={!profileReady || profileSaving} onChange={e => setDisplayName(e.target.value)} />{profileError && <p role="alert">Could not load your name. Refresh to try again.</p>}<Button onClick={saveName} disabled={!profileReady || profileSaving || !displayName.trim()}>Save name</Button></CardContent>
+      </Card>
 
       <Card className="editorial-card">
         <CardHeader>

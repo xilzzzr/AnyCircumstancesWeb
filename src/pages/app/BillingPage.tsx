@@ -63,7 +63,7 @@ type VaultFile = {
 const CHECKIN_LABEL: Record<string, string> = {
   monthly: "Monthly",
   weekly: "Weekly",
-  daily: "Daily",
+  daily: "Daily / scheduled",
 };
 
 const ADDON_META: Record<
@@ -409,7 +409,7 @@ export function BillingPage() {
                         <div className="text-xs text-muted-foreground">How often you verify you’re okay</div>
                       </div>
                     </div>
-                    <div className="text-sm font-medium">{checkInLabel}</div>
+                    <div className="text-sm font-medium">{checkInLabel}{billing?.checkInFrequency === "daily" && <p className="text-xs text-muted-foreground">Custom days, times, recurrence, and time zone included. Set your schedule in Verification Settings.</p>}</div>
                   </div>
 
                   <div className="pt-2 border-t">

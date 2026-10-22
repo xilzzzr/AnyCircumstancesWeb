@@ -51,7 +51,7 @@ const addons = [
 const checkInFrequencies = [
   { id: "monthly", label: "Monthly", price: 0.0 },
   { id: "weekly", label: "Weekly", price: 1.99 },
-  { id: "daily", label: "Daily", price: 2.99 },
+  { id: "daily", label: "Daily / scheduled", price: 2.99 },
 ];
 
 function getStoragePrice(gb: number): number {
@@ -159,7 +159,7 @@ export function PricingPage() {
               transition={{ delay: 0.1 }}
               className="text-lg text-vault-foreground/70 mb-6"
             >
-              Choose the storage and check-in frequency that fit your plan. Monthly check-ins are included, with weekly and daily options available for people who want a shorter verification interval.
+              Choose the storage and check-in frequency that fit your plan. Monthly check-ins are included, with weekly and daily / scheduled options available. Daily / scheduled includes custom days, times, recurrence, and time zones at the same daily-tier price.
             </motion.p>
           </div>
         </div>
