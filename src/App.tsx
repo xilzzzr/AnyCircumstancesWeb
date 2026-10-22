@@ -2,6 +2,7 @@ import React, { lazy, Suspense, type ComponentType, type LazyExoticComponent } f
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { ScrollToTop } from "@/components/ScrollToTop";
 import { RouteSeo } from "@/components/seo/RouteSeo";
+import { SensitivePage } from "@/components/SensitivePage";
 
 import { PublicLayout } from "@/layouts/PublicLayout";
 import NotFound from "@/pages/NotFound";
@@ -68,7 +69,8 @@ function RouteFallback({ application = false }: { application?: boolean }) {
 }
 
 function lazyElement(Page: LazyExoticComponent<ComponentType>, application = false) {
-  return <Suspense fallback={<RouteFallback application={application} />}><Page /></Suspense>;
+  const content = <Suspense fallback={<RouteFallback application={application} />}><Page /></Suspense>;
+  return application || Page === SharePage ? <SensitivePage>{content}</SensitivePage> : content;
 }
 
 export function AppRoutes() {
@@ -165,3 +167,4 @@ const App = () => (
 );
 
 export default App;
+

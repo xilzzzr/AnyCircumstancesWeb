@@ -25,6 +25,8 @@ The passphrase is chosen on first save. Use the same one when reopening document
 5. Use the demo instructions link at the bottom of the screen, then **Preview recipient package**. Check the file notes, individual PDF downloads, and ZIP containing Start here.pdf.
 6. Return to the owner vault and delete a test file to check deletion.
 
+The **Crypto wallet & seed phrase** template is available from Create a file. Use invented words to test it. Choose Other or Not sure for arbitrary test word counts, or enter 12 test words to exercise the BIP39 length check. The demo does not validate checksums or interact with a real wallet. Test an additional recovery passphrase, account paths, an owner edit, and the recipient's numbered-word PDF export. Never use a funded wallet's recovery words in this demo.
+
 This harness uses the actual frontend and browser encryption with an in-memory API simulation. It does not start the production backend, connect to MySQL or AWS, send email, or charge payments. Unknown API operations fail rather than reaching a production service. It is for testing the document and recipient screens, not end-to-end validation of billing, scheduled releases, login security, or production infrastructure. The recipient preview simulates release of only files assigned to Demo Recipient and requires no email access. Uploaded requests are limited to 32 MiB.
 
 Use invented information only. Everything, including encryption keys, is erased when the process stops. Press Control+C to stop. Restart for a clean account. If port 8080 is already in use, run `UAC_DEMO_PORT=8081 node scripts/local-demo.mjs` and use the address printed in Terminal.

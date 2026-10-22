@@ -11,7 +11,8 @@ export class ErrorBoundary extends React.Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
-    console.error("[ErrorBoundary]", error, info);
+    // Error messages and component diagnostics can contain user input. Do not emit them.
+    if (import.meta.env.DEV) console.error("[ErrorBoundary] component rendering failed");
   }
 
   render() {
@@ -46,3 +47,4 @@ export class ErrorBoundary extends React.Component<Props, State> {
     return this.props.children;
   }
 }
+

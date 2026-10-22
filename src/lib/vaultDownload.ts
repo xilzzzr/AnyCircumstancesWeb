@@ -13,7 +13,7 @@ export async function decryptVaultFile(file: VaultFile, passphrase: string) {
   const aesKey = await crypto.subtle.importKey('raw', rawKey, 'AES-GCM', false, ['decrypt']);
   const url = await presignDownload(file.key);
   if (!url) throw new Error('no_url');
-  const response = await fetch(url);
+  const response = await fetch(url, { cache: "no-store", referrerPolicy: "no-referrer" });
   if (!response.ok) throw new Error('download_failed');
   const bytes = await decryptUacBytes(aesKey, new Uint8Array(await response.arrayBuffer()), envelope.meta_json);
   return { rawKey, envelope, bytes,

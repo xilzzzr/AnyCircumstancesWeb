@@ -33,7 +33,7 @@ type OpenFile = ReleasedFile & {
 async function shareRequest(path: string, body: unknown = {}) {
   const response = await fetch(`/files/${path}`, {
     method: "POST",
-    credentials: "include",
+    credentials: "include", cache: "no-store",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
@@ -173,7 +173,7 @@ export default function SharePage() {
     const data = await shareRequest("share-presign-download", {
       file_id: file.id,
     });
-    const response = await fetch(data.url);
+    const response = await fetch(data.url, { cache: "no-store", referrerPolicy: "no-referrer" });
     if (!response.ok) throw new Error("download_failed");
     const key = await crypto.subtle.importKey(
       "raw",

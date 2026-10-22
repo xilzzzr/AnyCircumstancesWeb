@@ -1,3 +1,4 @@
+import { privateInputProps } from "@/lib/privateInputProps";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -103,7 +104,7 @@ export function VaultFileDetails({
       }
       const response = await fetch("/files/update-content", {
         method: "POST",
-        credentials: "include",
+        credentials: "include", cache: "no-store",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
@@ -157,6 +158,7 @@ export function VaultFileDetails({
           >
             <Label htmlFor="details-passphrase">Vault passphrase</Label>
             <Input
+              {...privateInputProps}
               id="details-passphrase"
               type="password"
               autoComplete="off"

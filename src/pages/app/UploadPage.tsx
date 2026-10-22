@@ -1,3 +1,4 @@
+import { privateInputProps } from "@/lib/privateInputProps";
 import React, { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,7 +45,7 @@ async function saveEscrowForFile(fileId: string, rawAesKey: Uint8Array) {
   const saveRes = await fetch("/files/save-file-escrow", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    credentials: "include",
+    credentials: "include", cache: "no-store",
     body: JSON.stringify({
       file_id: fileId,
       alg: "rsa-oaep-sha256",
@@ -64,6 +65,7 @@ type UploadingFile = {
   id: string;
   file: File;
   progress: number;
+  savedSizeBytes?: number;
   note: string;
   documentTemplate?: VaultDocument["template"];
   status: "ready" | "needs_pin" | "needs_passphrase" | "encrypting" | "uploading" | "complete" | "error";
@@ -131,7 +133,7 @@ export function UploadPage() {
   const [dragOver, setDragOver] = useState(false);
   const [creating, setCreating] = useState(false);
   const { toast } = useToast();
-  const { unlockVault } = useAuth();
+  const { unlockVault, vaultLocked } = useAuth();
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const runningUploads = useRef(new Set<string>());
@@ -141,7 +143,24 @@ export function UploadPage() {
 
   const [passphrase, setPassphrase] = useState("");
   const [passphraseOpen, setPassphraseOpen] = useState(false);
+  useEffect(() => {
+    if (files.length && files.every(file => file.status === "complete")) setPassphrase("");
+  }, [files]);
   const passphraseOk = useMemo(() => passphrase.trim().length >= 8, [passphrase]);
+
+  const previouslyUnlocked = useRef(false);
+  useEffect(() => {
+    if (!vaultLocked) { previouslyUnlocked.current = true; return; }
+    if (previouslyUnlocked.current) {
+      setFiles([]);
+      setPassphrase("");
+      setPin("");
+      setCreating(false);
+      setPassphraseOpen(false);
+      setPinOpen(false);
+      previouslyUnlocked.current = false;
+    }
+  }, [vaultLocked]);
 
   const [isPaidCache, setIsPaidCache] = useState<boolean | null>(null);
 
@@ -214,7 +233,7 @@ export function UploadPage() {
         }
 
         if (uf.key) {
-          const cleanup = await fetch("/files/delete", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: uf.key }) });
+          const cleanup = await fetch("/files/delete", { method: "POST", credentials: "include", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: uf.key }) });
           if (!cleanup.ok && cleanup.status !== 404) throw new Error("Could not clear the incomplete upload. Please retry.");
           updateFile(uf.id, { key: undefined });
         }
@@ -229,7 +248,7 @@ export function UploadPage() {
         const presignResp = await fetch("/files/presign-upload", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          credentials: "include",
+          credentials: "include", cache: "no-store",
           body: JSON.stringify({
             filename: uf.file.name,
             contentType: uf.file.type || "application/octet-stream",
@@ -274,7 +293,7 @@ export function UploadPage() {
         const confirmResp = await fetch("/files/confirm-upload", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          credentials: "include",
+          credentials: "include", cache: "no-store",
           body: JSON.stringify({
             key: presign.key,
             size_bytes: ciphertextBlob.size,
@@ -299,7 +318,7 @@ export function UploadPage() {
         const envResp = await fetch("/files/save-user-envelope", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          credentials: "include",
+          credentials: "include", cache: "no-store",
           body: JSON.stringify({
             file_id: presign.key,
             alg: "RSA-OAEP+AES-256-GCM",
@@ -330,7 +349,7 @@ export function UploadPage() {
           return;
         }
 
-        updateFile(uf.id, { status: "complete", progress: 100 });
+        updateFile(uf.id, { status: "complete", progress: 100, note: "", savedSizeBytes: uf.file.size, file: new File([], uf.file.name, { type: uf.file.type }) });
         toast({
           title: "Saved to your vault",
           description: `${uf.file.name} is saved. Assign it to recipients in Emergency contacts.`,
@@ -447,6 +466,7 @@ export function UploadPage() {
           </DialogHeader>
 
           <input
+            {...privateInputProps}
             type="password"
             value={passphrase}
             onChange={(e) => setPassphrase(e.target.value)}

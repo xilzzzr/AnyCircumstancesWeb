@@ -1,3 +1,5 @@
+import { WalletRecoveryFields } from "./WalletRecoveryFields";
+import { privateInputProps } from "@/lib/privateInputProps";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,13 +28,14 @@ export function RecipientNoteField({
   id?: string;
 }) {
   return (
-    <div className="space-y-2">
+    <div className="space-y-2 ph-no-capture">
       <Label htmlFor={id}>Note for your recipient (optional)</Label>
       <p id={`${id}-help`} className="text-sm text-muted-foreground">
         Explain what this file contains or how to use it. Everyone assigned this
         file will see the same note when it is released.
       </p>
       <Textarea
+        {...privateInputProps}
         id={id}
         aria-describedby={`${id}-help`}
         value={value}
@@ -66,6 +69,15 @@ export function VaultDocumentEditor({
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState("");
   const [visible, setVisible] = useState<Record<number, boolean>>({});
+  useEffect(() => {
+    const hide = () => setVisible({});
+    window.addEventListener("blur", hide);
+    document.addEventListener("visibilitychange", hide);
+    return () => {
+      window.removeEventListener("blur", hide);
+      document.removeEventListener("visibilitychange", hide);
+    };
+  }, []);
   useEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => {
       if (dirty) {
@@ -137,6 +149,7 @@ export function VaultDocumentEditor({
       <Label htmlFor={`document-${field}`}>{label}</Label>
       {multiline ? (
         <Textarea
+          {...privateInputProps}
           id={`document-${field}`}
           value={doc[field]}
           onChange={(e) => change({ [field]: e.target.value })}
@@ -145,6 +158,7 @@ export function VaultDocumentEditor({
         />
       ) : (
         <Input
+          {...privateInputProps}
           id={`document-${field}`}
           value={doc[field]}
           onChange={(e) => change({ [field]: e.target.value })}
@@ -156,7 +170,13 @@ export function VaultDocumentEditor({
   );
   return (
     <form
-      className="space-y-6"
+      autoComplete="off"
+      spellCheck={false}
+      data-private
+      data-hj-suppress
+      data-clarity-mask="true"
+      data-sentry-mask
+      className="space-y-6 ph-no-capture"
       onSubmit={async (e) => {
         e.preventDefault();
         if (busy) return;
@@ -190,6 +210,8 @@ export function VaultDocumentEditor({
               window.confirm("Discard changes and choose another template?")
             ) {
               setDoc(null);
+              setNote("");
+              setVisible({});
               setDirty(false);
             }
           }}
@@ -202,7 +224,12 @@ export function VaultDocumentEditor({
       </h2>
       <fieldset disabled={busy} className="space-y-6">
         {textField("title", "Document title")}
-        {doc.template === "passwords" ? (
+        {doc.template === "wallet" && doc.wallet ? (
+          <WalletRecoveryFields
+            wallet={doc.wallet}
+            onChange={(wallet) => change({ wallet })}
+          />
+        ) : doc.template === "passwords" ? (
           <div className="space-y-4">
             {doc.accounts.map((account, index) => (
               <section
@@ -233,6 +260,7 @@ export function VaultDocumentEditor({
                       <Label htmlFor={id}>{label}</Label>
                       {field === "notes" ? (
                         <Textarea
+                          {...privateInputProps}
                           id={id}
                           value={account[field]}
                           onChange={(e) => update(e.target.value)}
@@ -240,6 +268,7 @@ export function VaultDocumentEditor({
                         />
                       ) : (
                         <Input
+                          {...privateInputProps}
                           id={id}
                           type={
                             field === "password" && !visible[index]
@@ -287,6 +316,7 @@ export function VaultDocumentEditor({
                     Explain how to sign in and where to find what is needed
                   </Label>
                   <Textarea
+                    {...privateInputProps}
                     id={`verification-${index}`}
                     value={account.verification}
                     onChange={(e) =>
@@ -354,6 +384,7 @@ export function VaultDocumentEditor({
                         }
                       </Label>
                       <Input
+                        {...privateInputProps}
                         id={`contact-${index}-${field}`}
                         value={contact[field]}
                         onChange={(e) =>
@@ -436,7 +467,7 @@ export function VaultDocumentEditor({
         <Link to="/app/emergency-contacts" className="underline">
           Emergency contacts
         </Link>
-        . All accounts in this document go to the same assigned recipients.
+        . Everything in this document goes to the same assigned recipients.
       </p>
       {error && (
         <p role="alert" className="text-destructive">

@@ -1,3 +1,4 @@
+import { privateInputProps } from "@/lib/privateInputProps";
 import { VaultFileDetails } from "@/components/app/VaultFileDetails";
 import { documentPdf, downloadBlob } from "@/lib/vaultExports";
 import { DOCUMENT_TYPE, parseDocument, openRecipientNote } from "@/lib/vaultDocuments";
@@ -384,7 +385,7 @@ const handleDelete = async (fileKey: string) => {
             <DialogTitle>{syncKey ? "Back up your vault key" : "Decrypt and download"}</DialogTitle>
             <DialogDescription>Enter the vault passphrase you used when uploading. Your encrypted key will be backed up for use on your other devices. This passphrase is separate from your login password and PIN. Downloaded files may contain passwords; anyone with access to the download can read them.</DialogDescription>
           </DialogHeader>
-          <Input type="password" aria-label="Vault passphrase" placeholder="Vault passphrase"
+          <Input {...privateInputProps} type="password" aria-label="Vault passphrase" placeholder="Vault passphrase"
             value={passphrase} onChange={(e) => setPassphrase(e.target.value)} disabled={downloading}
             onKeyDown={(e) => { if (e.key === "Enter") handleDecryptDownload(); }} />
           <DialogFooter>

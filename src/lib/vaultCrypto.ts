@@ -85,7 +85,7 @@ function legacyVaultKey(): VaultKeyBundle | null {
 }
 
 async function vaultKeyRequest(path: string, body?: unknown) {
-  const response = await fetch(path, { credentials: "include", ...(body ? {
+  const response = await fetch(path, { credentials: "include", cache: "no-store", ...(body ? {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
   } : {}) });
   const data = await response.json().catch(() => ({}));

@@ -85,7 +85,8 @@ async function handle(req, res, next) {
   }
   if (isShare) {
     if (p === '/files/share-lookup') {
-      if (data.token !== shareToken || !released.size) return fail(res, 'invalid_token', 403);
+      const existingShareSession = (req.headers.cookie || '').split(';').some(c => c.trim() === `uac_demo_share=${shareToken}`);
+      if (!released.size || (data.token ? data.token !== shareToken : !existingShareSession)) return fail(res, 'invalid_token', 403);
       res.setHeader('Set-Cookie', `uac_demo_share=${shareToken}; HttpOnly; SameSite=Strict; Path=/`);
       return json(res, { ok: true });
     }

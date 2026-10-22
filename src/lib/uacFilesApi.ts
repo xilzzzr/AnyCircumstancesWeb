@@ -38,7 +38,7 @@ class ApiError extends Error {
 async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
-    credentials: "include",
+    credentials: "include", cache: "no-store",
     headers: {
       "Content-Type": "application/json",
       ...(init?.headers || {}),

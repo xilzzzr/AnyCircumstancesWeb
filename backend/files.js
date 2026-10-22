@@ -461,12 +461,14 @@ router.post(
         Fields: {
           "Content-Type": uploadContentType,
           "x-amz-server-side-encryption": "AES256",
+          "Cache-Control": "no-store",
         },
         Conditions: [
           // S3 evaluates the multipart request size, which includes form-field overhead.
           // The uploaded object's exact byte length is independently verified on confirm.
           ["content-length-range", uploadSize, uploadSize + 64 * 1024],
           ["eq", "$Content-Type", uploadContentType],
+          ["eq", "$Cache-Control", "no-store"],
           ["eq", "$x-amz-server-side-encryption", "AES256"],
         ],
       });
@@ -595,7 +597,7 @@ router.post(
 
     const s3 = new S3Client({ region });
 
-    const cmd = new GetObjectCommand({ Bucket: String(rows[0].bucket || bucket), Key: key });
+    const cmd = new GetObjectCommand({ Bucket: String(rows[0].bucket || bucket), Key: key, ResponseCacheControl: "no-store" });
     const url = await getSignedUrl(s3, cmd, { expiresIn: 600 });
 
     return res.json({ ok: true, url });
@@ -674,7 +676,7 @@ router.post(
 require("./vault_documents").registerDocumentRoutes(router, {
   requireUser, requirePaid, requireVaultAuthorization, limiter: confirmUploadLimiter, asyncHandler, getPool,
   putDocument: ({ bucket, fileId, ciphertext }) => getS3().send(new PutObjectCommand({
-    Bucket: bucket, Key: fileId, Body: ciphertext, ContentType: "application/octet-stream", ServerSideEncryption: "AES256",
+    Bucket: bucket, Key: fileId, Body: ciphertext, ContentType: "application/octet-stream", ServerSideEncryption: "AES256", CacheControl: "no-store",
   })),
 });
 
@@ -1019,6 +1021,7 @@ router.post(
     const cmd = new GetObjectCommand({
       Bucket: bucket,
       Key: fileId,
+      ResponseCacheControl: "no-store",
       ResponseContentType: String(frows[0].content_type || "application/octet-stream").slice(0, 255),
       ResponseContentDisposition: `attachment; filename="${basename.replace(/["\\\r\n]/g, "_")}"`,
     });
