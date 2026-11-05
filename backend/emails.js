@@ -54,9 +54,9 @@ function renderEmergencyEmail({ name, ownerName, ownerEmail, links, scheduled = 
   const context = scheduled ? 'The account owner missed a required check-in and their grace period has ended.' : 'The account owner triggered emergency access.';
   return renderAnyCircumstancesEmail({
     title: 'Emergency access', preview: 'Important information has been shared with you through AnyCircumstances.',
-    bodyHtml: `<p>${escapeHtml(name ? `Hi ${name},` : 'Hi,')}</p><h2 style="font-size:18px;color:#ffffff">Why you received this</h2><p>${context}</p>${ownerName ? `<p><strong>From:</strong> ${escapeHtml(ownerName)}</p>` : ''}${ownerEmail ? `<p><strong>Account:</strong> ${escapeHtml(ownerEmail)}</p>` : ''}<h2 style="font-size:18px;color:#ffffff">Shared information</h2><p>Open each secure link to access the files assigned to you.</p><ol style="padding-left:24px">${links.map((url, i) => `<li style="margin-bottom:16px"><a href="${emailUrl(url)}" style="color:#ffffff">Open shared file ${i + 1}</a><br><span style="font-size:13px;word-break:break-all">${escapeHtml(url)}</span></li>`).join('')}</ol>`,
+    bodyHtml: `<p>${escapeHtml(name ? `Hi ${name},` : 'Hi,')}</p><h2 style="font-size:18px;color:#ffffff">Why you received this</h2><p>${context}</p>${ownerName ? `<p><strong>From:</strong> ${escapeHtml(ownerName)}</p>` : ''}${ownerEmail ? `<p><strong>Account:</strong> ${escapeHtml(ownerEmail)}</p>` : ''}<h2 style="font-size:18px;color:#ffffff">Shared information</h2><p>Open a secure link to read the owner’s instructions and download the information shared with you.</p><ol style="padding-left:24px">${links.map((url, i) => `<li style="margin-bottom:16px"><a href="${emailUrl(url)}" style="color:#ffffff">Open shared file ${i + 1}</a><br><span style="font-size:13px;word-break:break-all">${escapeHtml(url)}</span></li>`).join('')}</ol>`,
     ctaText: 'Open shared information', ctaUrl: links[0],
-    info: { title: 'Secure file access', text: 'Open a link and select Download + decrypt. No contact key setup is required.' },
+    info: { title: 'Secure file access', text: 'Open a link and select Open files and instructions. You can download the files with a Start here guide containing the owner’s notes. No contact key setup is required.' },
     securityNotice: 'These links provide access to private information. Keep them secure and do not forward this email. If this is unexpected, contact the account owner through a trusted channel.'
   });
 }
@@ -65,3 +65,4 @@ function emergencyEmailSubject(ownerName, ownerEmail) {
   return `${owner}: emergency information shared with you | AnyCircumstances`;
 }
 module.exports = { emergencyEmailSubject, escapeHtml, emailSender, emailButton, renderAnyCircumstancesEmail, renderEmergencyEmail };
+
