@@ -8,6 +8,11 @@ does not require a paid subscription or completed customer onboarding.
 ## Deployment
 
 1. Merge this change and deploy the normal client build and backend together.
+   The September security schema must already be installed. Check it with
+   `npm run migrate:security:check --prefix backend` from `/srv/uac-web`.
+   If it reports missing schema, back up the database, then run
+   `npm run migrate:security --prefix backend`. This preserves existing columns
+   and reminder timestamps. See `docs/PRELAUNCH_SECURITY_DEPLOY.md` for details.
 2. On the server, find the **existing account's numeric ID** using a parameterized
    database query, or your database console:
 
@@ -31,7 +36,8 @@ does not require a paid subscription or completed customer onboarding.
 4. Keep the existing `STRIPE_SECRET_KEY`, database configuration, secure cookies,
    HTTPS origin restrictions, and JWT secret. The existing Stripe client needs
    read access to subscriptions, customers, coupons, promotion codes, balance
-   transactions, and charges. No new API keys or database migration are required.
+   transactions, and charges. Admin access adds no new schema beyond the existing
+   security migration and requires no new API keys.
 5. Add `/admin /admin/login` to the existing Caddy `@client_spa` path matcher,
    as shown in `deploy/Caddyfile.routing.example`. Preserve production settings;
    do not replace the whole Caddyfile. API traffic continues through `/auth/*`.
