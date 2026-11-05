@@ -207,7 +207,7 @@ export function VaultPage() {
 const handleDelete = async (fileKey: string) => {
   if (vaultLocked) {
     setUnlockModal(true);
-    toast({ title: "Unlock the vault", description: "Enter your safety PIN, then retry the deletion." });
+    toast({ title: "Unlock the vault", description: "Enter your check-in PIN, then retry the deletion." });
     return;
   }
   if (!confirm("Delete this file? This cannot be undone.")) return;
@@ -304,7 +304,7 @@ const handleDelete = async (fileKey: string) => {
           onClick={() => {
             if (vaultLocked) {
               setUnlockModal(true);
-              toast({ title: "Unlock the vault", description: "Enter your safety PIN before accessing the encrypted key backup." });
+              toast({ title: "Unlock the vault", description: "Enter your check-in PIN before accessing the encrypted key backup." });
               return;
             }
             setSyncKey(true);

@@ -149,6 +149,9 @@ export function VerifyEmailPage() {
           <p className="text-muted-foreground">
             Enter your account email and the 6-digit code from your verification email. You can also request a new email below.
           </p>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Next you’ll create your check-in PIN and emergency PIN. If you use the link in the email instead, sign in afterwards to finish setup.
+          </p>
         </div>
 
         <div className="space-y-6">

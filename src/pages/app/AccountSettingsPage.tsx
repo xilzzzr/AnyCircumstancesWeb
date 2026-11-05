@@ -52,9 +52,15 @@ export function AccountSettingsPage() {
         },
       });
     } catch (error) {
+      const code = String((error as Error)?.message || "");
       toast({
         title: "Action could not be completed",
-        description: String((error as Error)?.message || error),
+        description:
+          code === "invalid_pin"
+            ? "That PIN is incorrect. Enter your check-in PIN."
+            : code === "rate_limited"
+              ? "Too many attempts. Please wait a while and try again."
+              : "Please try again. If it keeps failing, email contact@anycircumstances.com.",
         variant: "destructive",
       });
     } finally {
@@ -82,8 +88,9 @@ export function AccountSettingsPage() {
         <CardHeader>
           <CardTitle>Subscription</CardTitle>
           <CardDescription>
-            Cancelling immediately removes access and permanently deletes every file in your vault.
-            This cannot be undone.
+            Cancelling ends your plan immediately and permanently deletes every file in your vault.
+            Emergency links already sent for those files stop working. This cannot be undone. Apple
+            subscriptions must also be cancelled through Apple.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -97,9 +104,9 @@ export function AccountSettingsPage() {
         <CardHeader>
           <CardTitle>Delete account</CardTitle>
           <CardDescription>
-            Permanently deletes your vault files, contacts, settings, account, and other associated
-            personal data. Stripe billing is cancelled automatically. Apple billing continues until
-            you cancel it through Apple.
+            Permanently deletes your vault files, emergency contacts, pending emergency links, settings,
+            account, and other associated personal data. Stripe billing is cancelled automatically. Apple
+            billing continues until you cancel it through Apple.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -118,22 +125,28 @@ export function AccountSettingsPage() {
             </DialogTitle>
             <DialogDescription id="destructive-action-help" className="space-y-3 pt-2">
               <span className="block">
-                This is immediate and irreversible when confirmed with your safety PIN. Every encrypted
+                This is immediate and irreversible when confirmed with your check-in PIN. Every encrypted
                 vault file and its recovery information will be permanently deleted.
               </span>
-              {action === "delete" && (
+              {action === "delete" ? (
                 <span className="block">
                   If you subscribed through Apple, deleting your account does not stop Apple billing.
                   Cancel it in your Apple subscription settings before continuing.
                 </span>
+              ) : (
+                <span className="block">
+                  If you subscribed through Apple, this does not stop Apple billing. Cancel it in your Apple
+                  subscription settings as well.
+                </span>
               )}
               <span className="block">
-                Enter your safety PIN, then type <strong className="text-foreground">{phrase}</strong> to confirm.
+                Enter your check-in PIN (not your account password), then type{" "}
+                <strong className="text-foreground">{phrase}</strong> to confirm.
               </span>
             </DialogDescription>
           </DialogHeader>
 
-          <Label htmlFor="destructive-pin">Safety PIN</Label>
+          <Label htmlFor="destructive-pin">Check-in PIN</Label>
           <Input
             id="destructive-pin"
             type="password"

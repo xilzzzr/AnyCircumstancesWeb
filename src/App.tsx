@@ -25,6 +25,9 @@ const ContactPage = lazy(() => import("@/routes/PublicInfoPages").then((module) 
 const AccessibilityPage = lazy(() => import("@/routes/PublicInfoPages").then((module) => ({ default: module.AccessibilityPage })));
 const PrivacyPage = lazy(() => import("@/routes/PublicInfoPages").then((module) => ({ default: module.PrivacyPage })));
 const TermsPage = lazy(() => import("@/routes/PublicInfoPages").then((module) => ({ default: module.TermsPage })));
+const StatusPage = lazy(() => import("@/routes/PublicInfoPages").then((module) => ({ default: module.StatusPage })));
+const CookiesPage = lazy(() => import("@/routes/PublicInfoPages").then((module) => ({ default: module.CookiesPage })));
+const RecipientsPage = lazy(() => import("@/pages/public/RecipientsPage").then((module) => ({ default: module.RecipientsPage })));
 
 const LoginPage = lazy(() => import("@/routes/AuthPages").then((module) => ({ default: module.LoginPage })));
 const SignupPage = lazy(() => import("@/routes/AuthPages").then((module) => ({ default: module.SignupPage })));
@@ -95,22 +98,9 @@ export function AppRoutes() {
         <Route path="/emergency-information-vault" element={lazyElement(EmergencyInformationVaultPage)} />
         <Route path="/guides" element={lazyElement(GuidesIndexPage)} />
         <Route path="/guides/:slug" element={lazyElement(GuidePage)} />
-        <Route
-          path="/cookies"
-          element={
-            <div className="p-8 text-center">
-              <h1 className="text-2xl font-bold">Cookie Settings</h1>
-            </div>
-          }
-        />
-        <Route
-          path="/status"
-          element={
-            <div className="p-8 text-center">
-              <h1 className="text-2xl font-bold">Status</h1>
-            </div>
-          }
-        />
+        <Route path="/recipients" element={lazyElement(RecipientsPage)} />
+        <Route path="/cookies" element={lazyElement(CookiesPage)} />
+        <Route path="/status" element={lazyElement(StatusPage)} />
         <Route path="/share" element={lazyElement(SharePage)} />
         <Route path="/share/:token" element={lazyElement(SharePage)} />
       </Route>

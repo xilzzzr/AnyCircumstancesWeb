@@ -1,11 +1,13 @@
-import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Shield, Eye, EyeOff, Loader2, Check, CheckCircle2, Clock3, Siren } from 'lucide-react';
+import { Shield, Eye, EyeOff, Loader2, Check, CheckCircle2, Clock3, Siren, KeyRound } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { PlanSummary } from '@/components/pricing/PlanSummary';
+import { planFromSearchParams, planToSearchParams, pricingHrefForPlan, readPendingPlan, savePendingPlan } from '@/lib/pendingPlan';
 
 const requirements = [
   { label: 'At least 10 characters', check: (p: string) => p.length >= 10 },
@@ -22,7 +24,17 @@ export function SignupPage() {
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
   const { toast } = useToast();
+  // A plan chosen on /pricing: from the URL first, otherwise from the saved pending plan.
+  const [plan] = useState(() => planFromSearchParams(location.search) ?? readPendingPlan());
+  const fromUrl = planFromSearchParams(location.search) !== null;
+
+  useEffect(() => {
+    if (plan && fromUrl) savePendingPlan(plan);
+  }, [plan, fromUrl]);
+
+  const signInHref = plan ? `/login?next=${encodeURIComponent(`/app/plan?${planToSearchParams(plan)}`)}` : '/login';
 
   const passwordValid = requirements.every(r => r.check(password));
   const passwordsMatch = password === confirmPassword && password.length > 0;
@@ -76,7 +88,7 @@ export function SignupPage() {
         body: JSON.stringify({ email, password, ageConfirmed: true }),
       });
 
-      let data: any = null;
+      let data: { ok?: boolean; error?: string } | null = null;
       try {
         data = await resp.json();
       } catch {
@@ -174,8 +186,16 @@ export function SignupPage() {
                   If you miss a check-in, reminders and your grace period happen before automatic emergency delivery begins.
                 </p>
               </div>
+              <div className="flex gap-3">
+                <KeyRound aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  You’ll set up three more things after this: a check-in PIN, an emergency PIN, and (when you upload your first file) a vault passphrase that encrypts your files. Your account password signs you in; it does not decrypt files.
+                </p>
+              </div>
             </div>
           </section>
+
+          {plan && <PlanSummary plan={plan} editHref={pricingHrefForPlan(plan)} className="mb-6" />}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
@@ -271,14 +291,19 @@ export function SignupPage() {
               </label>
             </div>
 
-            <Button type="submit" className="w-full" disabled={loading}>
+            <Button type="submit" className="w-full min-h-11" disabled={loading} aria-describedby="signup-payment-note">
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Create account'}
             </Button>
+            <p id="signup-payment-note" className="text-center text-xs leading-relaxed text-muted-foreground">
+              {plan
+                ? 'No payment is taken now. You’ll pay for this plan after account setup (email verification and your two PINs).'
+                : 'No payment is taken now. You’ll choose a plan and pay after account setup (email verification and your two PINs).'}
+            </p>
           </form>
 
           <p className="mt-6 text-center text-sm text-muted-foreground">
             Already have an account?{' '}
-            <Link to="/login" className="text-primary font-medium hover:underline">
+            <Link to={signInHref} className="text-primary font-medium hover:underline">
               Sign in
             </Link>
           </p>
@@ -294,8 +319,9 @@ export function SignupPage() {
             Client-side file encryption
           </h2>
           <p className="text-vault-foreground/70">
-            Files are encrypted on your device before upload. Your separate vault passphrase
-            protects the private key stored on that device.
+            Files are encrypted in your browser before upload. Your vault key is backed up to your
+            account, encrypted with a separate vault passphrase that you create when you upload your
+            first file.
           </p>
         </div>
       </div>

@@ -11,15 +11,13 @@ import {
   Loader2,
   Shield,
   Calendar,
-  Phone,
-  MessageSquare,
-  MapPin,
-  Zap,
+  AlertTriangle,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { useAuth } from "@/contexts/AuthContext";
+import { PlannedFeaturesNote } from "@/components/pricing/PlannedFeaturesNote";
+import { formatMoney as formatPlanPrice, getPlanCharge } from "@/lib/pricing";
 
-const API_BASE = (import.meta as any).env?.VITE_API_BASE_URL || "";
+const API_BASE = import.meta.env?.VITE_API_BASE_URL || "";
 
 type Invoice = {
   id: string;
@@ -30,7 +28,7 @@ type Invoice = {
   invoiceUrl: string | null;
 };
 
-type BillingStatus = "trial" | "active" | "paused" | "past_due" | "pending_setup";
+type BillingStatus = "trial" | "active" | "paused" | "past_due" | "unpaid" | "pending_setup";
 
 type BillingProfile = {
   userId: string;
@@ -60,37 +58,12 @@ type VaultFile = {
   include_in_emergency: boolean;
 };
 
+type HttpError = Error & { status?: number };
+
 const CHECKIN_LABEL: Record<string, string> = {
   monthly: "Monthly",
   weekly: "Weekly",
   daily: "Daily",
-};
-
-const ADDON_META: Record<
-  string,
-  { label: string; description: string; priceLabel?: string; icon: any; comingSoon?: boolean }
-> = {
-  "call-contacts": {
-    label: "Call emergency contacts",
-    description: "We’ll call your emergency contacts when triggered",
-    priceLabel: "+$1.99/mo",
-    icon: Phone,
-    comingSoon: true,
-  },
-  "text-contacts": {
-    label: "Text emergency contacts",
-    description: "We’ll send SMS to your emergency contacts",
-    priceLabel: "+$0.49/mo",
-    icon: MessageSquare,
-    comingSoon: true,
-  },
-  "log-location": {
-    label: "Log location at check-in",
-    description: "Record your GPS location each time you check in",
-    priceLabel: "+$0.99/mo",
-    icon: MapPin,
-    comingSoon: true,
-  },
 };
 
 function formatDate(iso: string) {
@@ -128,9 +101,9 @@ function formatMoney(amountCents: number, currency: string) {
 function statusBadge(status: BillingStatus) {
   if (status === "active") return { label: "Active", variant: "default" as const };
   if (status === "trial") return { label: "Trial", variant: "secondary" as const };
-  if (status === "past_due") return { label: "Past due", variant: "destructive" as const };
+  if (status === "past_due" || status === "unpaid") return { label: "Past due", variant: "destructive" as const };
   if (status === "paused") return { label: "Paused", variant: "secondary" as const };
-  return { label: "Free", variant: "secondary" as const };
+  return { label: "No active plan", variant: "secondary" as const };
 }
 
 async function fetchJson(path: string, init?: RequestInit) {
@@ -145,37 +118,37 @@ async function fetchJson(path: string, init?: RequestInit) {
 
   const body = await r.json().catch(() => null);
   if (!r.ok) {
-    const err = new Error(body?.error || `http_${r.status}`);
-    (err as any).status = r.status;
+    const err: HttpError = new Error(body?.error || `http_${r.status}`);
+    err.status = r.status;
     throw err;
   }
   return body;
 }
 
-function normalizeSummary(data: any): BillingDashboardSummary {
-  const raw = data || {};
-  const billingRaw = raw.billing || raw.profile || raw.subscription || {};
+function normalizeSummary(data: unknown): BillingDashboardSummary {
+  const raw = (data || {}) as Record<string, unknown>;
+  const billingRaw = (raw.billing || raw.profile || raw.subscription || {}) as Record<string, unknown>;
   const addons = Array.isArray(billingRaw.addons) ? billingRaw.addons.map(String) : [];
 
   return {
     billing: {
       userId: String(billingRaw.userId || "me"),
       status: (billingRaw.status || "pending_setup") as BillingStatus,
-      billingInterval: (billingRaw.billingInterval || "monthly") as any,
+      billingInterval: billingRaw.billingInterval === "annual" ? "annual" : "monthly",
       amountCents: Number(billingRaw.amountCents ?? 0),
       currency: String(billingRaw.currency || "usd").toLowerCase(),
       storageLimitGb: Number(billingRaw.storageLimitGb ?? 5),
-      checkInFrequency: (billingRaw.checkInFrequency || "monthly") as any,
+      checkInFrequency: (billingRaw.checkInFrequency || "monthly") as BillingProfile["checkInFrequency"],
       addons,
       updatedAt: billingRaw.updatedAt ? String(billingRaw.updatedAt) : undefined,
       currentPeriodEnd: billingRaw.currentPeriodEnd ? String(billingRaw.currentPeriodEnd) : null,
       activeProviders: Array.isArray(billingRaw.activeProviders) ? billingRaw.activeProviders.map(String) : [],
     },
-    invoices: Array.isArray(raw.invoices) ? raw.invoices : [],
+    invoices: Array.isArray(raw.invoices) ? (raw.invoices as Invoice[]) : [],
   };
 }
 
-function buildFreeSummary(): BillingDashboardSummary {
+function buildNoPlanSummary(): BillingDashboardSummary {
   return {
     billing: {
       userId: "me",
@@ -183,7 +156,7 @@ function buildFreeSummary(): BillingDashboardSummary {
       billingInterval: "monthly",
       amountCents: 0,
       currency: "usd",
-      storageLimitGb: 5,
+      storageLimitGb: 0,
       checkInFrequency: "monthly",
       addons: [],
       updatedAt: undefined,
@@ -196,11 +169,11 @@ function buildFreeSummary(): BillingDashboardSummary {
 
 export function BillingPage() {
   const { toast } = useToast();
-  const { user } = useAuth();
 
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState<BillingDashboardSummary | null>(null);
-  const [isFreeLimited, setIsFreeLimited] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [reload, setReload] = useState(0);
   const [portalLoading, setPortalLoading] = useState(false);
 
   const [vaultUsedBytes, setVaultUsedBytes] = useState<number | null>(null);
@@ -210,18 +183,12 @@ export function BillingPage() {
 
     async function load() {
       setLoading(true);
-      setIsFreeLimited(false);
+      setLoadError(false);
 
       try {
         const res = await fetchJson("/auth/billing/summary?limit=50");
         if (!alive) return;
-        const normalized = normalizeSummary(res);
-
-        const s = String(normalized?.billing?.status || "");
-        const paid = s === "active" || s === "trial";
-        if (!paid) setIsFreeLimited(true);
-
-        setSummary(normalized);
+        setSummary(normalizeSummary(res));
 
         // Storage used from Vault list (authoritative)
         try {
@@ -237,23 +204,24 @@ export function BillingPage() {
           if (!alive) return;
           setVaultUsedBytes(null);
         }
-      } catch (e: any) {
+      } catch (e) {
         if (!alive) return;
 
-        const code = String(e?.message || "server_error");
-        if (e?.status === 401 || code === "not_authenticated") {
+        const err = e as HttpError;
+        const code = String(err?.message || "server_error");
+        if (err?.status === 401 || code === "not_authenticated") {
           toast({
             title: "Session expired",
             description: "Please log in again.",
             variant: "destructive",
           });
           setSummary(null);
-        } else if (e?.status === 402 || code === "payment_required") {
-          setIsFreeLimited(true);
-          setSummary(buildFreeSummary());
+        } else if (err?.status === 402 || code === "payment_required") {
+          setSummary(buildNoPlanSummary());
         } else {
-          setIsFreeLimited(true);
-          setSummary(buildFreeSummary());
+          // Unknown plan state: don't claim the account has no plan.
+          setSummary(null);
+          setLoadError(true);
         }
       } finally {
         if (alive) setLoading(false);
@@ -264,11 +232,15 @@ export function BillingPage() {
     return () => {
       alive = false;
     };
-  }, [toast]);
+  }, [toast, reload]);
 
   const billing = summary?.billing;
-  const isPaid = String(billing?.status || "") === "active" || String(billing?.status || "") === "trial";
+  const status = String(billing?.status || "");
+  const isPaid = status === "active" || status === "trial";
+  const needsAttention = status === "past_due" || status === "unpaid" || status === "paused";
+  const hasNoPlan = Boolean(billing) && !isPaid && !needsAttention;
   const isAppleBilled = Boolean(billing?.activeProviders?.includes("apple") && !billing?.activeProviders?.includes("stripe"));
+  const canOpenPortal = (isPaid || needsAttention) && !isAppleBilled;
 
   async function openBillingPortal() {
     if (portalLoading) return;
@@ -278,8 +250,8 @@ export function BillingPage() {
       const url = r?.url ? String(r.url) : "";
       if (!url) throw new Error("portal_url_missing");
       window.location.assign(url);
-    } catch (e: any) {
-      const msg = String(e?.message || "server_error");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "server_error";
       toast({
         title: "Couldn’t open billing",
         description: msg,
@@ -293,7 +265,7 @@ export function BillingPage() {
   const storageUsedBytes =
     vaultUsedBytes !== null && Number.isFinite(vaultUsedBytes) ? Number(vaultUsedBytes) : null;
 
-  const storageLimitGb = Number(billing?.storageLimitGb || 0);
+  const storageLimitGb = hasNoPlan ? 0 : Number(billing?.storageLimitGb || 0);
   const storageLimitBytes = storageLimitGb > 0 ? storageLimitGb * 1024 * 1024 * 1024 : 0;
 
   const hasStorage =
@@ -301,17 +273,7 @@ export function BillingPage() {
   const storagePercentage = hasStorage ? Math.min(100, (Number(storageUsedBytes) / storageLimitBytes) * 100) : 0;
 
   const badge = useMemo(() => (billing ? statusBadge(billing.status) : null), [billing]);
-  const invoices = summary?.invoices || [];
-
-  const knownAddons = useMemo(() => {
-    const list = (billing?.addons || []).map((id) => ({ id, meta: ADDON_META[id] }));
-    return list;
-  }, [billing]);
-
-  const unknownAddons = useMemo(() => {
-    const ids = billing?.addons || [];
-    return ids.filter((id) => !ADDON_META[id]);
-  }, [billing]);
+  const invoices = useMemo(() => summary?.invoices || [], [summary]);
 
   const checkInLabel = billing ? (CHECKIN_LABEL[billing.checkInFrequency] || billing.checkInFrequency) : "—";
 
@@ -321,32 +283,67 @@ export function BillingPage() {
   }, [invoices]);
 
   const nextCharge = billing?.currentPeriodEnd ? String(billing.currentPeriodEnd) : "";
+  const nextChargeLabel = nextCharge ? formatDate(nextCharge) : "";
 
   return (
     <div className="p-6 space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-foreground">Billing</h1>
-        <p className="text-muted-foreground">Your custom configuration, current usage, and invoices</p>
+        <p className="text-muted-foreground">Your plan, current usage, and invoices</p>
       </div>
 
-      {isFreeLimited && (
+      {loadError && (
+        <Card className="border-destructive/30">
+          <CardContent className="py-4 text-sm" role="status">
+            <p className="text-foreground">We couldn’t load your billing details right now. Please try again.</p>
+            <Button className="mt-3 min-h-11" size="sm" variant="outline" disabled={loading} onClick={() => setReload((value) => value + 1)}>
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {hasNoPlan && (
         <Card className="border-primary/20 bg-primary/5">
           <CardContent className="py-4">
             <div className="flex items-start gap-3">
-              <Shield className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+              <Shield aria-hidden="true" className="h-5 w-5 text-primary shrink-0 mt-0.5" />
               <div className="text-sm">
-                <div className="font-medium text-foreground">You’re on a Free plan</div>
-                <div className="text-muted-foreground mt-1">Billing details are limited until you build a plan.</div>
-                <div className="mt-3 flex gap-2">
-                  <Link to="/app/plan">
-                    <Button size="sm">Start building my plan</Button>
-                  </Link>
-                  <Link to="/pricing">
-                    <Button size="sm" variant="outline">
-                      View pricing
-                    </Button>
-                  </Link>
+                <h2 className="font-medium text-foreground">No active plan</h2>
+                <p className="text-muted-foreground mt-1">
+                  Choose a plan to start storing files. Without an active plan you can’t upload, store or download files, or add emergency contacts. There’s no free plan or trial.
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button asChild size="sm" className="min-h-11">
+                    <Link to="/app/plan">Choose a plan</Link>
+                  </Button>
+                  <Button asChild size="sm" variant="outline" className="min-h-11">
+                    <Link to="/pricing">View pricing</Link>
+                  </Button>
                 </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {needsAttention && (
+        <Card className="border-destructive/30 bg-destructive/5">
+          <CardContent className="py-4">
+            <div className="flex items-start gap-3">
+              <AlertTriangle aria-hidden="true" className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+              <div className="text-sm">
+                <h2 className="font-medium text-foreground">Your plan needs attention</h2>
+                <p className="text-muted-foreground mt-1">
+                  {status === "paused"
+                    ? "Your subscription is paused. Review it in the billing portal."
+                    : "A payment didn’t go through, so access to your vault is paused. Update your payment details to continue."}
+                </p>
+                {canOpenPortal && (
+                  <Button className="mt-3 min-h-11" size="sm" onClick={openBillingPortal} disabled={portalLoading}>
+                    {portalLoading ? "Opening…" : "Update payment details"}
+                  </Button>
+                )}
               </div>
             </div>
           </CardContent>
@@ -357,10 +354,10 @@ export function BillingPage() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center justify-between">
-              Your Configuration
+              Your Plan
               {badge ? <Badge variant={badge.variant}>{badge.label}</Badge> : <Badge variant="secondary">—</Badge>}
             </CardTitle>
-            <CardDescription>What your account is configured to include</CardDescription>
+            <CardDescription>What your plan includes</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {loading ? (
@@ -370,6 +367,15 @@ export function BillingPage() {
               </div>
             ) : !billing ? (
               <div className="text-sm text-muted-foreground">No billing profile found.</div>
+            ) : hasNoPlan ? (
+              <>
+                <p className="text-sm text-muted-foreground">
+                  You haven’t chosen a plan yet. Plans start at {formatPlanPrice(getPlanCharge(5, "monthly", "monthly").amount)}/month for 5 GB with monthly check-ins.
+                </p>
+                <Button asChild variant="outline" className="w-full min-h-11">
+                  <Link to="/app/plan">Choose a plan</Link>
+                </Button>
+              </>
             ) : (
               <>
                 <div className="flex items-baseline justify-between gap-4">
@@ -395,10 +401,10 @@ export function BillingPage() {
                       <Shield className="h-4 w-4 text-muted-foreground" />
                       <div>
                         <div className="text-sm font-medium">Storage limit</div>
-                        <div className="text-xs text-muted-foreground">Included storage for your account</div>
+                        <div className="text-xs text-muted-foreground">The most your encrypted files can add up to</div>
                       </div>
                     </div>
-                    <div className="text-sm font-medium">{Number.isFinite(storageLimitGb) ? `${storageLimitGb} GB` : "—"}</div>
+                    <div className="text-sm font-medium">{Number.isFinite(storageLimitGb) && storageLimitGb > 0 ? `${storageLimitGb} GB` : "—"}</div>
                   </div>
 
                   <div className="flex items-start justify-between gap-3">
@@ -412,40 +418,17 @@ export function BillingPage() {
                     <div className="text-sm font-medium">{checkInLabel}</div>
                   </div>
 
-                  <div className="pt-2 border-t">
-                    <div className="text-sm font-medium mb-2">Add-ons</div>
-                    {billing.addons.length === 0 ? (
-                      <div className="text-sm text-muted-foreground">None</div>
-                    ) : (
-                      <div className="space-y-2">
-                        {knownAddons.map(({ id, meta }) => {
-                          const Icon = meta?.icon || Zap;
-                          return (
-                            <div key={id} className="flex items-start justify-between gap-3 p-3 rounded-lg border">
-                              <div className="flex items-start gap-2">
-                                <Icon className="h-4 w-4 text-muted-foreground mt-0.5" />
-                                <div>
-                                  <div className="text-sm font-medium">
-                                    {meta?.label || id}
-                                    {meta?.comingSoon ? (
-                                      <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
-                                        Soon
-                                      </span>
-                                    ) : null}
-                                  </div>
-                                  <div className="text-xs text-muted-foreground">{meta?.description || "—"}</div>
-                                </div>
-                              </div>
-                              <div className="text-xs text-muted-foreground whitespace-nowrap">{meta?.priceLabel || ""}</div>
-                            </div>
-                          );
-                        })}
-
-                        {unknownAddons.length > 0 ? (
-                          <div className="text-xs text-muted-foreground">Other: {unknownAddons.join(", ")}</div>
-                        ) : null}
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <CreditCard className="h-4 w-4 text-muted-foreground" />
+                      <div>
+                        <div className="text-sm font-medium">Billing</div>
+                        <div className="text-xs text-muted-foreground">
+                          {billing.billingInterval === "annual" ? "Billed once a year, renews yearly" : "Billed monthly, renews monthly"}
+                        </div>
                       </div>
-                    )}
+                    </div>
+                    <div className="text-sm font-medium">{billing.billingInterval === "annual" ? "Annual" : "Monthly"}</div>
                   </div>
                 </div>
 
@@ -455,17 +438,14 @@ export function BillingPage() {
                   </div>
 
                   {isPaid ? (
-                    <Button asChild variant="outline" className="w-full">
+                    <Button asChild variant="outline" className="w-full min-h-11">
                       <Link to="/app/edit-plan?returnTo=/app/billing">Edit your plan</Link>
                     </Button>
-                  ) : (
-                    <Button asChild variant="outline" className="w-full">
-                      <Link to="/app/plan">Start building my plan</Link>
-                    </Button>
-                  )}
+                  ) : null}
                 </div>
               </>
             )}
+            <PlannedFeaturesNote />
           </CardContent>
         </Card>
 
@@ -479,31 +459,31 @@ export function BillingPage() {
               <div className="flex justify-between text-sm">
                 <span>{storageUsedBytes !== null ? `${formatBytes(storageUsedBytes)} used` : "—"}</span>
                 <span className="text-muted-foreground">
-                  {storageLimitBytes > 0 ? `${formatBytes(storageLimitBytes)} limit` : "Storage limit not available yet."}
+                  {storageLimitBytes > 0 ? `${formatBytes(storageLimitBytes)} limit` : hasNoPlan ? "No storage until you choose a plan" : "Storage limit unavailable"}
                 </span>
               </div>
-              <Progress value={storagePercentage} className="h-3" />
+              <Progress value={storagePercentage} className="h-3" aria-label="Storage used" />
               <p className="text-xs text-muted-foreground">
                 {hasStorage
                   ? `${storagePercentage.toFixed(1)}% of your storage is used`
-                  : storageUsedBytes !== null
-                    ? "Storage used is shown from your Vault. Limit will appear once billing limit is wired."
-                    : "Storage usage will show here once wired."}
+                  : hasNoPlan
+                    ? "Choose a plan to start storing files."
+                    : "Storage usage isn’t available right now."}
               </p>
             </div>
 
             <div className="pt-4 border-t">
-              <p className="text-sm text-muted-foreground mb-2">{isPaid ? "Need to change storage?" : "Need more storage?"}</p>
+              <p className="text-sm text-muted-foreground mb-2">{isPaid ? "Need to change storage?" : hasNoPlan ? "Ready to store files?" : "Need more storage?"}</p>
 
               {isPaid ? (
-                <Button asChild variant="secondary" size="sm">
+                <Button asChild variant="secondary" size="sm" className="min-h-11">
                   <Link to="/app/edit-plan?returnTo=/app/billing">Edit your plan</Link>
                 </Button>
-              ) : (
-                <Button asChild variant="secondary" size="sm">
-                  <Link to="/app/plan">Start building my plan</Link>
+              ) : hasNoPlan ? (
+                <Button asChild variant="secondary" size="sm" className="min-h-11">
+                  <Link to="/app/plan">Choose a plan</Link>
                 </Button>
-              )}
+              ) : null}
             </div>
           </CardContent>
         </Card>
@@ -515,35 +495,48 @@ export function BillingPage() {
           <CardDescription>Your saved payment information</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <div className="p-2 bg-muted rounded">
                 <CreditCard className="h-5 w-5" />
               </div>
               <div>
-                <p className="font-medium">{isPaid ? (isAppleBilled ? "Managed by Apple" : "Manage in Stripe") : "Not connected yet"}</p>
+                <p className="font-medium">{isPaid || needsAttention ? (isAppleBilled ? "Managed by Apple" : "Manage in Stripe") : "Not connected yet"}</p>
                 <p className="text-sm text-muted-foreground">
-                  {isPaid ? (isAppleBilled ? "Update or cancel your subscription in your Apple ID settings" : "Update your card and billing info in the Stripe portal") : "No payment method connected"}
+                  {isPaid || needsAttention ? (isAppleBilled ? "Update or cancel your subscription in your Apple ID settings" : "Update your card and billing info in the Stripe portal") : "No payment method connected"}
                 </p>
               </div>
             </div>
             <div className="flex items-center gap-2">
               {isAppleBilled ? (
-                <Button variant="outline" size="sm" asChild>
+                <Button variant="outline" size="sm" className="min-h-11" asChild>
                   <a href="https://apps.apple.com/account/subscriptions" target="_blank" rel="noreferrer">Manage subscription</a>
                 </Button>
               ) : (
                 <>
-                  <Button variant="outline" size="sm" onClick={openBillingPortal} disabled={!isPaid || portalLoading}>
+                  <Button variant="outline" size="sm" className="min-h-11" onClick={openBillingPortal} disabled={!canOpenPortal || portalLoading}>
                     {portalLoading ? "Opening…" : "Update"}
                   </Button>
-                  <Button variant="outline" size="sm" className="text-destructive" asChild disabled={!isPaid}>
-                    <Link to="/app/settings">Cancel subscription</Link>
-                  </Button>
+                  {isPaid || needsAttention ? (
+                    <Button variant="outline" size="sm" className="min-h-11 text-destructive" asChild>
+                      <Link to="/app/settings">Cancel subscription</Link>
+                    </Button>
+                  ) : (
+                    // A disabled <a> still navigates; render a real disabled button instead.
+                    <Button variant="outline" size="sm" className="min-h-11 text-destructive" disabled>
+                      Cancel subscription
+                    </Button>
+                  )}
                 </>
               )}
             </div>
           </div>
+          {isPaid && !isAppleBilled && (
+            <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
+              Cancelling (from Account settings) ends your plan immediately and permanently deletes your stored files. Payments are non-refundable except where required by law — see{" "}
+              <Link to="/terms" className="text-primary underline underline-offset-4">Terms</Link>.
+            </p>
+          )}
         </CardContent>
       </Card>
 
@@ -558,17 +551,19 @@ export function BillingPage() {
               <div className="text-xs text-muted-foreground">Last payment</div>
               <div className="text-sm font-medium">{lastPaid ? formatDate(lastPaid) : "—"}</div>
             </div>
-            <div className="rounded-lg border p-3">
-              <div className="text-xs text-muted-foreground">Next charge date</div>
-              <div className="text-sm font-medium">{nextCharge ? formatDate(nextCharge) : "—"}</div>
-            </div>
+            {nextChargeLabel && nextChargeLabel !== "—" && (
+              <div className="rounded-lg border p-3">
+                <div className="text-xs text-muted-foreground">Next charge date</div>
+                <div className="text-sm font-medium">{nextChargeLabel}</div>
+              </div>
+            )}
           </div>
 
           {loading ? (
             <div className="text-sm text-muted-foreground">Loading…</div>
           ) : invoices.length === 0 ? (
             <div className="text-sm text-muted-foreground">
-              {isFreeLimited ? "No invoices yet. Create a plan to get started." : "No invoices yet."}
+              {hasNoPlan ? "No invoices yet. Choose a plan to get started." : "No invoices yet."}
             </div>
           ) : (
             <Table>
@@ -602,14 +597,14 @@ export function BillingPage() {
                     </TableCell>
                     <TableCell className="text-right">
                       {invoice.invoiceUrl ? (
-                        <a href={invoice.invoiceUrl} target="_blank" rel="noreferrer">
-                          <Button variant="ghost" size="sm">
-                            <Download className="h-4 w-4" />
-                          </Button>
-                        </a>
+                        <Button variant="ghost" size="sm" asChild>
+                          <a href={invoice.invoiceUrl} target="_blank" rel="noreferrer" aria-label={`Download invoice from ${formatDate(invoice.date)}`}>
+                            <Download aria-hidden="true" className="h-4 w-4" />
+                          </a>
+                        </Button>
                       ) : (
-                        <Button variant="ghost" size="sm" disabled>
-                          <Download className="h-4 w-4" />
+                        <Button variant="ghost" size="sm" disabled aria-label="Invoice not available">
+                          <Download aria-hidden="true" className="h-4 w-4" />
                         </Button>
                       )}
                     </TableCell>

@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { computePlanPrice, formatMoney } from "@/lib/pricing";
 
-function paywallDescriptionForDefaultPlan() {
+function startingPlanDescription() {
   const p = computePlanPrice({
     storageGb: 5,
     addons: [],
@@ -32,15 +32,7 @@ function paywallDescriptionForDefaultPlan() {
     billingInterval: "annual",
   });
 
-  return [
-    `Default plan (editable on Pricing):`,
-    `• Storage: ${formatMoney(p.storage)}/mo (5 GB)`,
-    `• Check-ins: ${formatMoney(p.frequency)}/mo (Monthly)`,
-    `• Add-ons: ${formatMoney(p.addons)}/mo`,
-    ``,
-    `Total: ${formatMoney(p.monthlyTotal)}/mo`,
-    `Annual: ${formatMoney(annual.annualTotal ?? p.monthlyTotal * 10)} once per year (pay 10 months, get 2 free)`,
-  ].join("\n");
+  return `Plans start at ${formatMoney(p.monthlyTotal)}/month for 5 GB with monthly check-ins, or ${formatMoney(annual.annualTotal ?? p.monthlyTotal * 10)} billed once a year. Prices in USD.`;
 }
 
 type Frequency = "daily" | "weekly" | "monthly";
@@ -102,7 +94,14 @@ type VaultFile = {
   include_in_emergency: boolean;
 };
 
-const API_BASE = (import.meta as any).env?.VITE_API_BASE_URL ?? "";
+const API_BASE = import.meta.env?.VITE_API_BASE_URL ?? "";
+
+type HttpError = Error & { status?: number };
+
+function errorInfo(e: unknown) {
+  const err = e as HttpError | null;
+  return { code: String(err?.message || ""), http: err?.status };
+}
 
 function formatRelativeTime(targetIso: string) {
   const now = Date.now();
@@ -160,9 +159,10 @@ export function DashboardPage() {
   const [reload, setReload] = useState(0);
 
   const displayName = useMemo(() => {
-    const name = (user as any)?.name ? String((user as any).name) : "";
+    const u = user as { name?: unknown; email?: unknown } | null;
+    const name = u?.name ? String(u.name) : "";
     if (name.trim()) return name.trim().split(" ")[0];
-    const email = (user as any)?.email ? String((user as any)?.email) : "";
+    const email = u?.email ? String(u.email) : "";
     return email ? email : "there";
   }, [user]);
 
@@ -175,7 +175,7 @@ export function DashboardPage() {
   const verifiedContacts = useMemo(() => contacts.filter((c) => c.verified).length, [contacts]);
 
   const storageLimitGbFromSummary = useMemo(() => {
-    const s: any = billingSummary || {};
+    const s: BillingSummaryResp = billingSummary || {};
     const raw =
       s?.billing?.storageLimitGb ??
       s?.profile?.storageLimitGb ??
@@ -202,8 +202,8 @@ export function DashboardPage() {
       const r = await fetch(`${API_BASE}${path}`, { credentials: "include" });
       if (!r.ok) {
         const body = await r.json().catch(() => null);
-        const err = new Error(body?.error || `http_${r.status}`);
-        (err as any).status = r.status;
+        const err: HttpError = new Error(body?.error || `http_${r.status}`);
+        err.status = r.status;
         throw err;
       }
       return r.json();
@@ -218,20 +218,20 @@ export function DashboardPage() {
           const billing: BillingStatusResp = await fetchJson("/auth/billing/status");
           if (!alive) return;
           setPlanState(dashboardPlanState(billing));
-        } catch (e: any) {
+        } catch (e) {
           if (!alive) return;
           setBillingError(true);
-          if (e?.status === 401 || e?.message === "not_authenticated") throw e;
+          const { code, http } = errorInfo(e);
+          if (http === 401 || code === "not_authenticated") throw e;
         }
 
         try {
           const summaryRes: BillingSummaryResp = await fetchJson("/auth/billing/summary?limit=1");
           if (!alive) return;
           setBillingSummary(summaryRes || null);
-        } catch (e: any) {
+        } catch (e) {
           if (!alive) return;
-          const code = String(e?.message || "");
-          const http = (e as any)?.status;
+          const { code, http } = errorInfo(e);
           if (http === 401 || code === "not_authenticated") throw e;
           setBillingSummary(null);
         }
@@ -246,10 +246,9 @@ export function DashboardPage() {
           }, 0);
           setVaultUsedBytes(used);
 
-        } catch (e: any) {
+        } catch (e) {
           if (!alive) return;
-          const code = String(e?.message || "");
-          const http = (e as any)?.status;
+          const { code, http } = errorInfo(e);
           if (http === 401 || code === "not_authenticated") throw e;
           setVaultUsedBytes(null);
         }
@@ -258,10 +257,9 @@ export function DashboardPage() {
           const out = await fetchJson("/auth/verification-checkins?limit=5");
           if (!alive) return;
           setCheckins(Array.isArray(out?.checkins) ? out.checkins : []);
-        } catch (e: any) {
+        } catch (e) {
           if (!alive) return;
-          const code = String(e?.message || "");
-          const http = (e as any)?.status;
+          const { code, http } = errorInfo(e);
           if (http === 401 || code === "not_authenticated") throw e;
           setCheckins([]);
         }
@@ -270,10 +268,9 @@ export function DashboardPage() {
           const settingsRes = await fetchJson("/auth/verification-settings");
           if (!alive) return;
           setSettings(settingsRes?.settings || null);
-        } catch (e: any) {
+        } catch (e) {
           if (!alive) return;
-          const code = String(e?.message || "");
-          const http = (e as any)?.status;
+          const { code, http } = errorInfo(e);
           if (http === 401 || code === "not_authenticated") throw e;
           setSettings(null);
         }
@@ -282,10 +279,9 @@ export function DashboardPage() {
           const statusRes = await fetchJson("/auth/verification-status");
           if (!alive) return;
           setStatus(statusRes?.status || null);
-        } catch (e: any) {
+        } catch (e) {
           if (!alive) return;
-          const code = String(e?.message || "");
-          const http = (e as any)?.status;
+          const { code, http } = errorInfo(e);
           if (http === 401 || code === "not_authenticated") throw e;
           setStatus(null);
         }
@@ -294,18 +290,17 @@ export function DashboardPage() {
           const contactsRes = await fetchJson("/auth/emergency-contacts");
           if (!alive) return;
           setContacts(Array.isArray(contactsRes?.contacts) ? contactsRes.contacts : []);
-        } catch (e: any) {
+        } catch (e) {
           if (!alive) return;
-          const code = String(e?.message || "");
-          const http = (e as any)?.status;
+          const { code, http } = errorInfo(e);
           if (http === 401 || code === "not_authenticated") throw e;
           setContacts([]);
         }
-      } catch (e: any) {
+      } catch (e) {
         if (!alive) return;
 
-        const code = String(e?.message || "server_error");
-        if ((e as any)?.status === 401 || code === "not_authenticated") {
+        const { code, http } = errorInfo(e);
+        if (http === 401 || code === "not_authenticated") {
           toast({
             title: "Session expired",
             description: "Please log in again.",
@@ -406,21 +401,19 @@ export function DashboardPage() {
       {!billingError && planState === "free" && (
         <Card className="editorial-card free-plan-card">
           <CardContent className="py-4 text-sm">
-            <div className="font-medium text-foreground">You’re on a Free plan</div>
-            <div className="text-muted-foreground mt-1">
-              Dashboard functionality is limited. Build a plan to unlock full features.
+            <h2 className="font-medium text-foreground">No active plan</h2>
+            <p className="text-muted-foreground mt-1">
+              Choose a plan to start storing files. Without an active plan you can’t upload, store or download files, or add emergency contacts. There’s no free plan or trial.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button asChild size="sm" className="min-h-11">
+                <Link to="/app/plan">Choose a plan</Link>
+              </Button>
+              <Button asChild size="sm" variant="outline" className="min-h-11">
+                <Link to="/pricing">View pricing</Link>
+              </Button>
             </div>
-            <div className="mt-3 flex gap-2">
-              <Link to="/app/plan">
-                <Button size="sm">Build a plan</Button>
-              </Link>
-              <Link to="/pricing">
-                <Button size="sm" variant="outline">
-                  View pricing
-                </Button>
-              </Link>
-            </div>
-            <pre className="mt-3 text-xs text-muted-foreground whitespace-pre-wrap">{paywallDescriptionForDefaultPlan()}</pre>
+            <p className="mt-3 text-xs text-muted-foreground">{startingPlanDescription()}</p>
           </CardContent>
         </Card>
       )}

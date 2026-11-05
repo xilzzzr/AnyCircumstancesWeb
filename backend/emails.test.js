@@ -19,7 +19,9 @@ test('emergency templates retain every link and explain access without key setup
     const links = ['https://example.com/share#token=one', 'https://example.com/share#token=two'];
     const out = renderEmergencyEmail({ name: '<script>alert(1)</script>', ownerEmail: 'owner@example.com', links, missingSetup: true, scheduled });
     for (const link of links) { assert.ok(out.html.includes(link)); assert.ok(out.text.includes(link)); }
-    assert.match(out.text, /No contact key setup is required/);
+    assert.match(out.text, /select Open shared file/);
+    assert.match(out.text, /Each link works once and expires if it is not used/);
+    assert.match(out.text, /You do not need an account/);
     assert.doesNotMatch(out.text, /Contact setup required|Files may not decrypt/);
     assert.doesNotMatch(out.html, /<script>/);
     assert.match(out.html, /Shared information/);

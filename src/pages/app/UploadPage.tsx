@@ -1,10 +1,10 @@
 import React, { useState, useCallback, useMemo, useRef } from "react";
+import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
 import { Progress } from "@/components/ui/progress";
 import { Card, CardContent } from "@/components/ui/card";
-import { Upload, X, FileText, Check, Loader2, Shield, Lock, AlertTriangle } from "lucide-react";
+import { Upload, X, FileText, Check, Loader2, Users, Lock, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -63,7 +63,6 @@ type UploadingFile = {
   file: File;
   progress: number;
   status: "needs_pin" | "needs_passphrase" | "encrypting" | "uploading" | "complete" | "error";
-  includeInEmergency: boolean;
   key?: string;
   error?: string;
 };
@@ -178,8 +177,8 @@ export function UploadPage() {
           const kp = await ensureUserKeypair(passphrase.trim());
           pubKey = kp.pubKey;
           pubSpkiB64 = kp.pubSpkiB64;
-        } catch (e: any) {
-          const msg = String(e?.message || "");
+        } catch (e: unknown) {
+          const msg = String((e as Error | null)?.message || "");
           if (msg === "vault_locked") {
             updateFile(uf.id, { status: "needs_pin", progress: 0, error: undefined });
             setPinOpen(true);
@@ -201,7 +200,7 @@ export function UploadPage() {
         const enc = await encryptFileToAesGcm(uf.file);
         const ciphertextBlob = enc.blob as Blob;
         const rawAes = enc.rawAes as Uint8Array;
-        const chunkMeta = (enc as any).meta || null;
+        const chunkMeta = (enc as { meta?: unknown }).meta || null;
 
         updateFile(uf.id, { progress: 15 });
 
@@ -311,8 +310,8 @@ export function UploadPage() {
           title: "File uploaded (encrypted)",
           description: `${uf.file.name} was encrypted locally and uploaded.`,
         });
-      } catch (e: any) {
-        const msg = String(e?.message || "upload_failed");
+      } catch (e: unknown) {
+        const msg = String((e as Error | null)?.message || "upload_failed");
         updateFile(uf.id, { status: "error", progress: 0, error: msg });
         toast({ title: "Upload failed", description: msg, variant: "destructive" });
       }
@@ -326,7 +325,7 @@ export function UploadPage() {
     try {
       const ok = await unlockVault(pin);
       if (!ok) {
-        toast({ title: "Incorrect PIN", description: "Enter your safety PIN to unlock the vault.", variant: "destructive" });
+        toast({ title: "Incorrect PIN", description: "Enter your check-in PIN to unlock the vault.", variant: "destructive" });
         return;
       }
       setPinOpen(false);
@@ -358,7 +357,6 @@ export function UploadPage() {
         file,
         progress: 0,
         status: "encrypting",
-        includeInEmergency: true,
       }));
 
       setFiles((prev) => [...prev, ...uploadFiles]);
@@ -389,7 +387,8 @@ export function UploadPage() {
               <Lock className="h-4 w-4" /> Unlock vault
             </DialogTitle>
             <DialogDescription>
-              Enter your safety PIN before the app can retrieve your encrypted vault-key backup.
+              Enter your check-in PIN before the app can retrieve your encrypted
+              vault-key backup.
             </DialogDescription>
           </DialogHeader>
           <Input
@@ -397,7 +396,8 @@ export function UploadPage() {
             inputMode="numeric"
             value={pin}
             onChange={(event) => setPin(event.target.value.replace(/\D/g, "").slice(0, 6))}
-            placeholder="Safety PIN"
+            placeholder="Check-in PIN"
+            aria-label="Check-in PIN"
             autoComplete="off"
             onKeyDown={(event) => { if (event.key === "Enter") handlePinUnlock(); }}
           />
@@ -416,7 +416,9 @@ export function UploadPage() {
               <Lock className="h-4 w-4" /> Vault passphrase
             </DialogTitle>
             <DialogDescription>
-              Your passphrase unlocks your encrypted vault key on any device. The encrypted key is backed up to your account.
+              Your vault passphrase encrypts your files in this browser before they are uploaded. It is different
+              from your account password and is never sent to AnyCircumstances. Your vault key is backed up to your
+              account encrypted with this passphrase, so it unlocks your vault on any device.
             </DialogDescription>
           </DialogHeader>
 
@@ -426,13 +428,20 @@ export function UploadPage() {
             onChange={(e) => setPassphrase(e.target.value)}
             className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
             placeholder="At least 8 characters"
+            aria-label="Vault passphrase"
           />
 
           <div className="rounded-lg border border-border p-3 text-sm text-muted-foreground flex items-start gap-2">
-            <AlertTriangle className="h-4 w-4 mt-0.5" />
-            <div>
-              Keep your vault passphrase in a password manager. For files uploaded before key syncing, unlock
-              the vault on the original device once to back up its key before clearing site data.
+            <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" aria-hidden="true" />
+            <div className="space-y-2">
+              <p>
+                This passphrase can&apos;t be reset. If you forget it, you won&apos;t be able to open your files
+                yourself. They stay stored and can still be released to the emergency contacts you assign them to.
+              </p>
+              <p>
+                Keep your vault passphrase in a password manager. For files uploaded before key syncing, unlock
+                the vault on the original device once to back up its key before clearing site data.
+              </p>
             </div>
           </div>
 
@@ -452,7 +461,10 @@ export function UploadPage() {
 
       <div>
         <h1 className="text-2xl font-bold text-foreground">Upload Files</h1>
-        <p className="text-muted-foreground">Files are encrypted on your device before upload. Only ciphertext is stored.</p>
+        <p className="text-muted-foreground">
+          Files are encrypted on your device before upload. Each file key is also locked with an emergency-release
+          key so the files you assign to contacts can be released to them.
+        </p>
       </div>
 
       <div
@@ -490,6 +502,17 @@ export function UploadPage() {
         </Button>
       </div>
 
+      <div className="rounded-lg border border-border p-3 text-sm text-muted-foreground flex items-start gap-2">
+        <Users className="h-4 w-4 mt-0.5 shrink-0" aria-hidden="true" />
+        <p>
+          To include a file in emergency delivery, assign it to a contact on the{" "}
+          <Link to="/app/emergency-contacts" className="text-foreground underline underline-offset-4">
+            Emergency contacts page
+          </Link>
+          . Files that aren&apos;t assigned to anyone aren&apos;t delivered.
+        </p>
+      </div>
+
       {files.length > 0 && (
         <div className="space-y-3">
           <h3 className="font-medium text-foreground">Upload Queue</h3>
@@ -510,7 +533,7 @@ export function UploadPage() {
                   <div className="flex items-center gap-2 mt-1">
                     {uf.status === "needs_pin" && (
                       <span className="text-xs text-muted-foreground flex items-center gap-1">
-                        <Lock className="h-3 w-3" /> Waiting for safety PIN...
+                        <Lock className="h-3 w-3" /> Waiting for check-in PIN…
                       </span>
                     )}
 
@@ -545,17 +568,12 @@ export function UploadPage() {
                 </div>
 
                 <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-2">
-                    <Shield className={cn("h-4 w-4", uf.includeInEmergency ? "text-primary" : "text-muted-foreground")} />
-                    <Switch
-                      checked={uf.includeInEmergency}
-                      onCheckedChange={(checked) => {
-                        setFiles((prev) => prev.map((f) => (f.id === uf.id ? { ...f, includeInEmergency: checked } : f)));
-                      }}
-                    />
-                  </div>
-
-                  <Button variant="ghost" size="icon" onClick={() => removeFile(uf.id)}>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => removeFile(uf.id)}
+                    aria-label={`Remove ${uf.file.name} from this list`}
+                  >
                     <X className="h-4 w-4" />
                   </Button>
                 </div>

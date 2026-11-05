@@ -248,7 +248,7 @@ export function VerificationSettingsPage() {
       return;
     }
     if (newPin === newEmergencyPin) {
-      toast({ title: "PINs must be different", description: "Your safety PIN and emergency PIN cannot match.", variant: "destructive" });
+      toast({ title: "PINs must be different", description: "Your check-in PIN and emergency PIN cannot match.", variant: "destructive" });
       return;
     }
 
@@ -271,7 +271,7 @@ export function VerificationSettingsPage() {
           description: data?.error === "verification_expired"
             ? "Your verification expired. Start the process again."
             : data?.error === "pin_conflict"
-            ? "Your safety PIN and emergency PIN must be different."
+            ? "Your check-in PIN and emergency PIN must be different."
             : "Please start the PIN change again.",
           variant: "destructive",
         });
@@ -283,7 +283,7 @@ export function VerificationSettingsPage() {
       resetPinDialog();
       toast({
         title: "PINs changed",
-        description: "Your safety PIN and emergency PIN have both been updated.",
+        description: "Your check-in PIN and emergency PIN have both been updated.",
       });
     } catch {
       toast({ title: "Network error", description: "Could not save your new PINs.", variant: "destructive" });
@@ -338,19 +338,17 @@ export function VerificationSettingsPage() {
             <div className="flex items-start gap-3">
               <Shield className="h-5 w-5 text-primary shrink-0 mt-0.5" />
               <div className="text-sm">
-                <p className="font-medium text-foreground">Free plan limitations</p>
+                <p className="font-medium text-foreground">No active plan</p>
                 <p className="text-muted-foreground mt-1">
-                  You can view your schedule, but changing grace period and reminder notifications requires a paid plan.
+                  You can view your schedule, but changing your grace period and reminder notifications requires an active plan. Choose a plan to start storing files.
                 </p>
-                <div className="mt-3 flex gap-2">
-                  <Link to="/app/plan">
-                    <Button size="sm">Build a plan</Button>
-                  </Link>
-                  <Link to="/pricing">
-                    <Button size="sm" variant="outline">
-                      View pricing
-                    </Button>
-                  </Link>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button asChild size="sm" className="min-h-11">
+                    <Link to="/app/plan">Choose a plan</Link>
+                  </Button>
+                  <Button asChild size="sm" variant="outline" className="min-h-11">
+                    <Link to="/pricing">View pricing</Link>
+                  </Button>
                 </div>
               </div>
             </div>
@@ -372,11 +370,11 @@ export function VerificationSettingsPage() {
               <div className="font-medium text-foreground">{formatFrequencyLabel(frequency)}</div>
               <div className="text-sm text-muted-foreground">{getFrequencyDescription(frequency)}</div>
             </div>
-            <Link to="/app/plan">
-              <Button variant="outline" size="sm">
-                Change plan
-              </Button>
-            </Link>
+            <Button asChild variant="outline" size="sm" className="min-h-11">
+              <Link to={isPaid ? "/app/edit-plan?returnTo=/app/verification" : "/app/plan"}>
+                {isPaid ? "Change plan" : "Choose a plan"}
+              </Link>
+            </Button>
           </div>
         </CardContent>
       </Card>
@@ -388,7 +386,7 @@ export function VerificationSettingsPage() {
             Security PINs
           </CardTitle>
           <CardDescription>
-            Change your safety PIN and emergency PIN together. For security, you’ll verify your account password and email first.
+            Change your check-in PIN and emergency PIN together. For security, you’ll verify your account password and email first.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -435,7 +433,7 @@ export function VerificationSettingsPage() {
 
             {!isPaid && (
               <div className="text-xs text-muted-foreground">
-                Upgrade to adjust grace period.
+                Choose a plan to adjust your grace period.
               </div>
             )}
           </div>
@@ -475,13 +473,14 @@ export function VerificationSettingsPage() {
           </Select>
 
           <p className="text-sm text-muted-foreground bg-muted/50 p-3 rounded-lg">
-            We'll send {reminders} reminder{parseInt(reminders) > 1 ? "s" : ""} via email and push notification during
-            your grace period before any files are delivered.
+            We'll email you {reminders} reminder{parseInt(reminders) > 1 ? "s" : ""} during your grace period, starting when
+            your check-in becomes overdue, before any files are delivered. If you use the iOS app with notifications on,
+            you may also get a push notification.
           </p>
 
           {!isPaid && (
             <div className="text-xs text-muted-foreground">
-              Upgrade to change reminder count.
+              Choose a plan to change the number of reminders.
             </div>
           )}
         </CardContent>
@@ -503,7 +502,7 @@ export function VerificationSettingsPage() {
                 ? "First, confirm your account password."
                 : pinResetStep === "email"
                 ? "Enter the 6-digit code we sent to your account email."
-                : "Set a new safety PIN and a different emergency PIN."}
+                : "Set a new check-in PIN and a different emergency PIN."}
             </DialogDescription>
           </DialogHeader>
 
@@ -541,7 +540,7 @@ export function VerificationSettingsPage() {
           {pinResetStep === "pins" && (
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="new-safety-pin">New safety PIN</Label>
+                <Label htmlFor="new-safety-pin">New check-in PIN</Label>
                 <Input
                   id="new-safety-pin"
                   type="password"
@@ -564,7 +563,7 @@ export function VerificationSettingsPage() {
                   placeholder="4–6 digits"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Your emergency PIN must be different from your safety PIN.
+                  Your emergency PIN must be different from your check-in PIN.
                 </p>
               </div>
             </div>
@@ -618,11 +617,9 @@ export function VerificationSettingsPage() {
               )}
             </Button>
           ) : (
-            <Link to="/app/plan">
-              <Button className="gap-2 shadow-lg">
-                Build a plan to edit
-              </Button>
-            </Link>
+            <Button asChild className="gap-2 shadow-lg min-h-11">
+              <Link to="/app/plan">Choose a plan to edit</Link>
+            </Button>
           )}
         </div>
       </div>

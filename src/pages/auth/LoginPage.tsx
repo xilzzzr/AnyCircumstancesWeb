@@ -7,6 +7,10 @@ import { Shield, Eye, EyeOff, Loader2 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 
+// Account-setup steps a signed-in user may be sent to after login (e.g. after
+// verifying their email by link, which does not sign them in).
+const SETUP_ROUTES = new Set(['/create-pin', '/create-panic-pin', '/onboarding']);
+
 function getSafePostLoginDestination(search: string) {
   const requested = new URLSearchParams(search).get('next');
   if (
@@ -19,10 +23,16 @@ function getSafePostLoginDestination(search: string) {
   }
 
   const base = 'https://uac.local';
-  const target = new URL(requested, base);
+  let target: URL;
+  try {
+    target = new URL(requested, base);
+  } catch {
+    return '/app';
+  }
   const isAppRoute = target.pathname === '/app' || target.pathname.startsWith('/app/');
+  const isSetupRoute = SETUP_ROUTES.has(target.pathname);
 
-  if (target.origin !== base || !isAppRoute) return '/app';
+  if (target.origin !== base || (!isAppRoute && !isSetupRoute)) return '/app';
   return target.pathname + target.search + target.hash;
 }
 
@@ -65,7 +75,7 @@ export function LoginPage() {
         body: JSON.stringify({ email, password }),
       });
 
-      let data: any = null;
+      let data: { ok?: boolean; error?: string } | null = null;
       try {
         data = await resp.json();
       } catch {
@@ -225,11 +235,12 @@ export function LoginPage() {
             <Shield className="h-10 w-10 text-primary" />
           </div>
           <h2 className="text-2xl font-bold text-vault-foreground mb-4">
-            Your data is always encrypted
+            Encrypted before upload
           </h2>
           <p className="text-vault-foreground/70">
-            Files are encrypted on your device before upload. The service stores ciphertext and
-            protected recovery-key material for emergency delivery.
+            Files are encrypted in your browser before they are uploaded. See{' '}
+            <Link to="/security" className="underline underline-offset-4 hover:opacity-90">Security</Link>{' '}
+            for how emergency release works.
           </p>
         </div>
       </div>
