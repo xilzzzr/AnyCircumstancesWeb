@@ -63,7 +63,7 @@ type HttpError = Error & { status?: number };
 const CHECKIN_LABEL: Record<string, string> = {
   monthly: "Monthly",
   weekly: "Weekly",
-  daily: "Daily",
+  daily: "Daily / scheduled",
 };
 
 function formatDate(iso: string) {
