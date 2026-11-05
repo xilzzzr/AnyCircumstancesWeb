@@ -75,7 +75,7 @@ describe('new account routes', () => {
     ['/app/plan', /Choose your protection plan/, /plan/i],
     ['/app/verification', /Set up your check-ins/, /Verification Settings/],
     ['/app/emergency-contacts', /Choose your emergency contacts/, /Emergency Contacts/],
-    ['/app/upload', /Add your first file/, /Upload Files/],
+    ['/app/upload', /Add your first file/, /Add to your vault/],
   ])('onboarding links render %s', async (destination, link, heading) => {
     mockServer(true);
     const router = app('/onboarding');
