@@ -82,6 +82,18 @@ export function CreatePinPage() {
           toast({ title: 'Password required', description: 'Enter your current account password.', variant: 'destructive' });
           return;
         }
+        if (code === 'pin_conflicts_with_emergency_pin') {
+          toast({ title: 'Choose a different PIN', description: 'Your check-in PIN must be different from your emergency PIN.', variant: 'destructive' });
+          setStep('create');
+          setPin('');
+          setConfirmPin('');
+          return;
+        }
+        if (code === 'use_pin_reset_flow') {
+          toast({ title: 'Check-in PIN already set', description: 'Your check-in PIN was created earlier. Continue with your emergency PIN.' });
+          navigate('/create-panic-pin');
+          return;
+        }
 
         toast({
           title: 'Could not save PIN',
@@ -127,15 +139,27 @@ export function CreatePinPage() {
           </h1>
           <p className="text-muted-foreground">
             {step === 'create'
-              ? 'This PIN will be used for verification check-ins. Choose 4 to 6 digits.'
+              ? 'This is your check-in PIN. Choose 4 to 6 digits.'
               : 'Enter your PIN again to confirm.'}
           </p>
         </div>
 
         <div className="space-y-6">
+          <section aria-labelledby="checkin-pin-about" className="rounded-xl border border-border bg-card/60 p-4 text-left">
+            <h2 id="checkin-pin-about" className="text-sm font-semibold text-foreground">What the check-in PIN does</h2>
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-sm leading-relaxed text-muted-foreground">
+              <li>You enter it to check in and confirm you’re safe, which resets your check-in timer.</li>
+              <li>It also confirms sensitive actions, such as unlocking your vault or cancelling your plan.</li>
+              <li>Resetting it later needs your account password and a code we email you.</li>
+            </ul>
+            <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+              Next you’ll create a separate emergency PIN. The two PINs must be different.
+            </p>
+          </section>
           <div className="space-y-2">
             <Label htmlFor="pin-current-password">Current account password</Label>
-            <Input id="pin-current-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" disabled={loading} />
+            <Input id="pin-current-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" disabled={loading} aria-describedby="pin-password-help" />
+            <p id="pin-password-help" className="text-xs text-muted-foreground">Confirms it’s you. Your password signs you in; it doesn’t decrypt files.</p>
           </div>
           <div className="flex justify-center">
             {step === 'create' ? (
@@ -191,7 +215,7 @@ export function CreatePinPage() {
           )}
 
           <p className="text-xs text-center text-muted-foreground">
-            Your PIN is stored securely and used only for verification check-ins.
+            We store only a hashed version of your PIN, never the PIN itself.
           </p>
         </div>
       </div>

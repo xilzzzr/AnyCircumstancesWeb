@@ -6,41 +6,50 @@ import {
   Clock,
   Users,
   FileCheck,
-  Zap
+  Zap,
+  ShieldAlert
 } from "lucide-react";
 
 const featureList = [
   {
     icon: Lock,
-    title: "Client-Side File Encryption",
+    title: "Encryption in your browser",
     description:
-      "Files are encrypted locally on your device before upload. The service stores ciphertext and protected recovery-key material for your emergency workflow."
+      "Each file is encrypted with its own AES-256 key before upload. An emergency-release key lets recipients open files without your passphrase, so the service isn’t zero-knowledge."
   },
   {
     icon: Clock,
-    title: "Automated Check-In System",
+    title: "Scheduled check-ins",
     description:
-      "Set daily, weekly, or monthly check-ins and configure email reminders. If a check-in is missed, the grace period begins before any recipient delivery occurs."
+      "Check in daily or on custom scheduled days and times, weekly, or every 30 days with your check-in PIN. Miss one and a grace period of 6 to 72 hours starts, with 1 to 5 reminder emails."
   },
   {
     icon: Users,
-    title: "Trusted Emergency Contacts",
+    title: "Emergency contacts",
     description:
-      "Add the people who should receive specific files if your release conditions are eventually met. Different files can be assigned according to who actually needs them."
+      "Add the people who should receive files. Each one confirms their email address once, and no account is needed."
   },
   {
     icon: FileCheck,
-    title: "Selective File Release",
+    title: "Per-person file assignment",
     description:
-      "Choose exactly which documents are included in your emergency release package."
+      "Choose exactly which files each contact receives. Nobody is given your whole vault."
   },
   {
     icon: Zap,
-    title: "Conditional Recipient Delivery",
+    title: "Secure delivery by email",
     description:
-      "If the configured grace period expires without a successful check-in, designated recipients are emailed secure access to the files assigned to them."
+      "When a release happens, each confirmed contact is emailed secure links to their files, which they decrypt in their own browser."
+  },
+  {
+    icon: ShieldAlert,
+    title: "Emergency PIN",
+    description:
+      "A second PIN that looks like a normal check-in but starts delivery immediately, for situations where you can’t wait for the schedule."
   }
 ];
+
+const planned = ["Phone calls to emergency contacts", "Text messages to emergency contacts", "Location logging at check-in"];
 
 export function FeaturesPage() {
   return (
@@ -72,13 +81,13 @@ export function FeaturesPage() {
         </p>
 
         <div className="flex flex-col sm:flex-row gap-3 justify-center">
-          <Button asChild className="gap-2"><Link to="/signup">
-              Create your vault
+          <Button asChild className="gap-2"><Link to="/pricing">
+              See plans from $4.99/month
               <ArrowRight className="h-4 w-4" />
             </Link></Button>
 
-          <Button asChild variant="outline"><Link to="/pricing">
-              Compare pricing plans
+          <Button asChild variant="outline"><Link to="/recipients">
+              What recipients receive
             </Link></Button>
         </div>
       </div>
@@ -104,6 +113,11 @@ export function FeaturesPage() {
           </div>
         ))}
       </div>
+
+      <section aria-labelledby="planned-title" className="mx-auto mt-12 max-w-3xl rounded-2xl border border-dashed p-6 text-sm text-muted-foreground">
+        <h2 id="planned-title" className="text-base font-semibold text-foreground">Planned, not available yet</h2>
+        <p className="mt-2">These aren’t part of any plan today and can’t be purchased: {planned.join(", ").toLowerCase()}. Delivery is currently by email only.</p>
+      </section>
 
       {/* Bottom SEO links */}
       <div className="text-center mt-16 max-w-3xl mx-auto">

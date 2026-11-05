@@ -9,7 +9,7 @@ export function HowItWorksPage() {
   return <div>
     <section className="bg-gradient-hero px-4 py-20 text-vault-foreground md:py-28"><div className="mx-auto max-w-4xl text-center">
       <p className="micro-label">{copy.eyebrow}</p><h1 className="mt-5 text-4xl font-bold md:text-6xl">{copy.h1}</h1><p className="mt-6 text-lg leading-8 text-vault-foreground/75">{copy.intro}</p>
-      <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row"><Button asChild size="lg"><Link to="/signup">Create Your Vault</Link></Button><Button asChild size="lg" variant="outline"><a href="#timeline">See the Full Timeline</a></Button></div>
+      <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row"><Button asChild size="lg"><Link to="/pricing">See plans from $4.99/month</Link></Button><Button asChild size="lg" variant="outline"><a href="#timeline">See the Full Timeline</a></Button></div>
     </div></section>
     <PublicContentSection section={copy.sections[0]} id="timeline" />
     <PublicContentSection section={copy.sections[1]} />

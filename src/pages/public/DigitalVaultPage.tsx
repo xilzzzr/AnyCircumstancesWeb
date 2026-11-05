@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import content from "@/data/publicContent.json";
 import { ContextualCta } from "@/components/public/ContextualCta";
 import { ContentLinks, PublicContentSection } from "@/components/public/ArticleContent";
-import { motion } from "framer-motion";
+import { motion } from "@/components/public/staticMotion";
 import {
   Vault,
   Lock,
@@ -70,8 +70,8 @@ export function DigitalVaultPage() {
               transition={{ duration: 0.55, delay: 0.2 }}
               className="flex flex-col sm:flex-row gap-4 justify-center"
             >
-              <Button asChild size="lg" className="w-full sm:w-auto gap-2 shadow-glow"><Link to="/signup">
-                  Create Your Vault
+              <Button asChild size="lg" className="w-full sm:w-auto gap-2 shadow-glow"><Link to="/pricing">
+                  See plans from $4.99/month
                   <ArrowRight className="h-4 w-4" />
                 </Link></Button>
               <Button asChild
@@ -90,9 +90,9 @@ export function DigitalVaultPage() {
               className="mt-12 grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-3xl mx-auto"
             >
               {[
-                { icon: EyeOff, title: "Ciphertext storage", desc: "Original files are encrypted before upload." },
-                { icon: Lock, title: "Encrypted locally", desc: "Encrypted before upload." },
-                { icon: BadgeCheck, title: "Controlled access", desc: "Only your rules trigger delivery." },
+                { icon: EyeOff, title: "Encrypted in your browser", desc: "File contents are encrypted before upload." },
+                { icon: Users, title: "Per-person access", desc: "Each contact gets only the files you assign." },
+                { icon: BadgeCheck, title: "Released on your rules", desc: "A missed check-in plus grace period, or your emergency PIN." },
               ].map((s) => (
                 <div
                   key={s.title}
@@ -128,12 +128,12 @@ export function DigitalVaultPage() {
 
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
               {[
-                { icon: FileKey2, title: "Recovery phrases", desc: "Crypto seed phrases, backup codes, hardware wallet instructions." },
-                { icon: ScrollText, title: "Legal docs", desc: "Wills, powers of attorney, contracts, PDFs you don’t want floating around." },
-                { icon: KeyRound, title: "Password backups", desc: "Encrypted exports, “how to access my accounts” instructions." },
+                { icon: FileKey2, title: "Crypto recovery instructions", desc: "Where wallets and hardware devices are, and the steps someone would follow to recover them." },
+                { icon: ScrollText, title: "Copies of legal documents", desc: "Wills, powers of attorney and contracts, plus where the signed originals are kept." },
+                { icon: KeyRound, title: "Account roadmaps", desc: "Which accounts exist, how to reach your password manager, and what to deal with first." },
                 { icon: FileText, title: "Personal directives", desc: "Letters, “what to do if…”, medical/insurance notes, emergency steps." },
                 { icon: Users, title: "Family access", desc: "Where key files are, who to contact, what matters most first." },
-                { icon: Shield, title: "Anything private", desc: "If it’d be a disaster in the wrong hands, it belongs here." },
+                { icon: Shield, title: "Personal letters", desc: "Messages you want a specific person to receive." },
               ].map((c, idx) => (
                 <motion.div
                   key={c.title}
@@ -176,9 +176,9 @@ export function DigitalVaultPage() {
 
             <div className="grid md:grid-cols-3 gap-6">
               {[
-                { step: "01", icon: Lock, title: "Encrypt & upload", desc: "Files are encrypted on your device. The server stores ciphertext only." },
-                { step: "02", icon: Clock, title: "Set check-ins", desc: "Choose a schedule (daily/weekly/monthly). You stay in control." },
-                { step: "03", icon: Users, title: "Choose recipients", desc: "Add trusted contacts. They only get access if you stop responding." },
+                { step: "01", icon: Lock, title: "Encrypt & upload", desc: "File contents are encrypted in your browser before upload." },
+                { step: "02", icon: Clock, title: "Set check-ins", desc: "Check in daily or on custom scheduled days, weekly or monthly, with reminders and a grace period you choose." },
+                { step: "03", icon: Users, title: "Choose recipients", desc: "Contacts confirm their email once, and receive their files only if a release happens." },
               ].map((s, idx) => (
                 <motion.div
                   key={s.step}
@@ -201,8 +201,8 @@ export function DigitalVaultPage() {
             </div>
 
             <div className="mt-12 flex flex-col sm:flex-row gap-4 justify-center">
-              <Button asChild size="lg" className="gap-2 shadow-glow"><Link to="/signup">
-                  Start free
+              <Button asChild size="lg" className="gap-2 shadow-glow"><Link to="/pricing">
+                  See plans from $4.99/month
                   <ArrowRight className="h-4 w-4" />
                 </Link></Button>
               <Button asChild size="lg" variant="outline" className="gap-2"><Link to="/dead-mans-switch">

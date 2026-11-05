@@ -1,20 +1,21 @@
-import React, { useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
-import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
-import { useLocation } from "react-router-dom";
-import { safeInternalPath } from "@/lib/navigation";
-import { computePlanPrice, formatMoney } from "@/lib/pricing";
-import { Phone, MessageSquare, MapPin } from "lucide-react";
+import { Link, useLocation } from "react-router-dom";
+import { computePlanPrice, formatMoney, getFrequencyPrice, type CheckInFrequencyId } from "@/lib/pricing";
+import { DEFAULT_PLAN, clearPendingPlan, isFrequency, planFromSearchParams, readPendingPlan } from "@/lib/pendingPlan";
+import { StorageSlider } from "@/components/pricing/StorageSlider";
+import { PlannedFeaturesNote } from "@/components/pricing/PlannedFeaturesNote";
+import { readPendingPromoCode, savePendingPromoCode, clearPendingPromoCode } from "@/lib/pioneerPromoStorage";
 
 type ApiResult = { ok: boolean; url?: string; error?: string };
 
-async function postJson(path: string, body: any): Promise<ApiResult> {
+async function postJson(path: string, body: unknown): Promise<ApiResult> {
   const res = await fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -26,55 +27,35 @@ async function postJson(path: string, body: any): Promise<ApiResult> {
   return data;
 }
 
-function useReturnTo() {
-  const loc = useLocation();
-  const params = new URLSearchParams(loc.search);
-  return safeInternalPath(params.get("returnTo"), "/app");
+function checkoutErrorMessage(code: string | undefined) {
+  if (code === "subscription_already_active") return "You already have an active plan. You can change it from Billing.";
+  if (code === "not_authenticated" || code === "invalid_session") return "Your session has expired. Please sign in again.";
+  if (code === "invalid_plan") return "That plan selection isn’t valid. Adjust your choices and try again.";
+  if (code === "invalid_promo_code") return "That promotion code is invalid, expired, or already redeemed. Check your code and try again.";
+  return "We couldn’t start checkout. You have not been charged. Please try again in a moment.";
 }
-
-const ADDONS = [
-  {
-    id: "call-contacts",
-    label: "Call emergency contacts",
-    description: "We'll call your emergency contacts when triggered",
-    priceMonthly: 1.99,
-    icon: Phone,
-    comingSoon: true,
-  },
-  {
-    id: "text-contacts",
-    label: "Text emergency contacts",
-    description: "We'll send SMS to your emergency contacts",
-    priceMonthly: 0.49,
-    icon: MessageSquare,
-    comingSoon: true,
-  },
-  {
-    id: "log-location",
-    label: "Log location at check-in",
-    description: "Record your GPS location each time you check in",
-    priceMonthly: 0.99,
-    icon: MapPin,
-    comingSoon: true,
-  },
-] as const;
 
 export default function PlanBuilderPage() {
   const { toast } = useToast();
-  const returnTo = useReturnTo();
+  const location = useLocation();
 
-  const [storageGb, setStorageGb] = useState(5);
-  const [checkInFrequency, setCheckInFrequency] = useState<"monthly" | "weekly" | "daily">("monthly");
-  const [isAnnual, setIsAnnual] = useState(false);
-  const [selectedAddons, setSelectedAddons] = useState<string[]>([]);
+  // Preload a selection from ?storage=&frequency=&billing= or the plan picked on
+  // /pricing before signup; otherwise start from the default plan.
+  const [initialPlan] = useState(() => planFromSearchParams(location.search) ?? readPendingPlan() ?? DEFAULT_PLAN);
+
+  const [storageGb, setStorageGb] = useState(initialPlan.storageGb);
+  const [checkInFrequency, setCheckInFrequency] = useState<CheckInFrequencyId>(initialPlan.frequency);
+  const [isAnnual, setIsAnnual] = useState(initialPlan.billing === "annual");
   const [loading, setLoading] = useState(false);
+  const [promoCode, setPromoCode] = useState(() => readPendingPromoCode());
+  const [error, setError] = useState<string | null>(null);
 
   const billingInterval: "monthly" | "annual" = isAnnual ? "annual" : "monthly";
 
   const pricing = useMemo(() => {
     const p = computePlanPrice({
       storageGb,
-      addons: selectedAddons,
+      addons: [],
       checkInFrequency,
       billingInterval,
     });
@@ -83,14 +64,11 @@ export default function PlanBuilderPage() {
 
     return {
       storage: p.storage,
-      addons: p.addons,
       frequency: p.frequency,
       monthlyTotal: p.monthlyTotal,
       annualTotal,
-      annualMonthly: annualTotal / 12,
-      savings: p.monthlyTotal * 2,
     };
-  }, [storageGb, selectedAddons, checkInFrequency, billingInterval]);
+  }, [storageGb, checkInFrequency, billingInterval]);
 
   const displayPriceFrom = useMemo(() => {
     const base = computePlanPrice({
@@ -102,41 +80,47 @@ export default function PlanBuilderPage() {
     return formatMoney(base.monthlyTotal);
   }, []);
 
-  const toggleAddon = (id: string) => {
-    setSelectedAddons((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
-  };
-
   const startCheckout = async () => {
     setLoading(true);
+    setError(null);
     try {
       const out = await postJson("/auth/billing/create-checkout-session", {
         storageGb,
         checkInFrequency,
         billingInterval,
-        addons: selectedAddons,
+        addons: [],
+        promoCode: promoCode.trim(),
       });
 
       if (!out.ok || !out.url) {
-        toast({ title: "Could not start checkout", description: out.error || "server_error" });
+        const message = checkoutErrorMessage(out.error);
+        setError(message);
+        toast({ title: "Could not start checkout", description: message, variant: "destructive" });
+        setLoading(false);
         return;
       }
 
+      clearPendingPlan();
+      clearPendingPromoCode();
       window.location.href = out.url;
-    } finally {
+    } catch {
+      const message = checkoutErrorMessage(undefined);
+      setError(message);
+      toast({ title: "Could not start checkout", description: message, variant: "destructive" });
       setLoading(false);
     }
   };
 
-  const checkInLabel = (freq: "monthly" | "weekly" | "daily") => {
-    if (freq === "daily") return "Daily";
+  const checkInLabel = (freq: CheckInFrequencyId) => {
+    if (freq === "daily") return "Daily / scheduled";
     if (freq === "weekly") return "Weekly";
     return "Monthly";
   };
 
-  const checkInHint = (freq: "monthly" | "weekly" | "daily") => {
-    if (freq === "monthly") return `Included`;
-    if (freq === "weekly") return `+${formatMoney(1.99)}/mo`;
-    return `+${formatMoney(2.99)}/mo`;
+  const checkInHint = (freq: CheckInFrequencyId) => {
+    if (freq === "monthly") return "Every 30 days · included";
+    if (freq === "weekly") return `Every 7 days · +${formatMoney(getFrequencyPrice("weekly"))}/mo`;
+    return `Daily or custom calendar · +${formatMoney(getFrequencyPrice("daily"))}/mo`;
   };
 
   return (
@@ -145,7 +129,7 @@ export default function PlanBuilderPage() {
         <CardHeader>
           <CardTitle>Build your plan</CardTitle>
           <CardDescription>
-            Plans start at {displayPriceFrom}/month. Pick storage, check-ins, and add-ons.
+            Plans start at {displayPriceFrom}/month. Pick storage, check-in frequency and billing. There’s no free plan or trial — files can be stored once your plan is active.
           </CardDescription>
         </CardHeader>
 
@@ -153,9 +137,9 @@ export default function PlanBuilderPage() {
           <div className="space-y-3">
             <div className="flex items-end justify-between gap-3">
               <div>
-                <Label>Storage (GB)</Label>
+                <Label id="plan-storage-label">Storage (GB)</Label>
                 <div className="text-xs text-muted-foreground mt-1">
-                  {formatMoney(pricing.storage)}/mo
+                  {formatMoney(pricing.storage)}/mo · the most your encrypted files can add up to
                 </div>
               </div>
               <div className="text-right">
@@ -163,30 +147,32 @@ export default function PlanBuilderPage() {
               </div>
             </div>
 
-            <Slider
-              value={[storageGb]}
-              onValueChange={(v) => setStorageGb(v[0] || 5)}
-              min={5}
-              max={200}
-              step={5}
-            />
+            <StorageSlider value={storageGb} onChange={setStorageGb} disabled={loading} />
           </div>
 
           <div className="space-y-3">
             <div className="flex items-end justify-between gap-3">
               <div>
-                <Label>Check-in frequency</Label>
+                <Label id="plan-frequency-label">Check-in frequency</Label>
                 <div className="text-xs text-muted-foreground mt-1">
                   {formatMoney(pricing.frequency)}/mo
                 </div>
               </div>
             </div>
 
-            <RadioGroup value={checkInFrequency} onValueChange={(v) => setCheckInFrequency(v as any)} className="space-y-3">
+            <RadioGroup
+              aria-labelledby="plan-frequency-label"
+              value={checkInFrequency}
+              onValueChange={(v) => {
+                if (isFrequency(v)) setCheckInFrequency(v);
+              }}
+              className="space-y-3"
+              disabled={loading}
+            >
               {(["monthly", "weekly", "daily"] as const).map((freq) => (
                 <label
                   key={freq}
-                  className="flex items-center justify-between gap-3 rounded-lg border p-3 cursor-pointer"
+                  className={`flex min-h-11 items-center justify-between gap-3 rounded-lg border p-3 cursor-pointer ${checkInFrequency === freq ? "border-primary bg-primary/5" : ""}`}
                   htmlFor={`freq-${freq}`}
                 >
                   <div className="flex items-center gap-3">
@@ -201,92 +187,75 @@ export default function PlanBuilderPage() {
             </RadioGroup>
           </div>
 
-          <div className="space-y-3">
-            <div className="flex items-end justify-between gap-3">
-              <div>
-                <Label>Add-ons</Label>
-                <div className="text-xs text-muted-foreground mt-1">
-                  {formatMoney(pricing.addons)}/mo
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              {ADDONS.map((a) => {
-                const checked = selectedAddons.includes(a.id);
-                const Icon = a.icon;
-                return (
-                  <label
-                    key={a.id}
-                    className={`flex items-start gap-3 rounded-lg border p-3 ${a.comingSoon ? "opacity-60" : "cursor-pointer"}`}
-                    htmlFor={`addon-${a.id}`}
-                  >
-                    <Checkbox
-                      id={`addon-${a.id}`}
-                      checked={checked}
-                      onCheckedChange={() => (!a.comingSoon ? toggleAddon(a.id) : null)}
-                      disabled={loading || a.comingSoon}
-                      className="mt-1"
-                    />
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-2">
-                          <Icon className="h-4 w-4 text-muted-foreground" />
-                          <div className="text-sm font-medium">{a.label}</div>
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          {a.comingSoon ? "Coming soon" : `+${formatMoney(a.priceMonthly)}/mo`}
-                        </div>
-                      </div>
-                      <div className="text-xs text-muted-foreground mt-1">{a.description}</div>
-                    </div>
-                  </label>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
+          <div className="flex min-h-11 items-center justify-between gap-3 rounded-lg border p-3">
             <div className="flex flex-col">
               <Label htmlFor="annual">Annual billing</Label>
-              <div className="text-xs text-muted-foreground mt-1">Pay for 10 months, get 2 free</div>
+              <div className="text-xs text-muted-foreground mt-1">10 × the monthly price, billed once a year up front, renews yearly</div>
             </div>
-            <Switch id="annual" checked={isAnnual} onCheckedChange={setIsAnnual} />
+            <Switch id="annual" checked={isAnnual} onCheckedChange={setIsAnnual} disabled={loading} />
           </div>
 
           <div className="rounded-lg border p-4 space-y-2">
             <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Storage</span>
+              <span className="text-muted-foreground">Storage ({storageGb} GB)</span>
               <span>{formatMoney(pricing.storage)}/mo</span>
             </div>
             <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Check-ins</span>
+              <span className="text-muted-foreground">Check-ins ({checkInLabel(checkInFrequency)})</span>
               <span>{formatMoney(pricing.frequency)}/mo</span>
             </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Add-ons</span>
-              <span>{formatMoney(pricing.addons)}/mo</span>
-            </div>
 
-            <div className="border-t pt-3 flex justify-between">
-              <span className="font-medium">Total</span>
-              <span className="font-semibold">
-                {isAnnual
-                  ? `${formatMoney(pricing.annualTotal)} / year`
-                  : `${formatMoney(pricing.monthlyTotal)} / month`}
-              </span>
-            </div>
-
-            {isAnnual && (
-              <div className="text-xs text-muted-foreground">
-                Equivalent to ~{formatMoney(pricing.annualMonthly)}/mo (billed yearly)
+            <div aria-live="polite" aria-atomic="true" className="border-t pt-3">
+              <div className="flex justify-between">
+                <span className="font-medium">Total</span>
+                <span className="font-semibold">
+                  {isAnnual
+                    ? `${formatMoney(pricing.annualTotal)} / year`
+                    : `${formatMoney(pricing.monthlyTotal)} / month`}
+                </span>
               </div>
-            )}
+              <div className="mt-1 text-xs text-muted-foreground">
+                {isAnnual
+                  ? `Charged once a year up front (10 × ${formatMoney(pricing.monthlyTotal)}), renews yearly. USD.`
+                  : "Charged every month, renews monthly. USD."}
+              </div>
+            </div>
           </div>
 
-          <Button onClick={startCheckout} disabled={loading} className="w-full">
-            {loading ? "Starting checkout..." : "Continue to checkout"}
-          </Button>
+          <div className="space-y-2">
+            <Label htmlFor="plan-promo-code">Promotion code (optional)</Label>
+            <Input id="plan-promo-code" type="text" name="promotionCode"
+              autoComplete="off" autoCapitalize="characters" spellCheck={false}
+              maxLength={40} placeholder="Enter your code" value={promoCode}
+              onChange={(e) => {
+                const code = e.target.value.toUpperCase();
+                setPromoCode(code);
+                savePendingPromoCode(code);
+                setError(null);
+              }}
+              disabled={loading} aria-describedby="plan-promo-explainer" />
+            <p id="plan-promo-explainer" className="text-xs leading-relaxed text-muted-foreground">
+              Eligible Pioneer invitations give 30 days free, then 20% off your recurring subscription for its lifetime.
+              A payment method is required. Your offer will be verified at checkout; other codes may have different terms.
+            </p>
+          </div>
+
+          <PlannedFeaturesNote />
+
+          <div className="space-y-3">
+            <Button onClick={startCheckout} disabled={loading} className="w-full min-h-11">
+              {loading ? "Starting checkout..." : "Continue to checkout"}
+            </Button>
+            {error && (
+              <p role="alert" className="text-sm text-destructive">
+                {error}
+              </p>
+            )}
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Cancel from Account settings at any time. Cancelling ends your plan immediately and permanently deletes your stored files. Payments are non-refundable except where required by law — see{" "}
+              <Link to="/terms" className="text-primary underline underline-offset-4">Terms</Link>.
+            </p>
+          </div>
         </CardContent>
       </Card>
     </div>

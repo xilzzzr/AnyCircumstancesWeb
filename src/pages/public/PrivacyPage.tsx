@@ -1,4 +1,4 @@
-import { motion } from 'framer-motion';
+import { Link } from 'react-router-dom';
 
 export function PrivacyPage() {
   return (
@@ -7,21 +7,12 @@ export function PrivacyPage() {
       <section className="py-16 lg:py-20 bg-gradient-hero">
         <div className="container mx-auto px-4">
           <div className="max-w-3xl mx-auto text-center">
-            <motion.h1
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="text-4xl md:text-5xl font-bold text-vault-foreground mb-4"
-            >
+            <h1 className="text-4xl md:text-5xl font-bold text-vault-foreground mb-4">
               Privacy Policy
-            </motion.h1>
-            <motion.p
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1 }}
-              className="text-vault-foreground/70"
-            >
-              Last updated: January 2025
-            </motion.p>
+            </h1>
+            <p className="text-vault-foreground/70">
+              Last updated: November 4, 2026
+            </p>
           </div>
         </div>
       </section>
@@ -75,23 +66,23 @@ export function PrivacyPage() {
             <p className="text-muted-foreground mt-4 font-medium">We do not use your content for advertising or data resale.</p>
 
             <h2 className="text-2xl font-semibold text-foreground mt-10 mb-4">3. How your data is protected</h2>
-            <p className="text-muted-foreground mb-4">We take data security seriously.</p>
             <ul className="list-disc pl-6 space-y-2 text-muted-foreground">
-              <li>Your data is encrypted during transfer</li>
-              <li>Your data is encrypted while stored</li>
-              <li>We use modern encryption standards such as AES-256 for stored data and TLS for data in transit</li>
+              <li>The contents of files you upload are encrypted in your browser (AES-256) before they reach us</li>
+              <li>File names, file types and sizes, your contacts' details and your account and check-in information are stored without that browser encryption, because the service needs them to work</li>
+              <li>Data is encrypted in transit (TLS), and stored files also use server-side encryption</li>
+              <li>To let your recipients open files without your vault passphrase, each file key is also protected by an emergency-release key held in AWS Key Management Service, which our systems can use to decrypt files for delivery</li>
             </ul>
             <p className="text-muted-foreground mt-4">
-              Access to systems containing sensitive information is limited to authorized personnel who require it to operate the service, and access is logged.
+              Access to systems containing sensitive information is limited to authorized personnel who require it to operate the service. The <Link to="/security" className="text-primary hover:underline">Security page</Link> explains what is and isn't encrypted in more detail.
             </p>
 
             <h2 className="text-2xl font-semibold text-foreground mt-10 mb-4">4. Who we share information with</h2>
             <p className="text-muted-foreground mb-4 font-medium">We do not sell or rent your data.</p>
             <p className="text-muted-foreground mb-4">We may share limited information with carefully selected service providers who help us:</p>
             <ul className="list-disc pl-6 space-y-2 text-muted-foreground">
-              <li>Host and operate the platform</li>
-              <li>Send emails and notifications</li>
-              <li>Process payments</li>
+              <li>Host and operate the platform, store files and manage encryption keys (Amazon Web Services)</li>
+              <li>Send emails and notifications (our email delivery provider, and Apple for iOS app notifications)</li>
+              <li>Process payments (Stripe for web payments; Apple for purchases made in the iOS app)</li>
             </ul>
             <p className="text-muted-foreground mt-4">These providers are only permitted to use your information to perform services on our behalf.</p>
             <p className="text-muted-foreground mt-4">
@@ -102,15 +93,15 @@ export function PrivacyPage() {
             </p>
 
             <h2 className="text-2xl font-semibold text-foreground mt-10 mb-4">5. Cookies and tracking technologies</h2>
-            <p className="text-muted-foreground mb-4">We may use cookies or similar technologies to:</p>
+            <p className="text-muted-foreground mb-4">We use only the cookies and browser storage needed for the service to work:</p>
             <ul className="list-disc pl-6 space-y-2 text-muted-foreground">
-              <li>Keep you signed in</li>
-              <li>Remember your preferences</li>
-              <li>Improve website functionality</li>
-              <li>Understand anonymous usage trends</li>
+              <li>Keeping you signed in and protecting sessions</li>
+              <li>Keeping your vault open for a short time after you enter your PIN</li>
+              <li>Letting an emergency recipient download a file after opening their link</li>
+              <li>Remembering choices such as the plan you selected while you sign up</li>
             </ul>
             <p className="text-muted-foreground mt-4">
-              You can disable cookies through your browser settings, but some features may not work properly without them.
+              We don't use advertising or analytics cookies. The <Link to="/cookies" className="text-primary hover:underline">Cookies page</Link> lists each one. You can disable cookies through your browser settings, but you won't be able to sign in without them.
             </p>
 
             <h2 className="text-2xl font-semibold text-foreground mt-10 mb-4">6. Children's privacy</h2>
@@ -127,10 +118,10 @@ export function PrivacyPage() {
               <li>Delete your entire account</li>
             </ul>
             <p className="text-muted-foreground mt-4">
-              When you delete information, it is removed from our active systems within a reasonable time period.
+              When you delete information, it is removed from our active systems within a reasonable time period. Cancelling your plan from your account settings also permanently deletes your stored files.
             </p>
             <p className="text-muted-foreground mt-4">
-              If you have questions or requests about your data, contact us at <a href="mailto:support@example.com" className="text-primary hover:underline">support@example.com</a>.
+              If you have questions or requests about your data, contact us at <a href="mailto:contact@anycircumstances.com" className="text-primary hover:underline">contact@anycircumstances.com</a>.
             </p>
 
             <h2 className="text-2xl font-semibold text-foreground mt-10 mb-4">8. Changes to this Privacy Policy</h2>

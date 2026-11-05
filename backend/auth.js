@@ -1,3 +1,4 @@
+const { normalizeSchedule, readSchedule, nextScheduledCheckin, nextDueAfterSave } = require("./checkin_schedule");
 const express = require("express");
 const mysql = require("mysql2/promise");
 const fs = require("fs");
@@ -6,6 +7,7 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const nodemailer = require("nodemailer");
 const Stripe = require("stripe");
+const { findPromotion, checkoutTerms } = require("./pioneer_promo");
 const { escapeHtml, emailSender, renderAnyCircumstancesEmail, renderEmergencyEmail } = require("./emails");
 const { currentApnsEnv } = require("./push_notifications");
 const {
@@ -95,7 +97,7 @@ if (process.env.NODE_ENV === "production") {
   }
 }
 
-const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
+const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2026-08-26.dahlia" }) : null;
 // Equalizes the expensive password-check path when an email is not registered.
 const DUMMY_PASSWORD_HASH = "$2b$12$Bzp.v2dUrXUXjidOrU6Nre9/CR1KzXktUVuqYfy1m.WXOKuf7CV2K";
 const emergencyGlobalGate = createFixedWindowGate({
@@ -607,6 +609,8 @@ router.post(
   asyncHandler(async (req, res) => {
     const email = normalizeEmail(req.body?.email);
     const password = String(req.body?.password || "");
+    const displayName = typeof req.body?.displayName === "string" ? req.body.displayName.trim() : "";
+    if (displayName.length > 120 || /[\x00-\x1f\x7f]/.test(displayName)) return res.status(400).json({ ok: false, error: "invalid_name" });
     const ageConfirmed = req.body?.ageConfirmed === true;
 
     if (!validateEmail(email) || email.length > 254) return res.status(400).json({ ok: false, error: "invalid_email" });
@@ -629,8 +633,8 @@ router.post(
       await conn.beginTransaction();
 
       const [result] = await conn.query(
-        "INSERT INTO users (email, password_hash, status, created_at) VALUES (?, ?, 'active', NOW())",
-        [email, passwordHash]
+        "INSERT INTO users (email, password_hash, display_name, status, created_at) VALUES (?, ?, ?, 'active', NOW())",
+        [email, passwordHash, displayName || null]
       );
 
       const userId = result.insertId;
@@ -1219,6 +1223,19 @@ router.post(
   })
 );
 
+router.get("/profile", asyncHandler(async (req, res) => {
+  const userId = await requireUserId(req, res); if (!userId) return;
+  const [rows] = await pool.query("SELECT display_name FROM users WHERE id = ? LIMIT 1", [String(userId)]);
+  return res.json({ ok: true, displayName: rows[0]?.display_name || "" });
+}));
+router.put("/profile", asyncHandler(async (req, res) => {
+  const userId = await requireUserId(req, res); if (!userId) return;
+  const displayName = typeof req.body?.displayName === "string" ? req.body.displayName.trim() : "";
+  if (!displayName || displayName.length > 120 || /[\x00-\x1f\x7f]/.test(displayName)) return res.status(400).json({ ok: false, error: "invalid_name" });
+  await pool.query("UPDATE users SET display_name = ? WHERE id = ?", [displayName, String(userId)]);
+  return res.json({ ok: true, displayName });
+}));
+
 function daysForFrequency(freq) {
   if (freq === "daily") return 1;
   if (freq === "weekly") return 7;
@@ -1239,7 +1256,7 @@ function isValidReminders(n) {
 
 async function getVerificationSettingsRow(userId) {
   const [rows] = await pool.query(
-    "SELECT user_id, frequency, grace_period_hours, reminders, last_checkin_at, next_due_at FROM verification_settings WHERE user_id = ? LIMIT 1",
+    "SELECT user_id, frequency, grace_period_hours, reminders, last_checkin_at, next_due_at, schedule_json FROM verification_settings WHERE user_id = ? LIMIT 1",
     [String(userId)]
   );
   return rows[0] || null;
@@ -1255,47 +1272,42 @@ function normalizeBillingFrequency(freq) {
 
 async function getPaidCheckinFrequency(userId) {
   const [rows] = await pool.query(
-    "SELECT checkin_frequency, status FROM billing_profiles WHERE user_id = ? LIMIT 1",
-    [String(userId)]
+    `SELECT COALESCE(
+       (SELECT be.checkin_frequency FROM billing_entitlements be WHERE be.user_id = bp.user_id
+        AND be.status = 'active' AND (be.current_period_end IS NULL OR be.current_period_end > UTC_TIMESTAMP(3))
+        ORDER BY FIELD(be.checkin_frequency, 'daily', 'weekly', 'monthly') LIMIT 1),
+       CASE WHEN bp.status = 'active' AND (bp.current_period_end IS NULL OR bp.current_period_end > UTC_TIMESTAMP(3))
+            THEN bp.checkin_frequency END) AS checkin_frequency
+     FROM billing_profiles bp WHERE bp.user_id = ? LIMIT 1`, [String(userId)]
   );
-  if (!rows[0]) return null;
-  if (String(rows[0].status || "") !== "active") return null;
-  return normalizeBillingFrequency(rows[0].checkin_frequency) || null;
+  return normalizeBillingFrequency(rows[0]?.checkin_frequency);
 }
 
 async function syncVerificationFromBilling(userId) {
   const paid = await getPaidCheckinFrequency(userId);
   if (!paid) return;
 
-  const existing = await getVerificationSettingsRow(userId);
-  const now = nowUtc();
-
-  const freqChanged = existing && String(existing.frequency || "") !== paid;
-
-  let nextDue = null;
-
-  if (existing?.last_checkin_at) {
-    nextDue = addDays(new Date(existing.last_checkin_at), daysForFrequency(paid));
-  } else if (!freqChanged && existing?.next_due_at && new Date(existing.next_due_at).getTime() > now.getTime()) {
-    nextDue = new Date(existing.next_due_at);
-  } else {
-    nextDue = addDays(now, daysForFrequency(paid));
-  }
-
-  const grace = existing ? Number(existing.grace_period_hours) : 24;
-  const reminders = existing ? Number(existing.reminders) : 3;
-  const last = existing?.last_checkin_at ? new Date(existing.last_checkin_at) : null;
-
-  await pool.query(
-    "INSERT INTO verification_settings (user_id, frequency, grace_period_hours, reminders, last_checkin_at, next_due_at) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE frequency = VALUES(frequency), grace_period_hours = VALUES(grace_period_hours), reminders = VALUES(reminders), last_checkin_at = verification_settings.last_checkin_at, next_due_at = VALUES(next_due_at)",
-    [String(userId), paid, grace, reminders, last, nextDue]
-  );
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [rows] = await conn.query("SELECT * FROM verification_settings WHERE user_id = ? FOR UPDATE", [String(userId)]);
+    const existing = rows[0];
+    if (!existing) {
+      await conn.query("INSERT INTO verification_settings (user_id, frequency, grace_period_hours, reminders, next_due_at) VALUES (?, ?, 24, 3, ?)", [String(userId), paid, addDays(nowUtc(), daysForFrequency(paid))]);
+    } else if (existing.frequency !== paid) {
+      // Preserve the outstanding due time, including an already-running grace period.
+      await conn.query("UPDATE verification_settings SET frequency = ?, schedule_json = NULL WHERE user_id = ?", [paid, String(userId)]);
+    }
+    await conn.commit();
+  } catch (error) { await conn.rollback(); throw error; }
+  finally { conn.release(); }
 }
 
 
 function settingsDto(row) {
   return {
     frequency: row.frequency,
+    schedule: readSchedule(row),
     gracePeriodHours: Number(row.grace_period_hours),
     reminders: Number(row.reminders),
     lastCheckinAt: row.last_checkin_at ? new Date(row.last_checkin_at).toISOString() : null,
@@ -1319,7 +1331,7 @@ const row = await getVerificationSettingsRow(userId);
       });
     }
 
-    return res.json({ ok: true, settings: settingsDto(row) });
+    return res.json({ ok: true, canSchedule: (await getPaidCheckinFrequency(userId)) === "daily", settings: settingsDto(row) });
   })
 );
 
@@ -1329,44 +1341,48 @@ router.put(
     const userId = await requireUserId(req, res);
     if (!userId) return;
 
-const requestedFrequency = String(req.body?.frequency || "");
-const paidFrequency = await getPaidCheckinFrequency(userId);
-if (requestedFrequency && paidFrequency && requestedFrequency !== paidFrequency) {
-  return res.status(409).json({ ok: false, error: "frequency_locked", frequency: paidFrequency });
-}
-const frequency = paidFrequency || requestedFrequency;
+    const paidFrequency = await getPaidCheckinFrequency(userId);
+    if (!paidFrequency) return res.status(403).json({ ok: false, error: "payment_required" });
+    const requestedFrequency = req.body?.frequency;
+    if (requestedFrequency && requestedFrequency !== paidFrequency) return res.status(409).json({ ok: false, error: "frequency_locked" });
     const gracePeriodHours = Number(req.body?.gracePeriodHours);
     const reminders = Number(req.body?.reminders);
-
-if (!isValidFrequency(frequency || "")) return res.status(400).json({ ok: false, error: "invalid_frequency" });
     if (!isValidGraceHours(gracePeriodHours)) return res.status(400).json({ ok: false, error: "invalid_grace_period" });
     if (!isValidReminders(reminders)) return res.status(400).json({ ok: false, error: "invalid_reminders" });
-
-const days = daysForFrequency(frequency);
-const existing = await getVerificationSettingsRow(userId);
-const now = nowUtc();
-
-const freqChanged = existing && String(existing.frequency || "") !== String(frequency || "");
-
-let nextDue = null;
-let last = null;
-
-if (existing?.last_checkin_at) {
-  last = new Date(existing.last_checkin_at);
-  nextDue = addDays(last, days);
-} else if (!freqChanged && existing?.next_due_at && new Date(existing.next_due_at).getTime() > now.getTime()) {
-  nextDue = new Date(existing.next_due_at);
-} else {
-  nextDue = addDays(now, days);
-}
-
-    await pool.query(
-      "INSERT INTO verification_settings (user_id, frequency, grace_period_hours, reminders, last_checkin_at, next_due_at) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE frequency = VALUES(frequency), grace_period_hours = VALUES(grace_period_hours), reminders = VALUES(reminders), last_checkin_at = COALESCE(verification_settings.last_checkin_at, VALUES(last_checkin_at)), next_due_at = VALUES(next_due_at)",
-      [String(userId), frequency, gracePeriodHours, reminders, last, nextDue]
-    );
-
+    const hasSchedule = Object.prototype.hasOwnProperty.call(req.body || {}, "schedule");
+    if (hasSchedule && req.body.schedule != null && paidFrequency !== "daily") return res.status(403).json({ ok: false, error: "scheduled_checkin_requires_daily" });
+    let requestedSchedule;
+    try { requestedSchedule = hasSchedule ? normalizeSchedule(req.body.schedule) : undefined; }
+    catch (error) { return res.status(400).json({ ok: false, error: error.message }); }
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const [rows] = await conn.query("SELECT * FROM verification_settings WHERE user_id = ? FOR UPDATE", [String(userId)]);
+      const existing = rows[0] || null;
+      const oldSchedule = readSchedule(existing);
+      const schedule = paidFrequency === "daily" ? (hasSchedule ? requestedSchedule : oldSchedule) : null;
+      const changed = JSON.stringify(schedule) !== JSON.stringify(oldSchedule);
+      const now = nowUtc();
+      if (existing?.next_due_at && +new Date(existing.next_due_at) <= +now && (changed || gracePeriodHours !== Number(existing.grace_period_hours))) {
+        await conn.rollback();
+        return res.status(409).json({ ok: false, error: "check_in_before_schedule_change" });
+      }
+      const fallback = addDays(now, daysForFrequency(paidFrequency));
+      const nextDue = changed
+        ? nextDueAfterSave(existing, schedule, now, fallback)
+        : existing?.next_due_at ? new Date(existing.next_due_at) : (schedule ? nextScheduledCheckin(schedule, now) : fallback);
+      await conn.query(
+        `INSERT INTO verification_settings (user_id, frequency, grace_period_hours, reminders, next_due_at, schedule_json)
+         VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE frequency = VALUES(frequency),
+         grace_period_hours = VALUES(grace_period_hours), reminders = VALUES(reminders),
+         next_due_at = VALUES(next_due_at), schedule_json = VALUES(schedule_json)`,
+        [String(userId), paidFrequency, gracePeriodHours, reminders, nextDue, schedule ? JSON.stringify(schedule) : null]
+      );
+      await conn.commit();
+    } catch (error) { await conn.rollback(); throw error; }
+    finally { conn.release(); }
     const saved = await getVerificationSettingsRow(userId);
-    return res.json({ ok: true, settings: saved ? settingsDto(saved) : null });
+    return res.json({ ok: true, canSchedule: paidFrequency === "daily", settings: saved ? settingsDto(saved) : null });
   })
 );
 
@@ -1406,7 +1422,7 @@ router.post(
     const gracePeriodHours = row ? Number(row.grace_period_hours) : 24;
     const reminders = row ? Number(row.reminders) : 3;
     const now = nowUtc();
-    const nextDue = addDays(now, daysForFrequency(frequency));
+    let nextDue;
 
     const conn = await pool.getConnection();
     let panicTriggerJobId = 0;
@@ -1414,10 +1430,13 @@ router.post(
       await conn.beginTransaction();
 
       // Serialize successful check-ins against scheduled emergency dispatch.
-      await conn.query(
-        "SELECT user_id FROM verification_settings WHERE user_id = ? LIMIT 1 FOR UPDATE",
+      const [lockedRows] = await conn.query(
+        "SELECT * FROM verification_settings WHERE user_id = ? LIMIT 1 FOR UPDATE",
         [String(userId)]
       );
+
+      const schedule = paidFrequency === "daily" ? readSchedule(lockedRows[0]) : null;
+      nextDue = schedule ? nextScheduledCheckin(schedule, now) : addDays(now, daysForFrequency(frequency));
 
       await conn.query(
         "INSERT INTO verification_checkins (user_id, method) VALUES (?, 'manual')",
@@ -1977,35 +1996,62 @@ router.post(
     const successUrl = `${publicWebBaseUrl}/app/billing?checkout=success`;
     const cancelUrl = `${publicWebBaseUrl}/app/billing?checkout=cancel`;
 
-    const session = await stripe.checkout.sessions.create({
+    // Validate discounts on the server. Only our marked, unused, one-redemption
+    // Pioneer codes can grant a trial. Ordinary Stripe codes never grant one.
+    const rawPromo = req.body?.promoCode;
+    if (rawPromo != null && typeof rawPromo !== "string") {
+      return res.status(400).json({ ok: false, error: "invalid_promo_code" });
+    }
+    const enteredCode = String(rawPromo || "").trim();
+    const promotion = enteredCode ? await findPromotion(stripe, enteredCode) : null;
+    if (enteredCode && !promotion) {
+      return res.status(400).json({ ok: false, error: "invalid_promo_code" });
+    }
+    const offer = checkoutTerms(promotion);
+
+    const subscriptionData = {
+      metadata: {
+        user_id: String(userId),
+        storage_gb: String(safeStorageGb),
+        checkin_frequency: checkInFrequency,
+        billing_interval: billingInterval,
+        addons_json: JSON.stringify(addons),
+        ...(offer.pioneer ? { pioneer_offer: "one_month_free_20_percent_forever" } : {}),
+      },
+      ...offer.subscription,
+    };
+
+    let session;
+    try {
+      session = await stripe.checkout.sessions.create({
       mode: "subscription",
       customer: customerId,
       client_reference_id: String(userId),
       success_url: successUrl,
       cancel_url: cancelUrl,
-      allow_promotion_codes: true,
+      ...offer.checkout,
       line_items: [
         {
           price_data: {
             currency: "usd",
-            product_data: { name: `anycircumstances Plan (${safeStorageGb} GB)` },
+            product_data: { name: `anycircumstances Plan (${safeStorageGb} GB)`, description: checkInFrequency === "daily" ? "Daily / scheduled check-in: custom days, times, recurrence, and time zone." : `${checkInFrequency} check-ins` },
             unit_amount: unitAmount,
             recurring: { interval: billingInterval === "annual" ? "year" : "month" },
           },
           quantity: 1,
         },
       ],
-      subscription_data: {
-        metadata: {
-          user_id: String(userId),
-          storage_gb: String(safeStorageGb),
-          checkin_frequency: checkInFrequency,
-          billing_interval: billingInterval,
-          addons_json: JSON.stringify(addons),
-        },
-      },
+      subscription_data: subscriptionData,
       metadata: { user_id: String(userId) },
-    });
+      });
+    } catch (error) {
+      // A code may be used or revoked between lookup and Checkout creation.
+      // Preserve a user-facing invalid-code response; never grant a trial by fallback.
+      if (promotion && /^(discounts|promotion_code)/.test(String(error?.param || ""))) {
+        return res.status(400).json({ ok: false, error: "invalid_promo_code" });
+      }
+      throw error;
+    }
 
     await pool.query(
       `UPDATE billing_profiles
@@ -2335,7 +2381,7 @@ async function sendEmergencyContactInviteEmail(toEmail, contactName, ownerEmail,
     bodyHtml:
       `<p style="margin:0 0 12px 0">${escapeHtml(introLine)}</p>` +
       `<p style="margin:0 0 12px 0"><b>${escapeHtml(safeOwner)}</b> added you as an emergency contact in <b>AnyCircumstances</b>.</p>` +
-      `<h2 style="margin:16px 0 8px;font-size:18px;color:#d6e6df">What this means</h2>` +
+      `<h2 style="margin:16px 0 8px;font-size:18px;color:#ffffff">What this means</h2>` +
       `<ul style="margin:0 0 16px 18px;padding:0">` +
       `<li>You are not taking on any responsibility for them.</li>` +
       `<li>If they miss scheduled check-ins and the grace period expires, you may receive a secure email with links to files they assigned to you.</li>` +

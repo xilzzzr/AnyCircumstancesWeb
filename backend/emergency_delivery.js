@@ -1,6 +1,6 @@
 const crypto = require("crypto");
 const nodemailer = require("nodemailer");
-const { emailSender, renderEmergencyEmail } = require("./emails");
+const { emailSender, renderEmergencyEmail, emergencyEmailSubject } = require("./emails");
 
 function sha256Hex(input) {
   return crypto.createHash("sha256").update(String(input)).digest("hex");
@@ -165,14 +165,15 @@ async function createShareLinks(pool, contactId, userId, fileIds) {
   const validIds = new Set((rows || []).map((row) => String(row.id)));
   const links = [];
   const tokenHashes = [];
+  const deliveryGroupId = crypto.randomUUID();
 
   for (const fileId of fileIds) {
     if (!validIds.has(String(fileId))) continue;
     const token = crypto.randomBytes(32).toString("hex");
     const tokenHash = sha256Hex(token);
     await pool.query(
-      "INSERT INTO contact_file_share_tokens (contact_id, file_id, token_hash, expires_at) VALUES (?, ?, ?, ?)",
-      [String(contactId), String(fileId), tokenHash, shareExpiresAt()]
+      "INSERT INTO contact_file_share_tokens (contact_id, file_id, token_hash, expires_at, delivery_group_id) VALUES (?, ?, ?, ?, ?)",
+      [String(contactId), String(fileId), tokenHash, shareExpiresAt(), deliveryGroupId]
     );
     tokenHashes.push(tokenHash);
     links.push(publicAppBase() + "/share#token=" + encodeURIComponent(token));
@@ -300,7 +301,7 @@ async function deliverPendingEmergencyDispatches(pool, { userId = null, dueAt = 
 
   const [dispatches] = await pool.query(
     `SELECT d.id, d.user_id, d.contact_id, d.due_at, d.reason, d.file_ids_json,
-            c.email, c.name, c.public_key, u.email AS owner_email
+            c.email, c.name, c.public_key, u.email AS owner_email, u.display_name AS owner_name
      FROM verification_emergency_contact_dispatches d
      JOIN users u ON u.id = d.user_id
      JOIN emergency_contacts c
@@ -360,6 +361,7 @@ async function deliverPendingEmergencyDispatches(pool, { userId = null, dueAt = 
       const rendered = renderEmergencyEmail({
         name: String(dispatch.name || ""),
         ownerEmail: String(dispatch.owner_email || ""),
+        ownerName: String(dispatch.owner_name || ""),
         links: created.links,
         scheduled: String(dispatch.reason || "") === "scheduled",
       });
@@ -367,7 +369,7 @@ async function deliverPendingEmergencyDispatches(pool, { userId = null, dueAt = 
       await transporter.sendMail({
         from,
         to: String(dispatch.email),
-        subject: "AnyCircumstances: Emergency access link",
+        subject: emergencyEmailSubject(dispatch.owner_name, dispatch.owner_email),
         text: rendered.text,
         html: rendered.html,
       });
@@ -428,3 +430,4 @@ module.exports = {
   queueAndDeliverEmergency,
   queueEmergencyDispatch,
 };
+

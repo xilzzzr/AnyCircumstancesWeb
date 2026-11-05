@@ -40,14 +40,14 @@ export const quickGuideContent: Record<GuideLanguage, GuideContent> = {
       {
         "label": "THE BASICS",
         "headline": "Your protection works in a simple cycle",
-        "body": "AnyCircumstances keeps important files in your encrypted vault and uses scheduled check-ins to make sure you're okay. If you miss a check-in and your grace period ends, the files you selected for emergency access can be delivered to your verified contacts.",
+        "body": "AnyCircumstances keeps important files in your encrypted vault and uses scheduled check-ins to make sure you're okay. If you miss a check-in and your grace period ends, the files you assigned to your verified contacts can be delivered to them by email.",
         "callout": "You stay in control of what is stored, who receives it, and when delivery can happen.",
         "cta": "Upload your first file"
       },
       {
         "label": "YOUR VAULT",
         "headline": "Add the files that matter",
-        "body": "Upload documents and information you may want available in an emergency. Your files are encrypted before upload. You decide which files are included in emergency access and which trusted contacts should receive them.",
+        "body": "Upload documents and information you may want available in an emergency. Your files are encrypted before upload. A file is only included in emergency delivery when you assign it to a contact on the Emergency Contacts page.",
         "callout": "You can return to your vault anytime to add, remove, or review files.",
         "cta": "Upload files"
       },
@@ -87,14 +87,14 @@ export const quickGuideContent: Record<GuideLanguage, GuideContent> = {
       {
         "label": "LO ESENCIAL",
         "headline": "Tu protección funciona en un ciclo sencillo",
-        "body": "AnyCircumstances guarda archivos importantes en tu bóveda cifrada y utiliza verificaciones programadas para confirmar que estás bien. Si no realizas una verificación y termina tu período de gracia, los archivos que seleccionaste para acceso de emergencia pueden enviarse a tus contactos verificados.",
+        "body": "AnyCircumstances guarda archivos importantes en tu bóveda cifrada y utiliza verificaciones programadas para confirmar que estás bien. Si no realizas una verificación y termina tu período de gracia, los archivos que asignaste a tus contactos verificados pueden enviárseles por correo electrónico.",
         "callout": "Tú decides qué se guarda, quién lo recibe y cuándo puede realizarse la entrega.",
         "cta": "Subir tu primer archivo"
       },
       {
         "label": "TU BÓVEDA",
         "headline": "Añade los archivos importantes",
-        "body": "Sube documentos e información que quieras tener disponibles en una emergencia. Tus archivos se cifran antes de subirse. Tú decides qué archivos se incluyen en el acceso de emergencia y qué contactos de confianza deben recibirlos.",
+        "body": "Sube documentos e información que quieras tener disponibles en una emergencia. Tus archivos se cifran antes de subirse. Un archivo solo se incluye en la entrega de emergencia cuando lo asignas a un contacto en la página de contactos de emergencia (Emergency Contacts).",
         "callout": "Puedes volver a tu bóveda en cualquier momento para añadir, eliminar o revisar archivos.",
         "cta": "Subir archivos"
       },
@@ -134,14 +134,14 @@ export const quickGuideContent: Record<GuideLanguage, GuideContent> = {
       {
         "label": "ОСНОВЫ",
         "headline": "Ваша защита работает по простому циклу",
-        "body": "AnyCircumstances хранит важные файлы в вашем зашифрованном хранилище и использует запланированные отметки, чтобы убедиться, что с вами всё в порядке. Если вы пропустите отметку и закончится льготный период, выбранные вами для экстренного доступа файлы могут быть переданы подтверждённым доверенным контактам.",
+        "body": "AnyCircumstances хранит важные файлы в вашем зашифрованном хранилище и использует запланированные отметки, чтобы убедиться, что с вами всё в порядке. Если вы пропустите отметку и закончится льготный период, файлы, которые вы назначили подтверждённым контактам, могут быть отправлены им по электронной почте.",
         "callout": "Вы сами решаете, что хранить, кому передавать информацию и когда может произойти передача.",
         "cta": "Загрузить первый файл"
       },
       {
         "label": "ВАШЕ ХРАНИЛИЩЕ",
         "headline": "Добавьте важные файлы",
-        "body": "Загрузите документы и информацию, которые могут понадобиться в экстренной ситуации. Файлы шифруются до загрузки. Вы сами выбираете, какие файлы доступны при экстренной передаче и какие доверенные контакты должны их получить.",
+        "body": "Загрузите документы и информацию, которые могут понадобиться в экстренной ситуации. Файлы шифруются до загрузки. Файл попадает в экстренную передачу, только если вы назначите его контакту на странице экстренных контактов (Emergency Contacts).",
         "callout": "Вы можете в любое время вернуться в хранилище, чтобы добавить, удалить или проверить файлы.",
         "cta": "Загрузить файлы"
       },
@@ -181,14 +181,14 @@ export const quickGuideContent: Record<GuideLanguage, GuideContent> = {
       {
         "label": "L'ESSENTIEL",
         "headline": "Votre protection fonctionne selon un cycle simple",
-        "body": "AnyCircumstances conserve vos fichiers importants dans votre coffre chiffré et utilise des confirmations programmées pour vérifier que tout va bien. Si vous manquez une confirmation et que votre délai de grâce se termine, les fichiers sélectionnés pour l'accès d'urgence peuvent être transmis à vos contacts vérifiés.",
+        "body": "AnyCircumstances conserve vos fichiers importants dans votre coffre chiffré et utilise des confirmations programmées pour vérifier que tout va bien. Si vous manquez une confirmation et que votre délai de grâce se termine, les fichiers que vous avez attribués à vos contacts vérifiés peuvent leur être transmis par e-mail.",
         "callout": "Vous décidez de ce qui est stocké, de qui le reçoit et du moment où la transmission peut avoir lieu.",
         "cta": "Téléverser votre premier fichier"
       },
       {
         "label": "VOTRE COFFRE",
         "headline": "Ajoutez les fichiers importants",
-        "body": "Téléversez les documents et informations que vous souhaitez rendre disponibles en cas d'urgence. Vos fichiers sont chiffrés avant leur téléversement. Vous choisissez les fichiers inclus dans l'accès d'urgence et les contacts de confiance qui doivent les recevoir.",
+        "body": "Téléversez les documents et informations que vous souhaitez rendre disponibles en cas d'urgence. Vos fichiers sont chiffrés avant leur téléversement. Un fichier n'est inclus dans la transmission d'urgence que si vous l'attribuez à un contact sur la page des contacts d'urgence (Emergency Contacts).",
         "callout": "Vous pouvez revenir à votre coffre à tout moment pour ajouter, supprimer ou consulter des fichiers.",
         "cta": "Téléverser des fichiers"
       },
@@ -228,14 +228,14 @@ export const quickGuideContent: Record<GuideLanguage, GuideContent> = {
       {
         "label": "基本原理",
         "headline": "您的保护按照一个简单的流程运行",
-        "body": "AnyCircumstances 将重要文件保存在加密保险库中，并通过定期签到确认您的安全状态。如果您错过签到并且宽限期结束，您选择用于紧急访问的文件可以发送给已验证的可信联系人。",
+        "body": "AnyCircumstances 将重要文件保存在加密保险库中，并通过定期签到确认您的安全状态。如果您错过签到并且宽限期结束，您分配给已验证联系人的文件可以通过电子邮件发送给他们。",
         "callout": "由您决定保存哪些内容、谁可以接收，以及何时可以进行发送。",
         "cta": "上传第一个文件"
       },
       {
         "label": "您的保险库",
         "headline": "添加重要文件",
-        "body": "上传您希望在紧急情况下可以访问的文件和信息。文件会在上传之前进行加密。由您决定哪些文件可以用于紧急访问，以及哪些可信联系人可以接收这些文件。",
+        "body": "上传您希望在紧急情况下可以访问的文件和信息。文件会在上传之前进行加密。只有在紧急联系人页面（Emergency Contacts）将文件分配给联系人后，该文件才会包含在紧急发送中。",
         "callout": "您可以随时返回保险库添加、删除或查看文件。",
         "cta": "上传文件"
       },

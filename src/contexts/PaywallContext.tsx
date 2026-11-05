@@ -2,6 +2,9 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from "
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
+import { formatMoney, getPlanCharge } from "@/lib/pricing";
+
+const STARTING_PRICE = formatMoney(getPlanCharge(5, "monthly", "monthly").amount);
 
 type PaywallState = {
   open: boolean;
@@ -21,8 +24,8 @@ export function PaywallProvider({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
   const [state, setState] = useState<PaywallState>({
     open: false,
-    title: "Paid feature",
-    description: "This feature is part of a paid plan. Build a plan starting at $4.99/month to unlock it.",
+    title: "Active plan required",
+    description: `This needs an active plan. There’s no free plan or trial — plans start at ${STARTING_PRICE}/month.`,
     returnTo: undefined,
   });
 
@@ -43,7 +46,7 @@ export function PaywallProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const handler = (e: Event) => {
-      const ce = e as CustomEvent<any>;
+      const ce = e as CustomEvent<{ title?: unknown; description?: unknown; returnTo?: unknown } | null>;
       const d = ce?.detail || {};
       setState((s) => ({
         ...s,
@@ -79,7 +82,7 @@ export function PaywallProvider({ children }: { children: React.ReactNode }) {
             <Button variant="ghost" onClick={() => setState((s) => ({ ...s, open: false }))}>
               Not now
             </Button>
-            <Button onClick={goBuildPlan}>Build my plan (from $4.99)</Button>
+            <Button onClick={goBuildPlan}>Choose a plan (from {STARTING_PRICE}/month)</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
