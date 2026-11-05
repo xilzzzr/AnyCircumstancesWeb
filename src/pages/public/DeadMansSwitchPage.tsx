@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import content from "@/data/publicContent.json";
 import { ContextualCta } from "@/components/public/ContextualCta";
 import { ContentLinks, PublicContentSection } from "@/components/public/ArticleContent";
-import { motion } from "framer-motion";
+import { motion } from "@/components/public/staticMotion";
 import {
   Skull,
   Clock,
@@ -71,8 +71,8 @@ export function DeadMansSwitchPage() {
               transition={{ duration: 0.55, delay: 0.2 }}
               className="flex flex-col sm:flex-row gap-4 justify-center"
             >
-              <Button asChild size="lg" className="w-full sm:w-auto gap-2 shadow-glow"><Link to="/signup">
-                  Set Up Your Switch
+              <Button asChild size="lg" className="w-full sm:w-auto gap-2 shadow-glow"><Link to="/pricing">
+                  See plans from $4.99/month
                   <ArrowRight className="h-4 w-4" />
                 </Link></Button>
               <Button asChild
@@ -166,13 +166,13 @@ export function DeadMansSwitchPage() {
                 },
                 {
                   icon: Lock,
-                  title: "Privacy first",
-                  desc: "Your files stay encrypted and private until the trigger happens.",
+                  title: "Nothing sent early",
+                  desc: "Recipients receive nothing until a release happens, and then only the files assigned to them.",
                 },
                 {
                   icon: Zap,
-                  title: "Fast activation",
-                  desc: "When triggered, secure links are delivered quickly.",
+                  title: "Prompt delivery",
+                  desc: "When a release happens, secure links are emailed to confirmed contacts shortly afterwards.",
                 },
               ].map((c, idx) => (
                 <motion.div
@@ -222,19 +222,19 @@ export function DeadMansSwitchPage() {
                   step: "01",
                   icon: Workflow,
                   title: "Pick a schedule",
-                  desc: "Daily, weekly, or monthly. You decide what “normal” looks like.",
+                  desc: "Daily or custom scheduled days, weekly, or monthly. You decide what “normal” looks like.",
                 },
                 {
                   step: "02",
                   icon: MessageCircleWarning,
                   title: "Check in quickly",
-                  desc: "Confirm you’re good. Takes seconds. (Your future self will thank you.)",
+                  desc: "Sign in and enter your check-in PIN. It takes seconds and resets the schedule.",
                 },
                 {
                   step: "03",
                   icon: BellRing,
                   title: "The grace period expires",
-                  desc: "After your grace rules, contacts receive secure access.",
+                  desc: "Miss a check-in and you get 1–5 reminder emails during a 6–72 hour grace period. If it runs out, contacts are emailed secure links.",
                 },
               ].map((s, idx) => (
                 <motion.div
@@ -274,8 +274,8 @@ export function DeadMansSwitchPage() {
                   </div>
                 </div>
               </div>
-              <Button asChild className="w-full md:w-auto gap-2 shadow-glow"><Link to="/signup" className="w-full md:w-auto">
-                  Set it up now
+              <Button asChild className="w-full md:w-auto gap-2 shadow-glow"><Link to="/pricing" className="w-full md:w-auto">
+                  Build your plan
                   <ArrowRight className="h-4 w-4" />
                 </Link></Button>
             </motion.div>
@@ -299,11 +299,11 @@ export function DeadMansSwitchPage() {
                   </div>
 
                   <h2 className="text-3xl font-bold text-foreground mb-3">
-                    No one gets access early
+                    Recipients get nothing early
                   </h2>
 
                   <p className="text-muted-foreground text-lg">
-                    Your files stay encrypted and locked until your trigger rules say otherwise.
+                    Contacts receive their files only when a release happens: a missed check-in followed by an expired grace period, or your emergency PIN.
                   </p>
 
                   <div className="mt-6 grid gap-3">
@@ -311,17 +311,17 @@ export function DeadMansSwitchPage() {
                       {
                         icon: Lock,
                         t: "Encrypted before upload",
-                        d: "The server stores ciphertext, not readable files.",
+                        d: "File contents are encrypted in your browser before they reach our storage.",
                       },
                       {
                         icon: EyeOff,
-                        t: "Protected recovery design",
-                        d: "Encrypted recovery material supports delivery to the contacts you choose.",
+                        t: "Emergency-release key",
+                        d: "So recipients can open files without your passphrase, each file key is also protected by a key our systems can use. That means the service isn’t zero-knowledge.",
                       },
                       {
                         icon: KeyRound,
-                        t: "Access stays under your control",
-                        d: "Contacts only receive access when the system triggers.",
+                        t: "Per-person file assignment",
+                        d: "Each confirmed contact receives only the files you assigned to them.",
                       },
                     ].map((x) => (
                       <div key={x.t} className="flex items-start gap-3">
@@ -355,9 +355,9 @@ export function DeadMansSwitchPage() {
                   <div className="space-y-3">
                     {[
                       { icon: Clock, t: "Choose a realistic schedule" },
-                      { icon: Users, t: "Add 1–3 trusted contacts" },
-                      { icon: FileKey2, t: "Attach only the files you want delivered" },
-                      { icon: BellRing, t: "Test notifications and confirm routes" },
+                      { icon: Users, t: "Add trusted contacts and make sure each one confirms by email" },
+                      { icon: FileKey2, t: "Assign only the files each person should receive" },
+                      { icon: BellRing, t: "Tell your contacts to expect an email from AnyCircumstances" },
                     ].map((x) => (
                       <div key={x.t} className="flex items-start gap-3">
                         <div className="h-9 w-9 rounded-xl bg-primary/10 flex items-center justify-center mt-0.5">
@@ -369,8 +369,8 @@ export function DeadMansSwitchPage() {
                   </div>
 
                   <div className="mt-6">
-                    <Button asChild className="w-full gap-2 shadow-glow"><Link to="/signup">
-                        Set Up Your Switch
+                    <Button asChild className="w-full gap-2 shadow-glow"><Link to="/pricing">
+                        Build your plan
                         <ArrowRight className="h-4 w-4" />
                       </Link></Button>
                   </div>

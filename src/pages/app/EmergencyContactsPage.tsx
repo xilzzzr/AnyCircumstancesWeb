@@ -48,6 +48,20 @@ type ApiListResp =
   | { ok: true; contacts: EmergencyContact[] }
   | { ok: false; error: string };
 
+// Why an unverified contact still needs a confirmation email. Known only for actions taken
+// in this session; the contacts API doesn't report whether an invite was ever sent.
+type InviteIssue = "not_sent" | "send_failed" | "email_changed";
+
+const inviteIssueText: Record<InviteIssue, string> = {
+  not_sent: "No confirmation email has been sent yet.",
+  send_failed: "The confirmation email couldn't be sent.",
+  email_changed: "The email address changed, so they need to confirm the new address.",
+};
+
+function normalizeEmail(email: string) {
+  return String(email || "").trim().toLowerCase();
+}
+
 function emitPaywall(title?: string, description?: string) {
   const returnTo = window.location.pathname + window.location.search;
   window.dispatchEvent(
@@ -72,8 +86,9 @@ async function readJsonSafe(res: Response) {
   }
 }
 
-function isPaymentRequired(resp: Response, data: any) {
-  const code = data?.error ? String(data.error) : "";
+function isPaymentRequired(resp: Response, data: unknown) {
+  const error = (data as { error?: unknown } | null)?.error;
+  const code = error ? String(error) : "";
   return resp.status === 402 || code === "payment_required";
 }
 
@@ -104,6 +119,7 @@ export function EmergencyContactsPage() {
 
   const [skipNotify, setSkipNotify] = useState(false);
   const [showSkipNotifyConfirm, setShowSkipNotifyConfirm] = useState(false);
+  const [inviteIssues, setInviteIssues] = useState<Record<string, InviteIssue>>({});
 
   const [formName, setFormName] = useState("");
   const [formEmail, setFormEmail] = useState("");
@@ -128,6 +144,23 @@ export function EmergencyContactsPage() {
     setSkipNotify(false);
   };
 
+  const setInviteIssue = (contactId: string, issue: InviteIssue | null) => {
+    setInviteIssues((prev) => {
+      const next = { ...prev };
+      if (issue) next[contactId] = issue;
+      else delete next[contactId];
+      return next;
+    });
+  };
+
+  const showReauthFailed = () => {
+    toast({
+      title: "Incorrect password",
+      description: "Enter your current account password to confirm this change.",
+      variant: "destructive",
+    });
+  };
+
   const fetchContacts = async () => {
     try {
       const resp = await fetch("/auth/emergency-contacts", { credentials: "include" });
@@ -143,7 +176,7 @@ export function EmergencyContactsPage() {
           return;
         }
 
-        const code = (data && "error" in data ? (data as any).error : "") || "load_failed";
+        const code = (data && "error" in data ? data.error : "") || "load_failed";
 
         if (code === "not_authenticated") {
           toast({
@@ -177,8 +210,8 @@ export function EmergencyContactsPage() {
     try {
       const files = await listVaultFiles();
       setVaultFiles(Array.isArray(files) ? files : []);
-    } catch (e: any) {
-      const msg = String(e?.message || "");
+    } catch (e: unknown) {
+      const msg = String((e as Error | null)?.message || "");
       if (msg === "payment_required" || msg === "http_402") {
         setVaultFiles([]);
         setFilesLoading(false);
@@ -264,6 +297,11 @@ export function EmergencyContactsPage() {
           return;
         }
 
+        if (code === "reauthentication_failed") {
+          showReauthFailed();
+          return;
+        }
+
         toast({
           title: "Could not add contact",
           description: "Please try again.",
@@ -272,14 +310,33 @@ export function EmergencyContactsPage() {
         return;
       }
 
-      setContacts((prev) => [data.contact as EmergencyContact, ...prev]);
+      const created = data.contact as EmergencyContact;
+      const skippedInvite = skipNotify;
+      const emailSent = data.email_sent === true;
+
+      setContacts((prev) => [created, ...prev]);
       setShowAddModal(false);
       resetForm();
 
-      toast({
-        title: "Contact added",
-        description: skipNotify ? "Contact added without notifying them. You can resend verification anytime." : "A verification email has been sent to your contact.",
-      });
+      if (skippedInvite) {
+        setInviteIssue(created.id, "not_sent");
+        toast({
+          title: "Contact added, not verified",
+          description: `No confirmation email was sent. ${created.name} won't receive any files until you send it with "Resend confirmation email" and they click the link.`,
+        });
+      } else if (emailSent) {
+        toast({
+          title: "Contact added",
+          description: `We emailed ${created.email} a confirmation link. They need to click it within 2 days before they can receive any files.`,
+        });
+      } else {
+        setInviteIssue(created.id, "send_failed");
+        toast({
+          title: "Confirmation email couldn't be sent",
+          description: `${created.name} was added but won't receive any files until they confirm. Try "Resend confirmation email" on their contact card.`,
+          variant: "destructive",
+        });
+      }
     } catch {
       toast({
         title: "Network error",
@@ -330,6 +387,20 @@ export function EmergencyContactsPage() {
           return;
         }
 
+        if (code === "reauthentication_failed") {
+          showReauthFailed();
+          return;
+        }
+
+        if (code === "invalid_email") {
+          toast({
+            title: "Invalid email",
+            description: "Please enter a valid email address.",
+            variant: "destructive",
+          });
+          return;
+        }
+
         toast({
           title: "Could not update contact",
           description: "Please try again.",
@@ -338,10 +409,21 @@ export function EmergencyContactsPage() {
         return;
       }
 
+      // The server clears verification and cancels outstanding links when the email changes.
+      const emailChanged = normalizeEmail(formEmail) !== normalizeEmail(selectedContact.email);
+      const contactId = selectedContact.id;
+      const savedName = formName.trim() || selectedContact.name;
+
       setContacts((prev) =>
         prev.map((c) =>
-          c.id === selectedContact.id
-            ? { ...c, name: formName, email: formEmail, relationship: formRelationship }
+          c.id === contactId
+            ? {
+                ...c,
+                name: savedName,
+                email: normalizeEmail(formEmail),
+                relationship: formRelationship.trim(),
+                verified: emailChanged ? false : c.verified,
+              }
             : c
         )
       );
@@ -349,10 +431,18 @@ export function EmergencyContactsPage() {
       setShowEditModal(false);
       resetForm();
 
-      toast({
-        title: "Contact updated",
-        description: "Emergency contact details have been saved.",
-      });
+      if (emailChanged) {
+        setInviteIssue(contactId, "email_changed");
+        toast({
+          title: "Contact updated, needs to verify again",
+          description: `Because the email address changed, ${savedName} is no longer verified and links already sent to them were cancelled. Send a confirmation email to the new address with "Resend confirmation email".`,
+        });
+      } else {
+        toast({
+          title: "Contact updated",
+          description: "Emergency contact details have been saved.",
+        });
+      }
     } catch {
       toast({
         title: "Network error",
@@ -384,6 +474,11 @@ export function EmergencyContactsPage() {
             "Removing contacts requires a plan",
             "Upgrade to manage contacts."
           );
+          return;
+        }
+
+        if (data?.error === "reauthentication_failed") {
+          showReauthFailed();
           return;
         }
 
@@ -434,6 +529,11 @@ export function EmergencyContactsPage() {
             "Assigning files requires a plan",
             "Upgrade to assign files to your emergency contacts."
           );
+          return;
+        }
+
+        if (data?.error === "reauthentication_failed") {
+          showReauthFailed();
           return;
         }
 
@@ -493,9 +593,20 @@ export function EmergencyContactsPage() {
         return;
       }
 
+      if (data.email_sent !== true) {
+        setInviteIssue(contact.id, "send_failed");
+        toast({
+          title: "Email couldn't be sent",
+          description: `The confirmation email to ${contact.email} couldn't be sent. Please try "Resend confirmation email" again in a few minutes.`,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      setInviteIssue(contact.id, null);
       toast({
-        title: "Verification sent",
-        description: `A new verification email has been sent to ${contact.email}.`,
+        title: "Confirmation email sent",
+        description: `We sent a new confirmation link to ${contact.email}. It's valid for 2 days.`,
       });
     } catch {
       toast({
@@ -549,9 +660,20 @@ export function EmergencyContactsPage() {
           <div className="text-sm">
             <p className="font-medium text-foreground">How it works</p>
             <p className="text-muted-foreground">
-              If you miss your check-in and the grace period expires, only the files you&apos;ve assigned
-              to each contact will be sent to them. Nothing is shared until then.
+              If emergency delivery starts (you miss your check-in and the grace period ends, or you use your
+              emergency PIN), each verified contact is emailed links to only the files you&apos;ve assigned to
+              them. No files are shared before then.
             </p>
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
+              <li>
+                Each contact must confirm their email by clicking the link in the confirmation email. The link is
+                valid for 2 days, and you can resend it. Contacts who haven&apos;t confirmed receive nothing.
+              </li>
+              <li>Contacts receive only the files you assign to them. A contact with no files assigned receives nothing.</li>
+              <li>
+                Delivery is by email only. We can&apos;t tell if an email bounces, so double-check each address.
+              </li>
+            </ul>
           </div>
         </CardContent>
       </Card>
@@ -579,7 +701,10 @@ export function EmergencyContactsPage() {
         </Card>
       ) : (
         <div className="grid gap-4">
-          {contacts.map((contact) => (
+          {contacts.map((contact) => {
+            const assignedCount = Array.isArray(contact.assignedFiles) ? contact.assignedFiles.length : 0;
+            const inviteIssue = inviteIssues[contact.id];
+            return (
             <Card key={contact.id}>
               <CardContent className="flex items-center gap-4 py-4">
                 <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center text-primary font-medium text-lg">
@@ -597,21 +722,51 @@ export function EmergencyContactsPage() {
                     ) : (
                       <Badge variant="outline" className="bg-warning/10 text-warning border-warning/20 gap-1">
                         <Clock className="h-3 w-3" />
-                        Pending
+                        {inviteIssue === "not_sent" ? "Not invited" : "Not verified"}
                       </Badge>
                     )}
                   </div>
                   <p className="text-sm text-muted-foreground truncate">{contact.email}</p>
                   <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-                    <span>{contact.relationship}</span>
-                    <span>•</span>
+                    {contact.relationship && (
+                      <>
+                        <span>{contact.relationship}</span>
+                        <span aria-hidden="true">•</span>
+                      </>
+                    )}
                     <span>
-                      {Array.isArray(contact.assignedFiles) ? contact.assignedFiles.length : 0} file
-                      {Array.isArray(contact.assignedFiles) && contact.assignedFiles.length !== 1 ? "s" : ""} assigned
+                      {assignedCount} file{assignedCount !== 1 ? "s" : ""} assigned
                     </span>
                   </div>
 
-                  {Array.isArray(contact.assignedFiles) && contact.assignedFiles.length > 0 && (
+                  {assignedCount === 0 && (
+                    <p className="mt-1 text-xs text-warning">No files assigned, so this contact will receive nothing.</p>
+                  )}
+
+                  {!contact.verified && (
+                    <div className="mt-2 rounded-md border border-warning/20 bg-warning/5 px-3 py-2 text-xs">
+                      <p className="text-foreground">
+                        {inviteIssue
+                          ? inviteIssueText[inviteIssue]
+                          : "Waiting for them to confirm. If they didn't get the email or the 2-day link expired, resend it."}
+                      </p>
+                      <p className="mt-0.5 text-muted-foreground">
+                        They won&apos;t receive any files until they click the confirmation email.
+                      </p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="mt-2 min-h-11 sm:min-h-9"
+                        onClick={() => handleResendVerification(contact)}
+                        disabled={loading}
+                      >
+                        <Send className="h-3.5 w-3.5" />
+                        Resend confirmation email
+                      </Button>
+                    </div>
+                  )}
+
+                  {assignedCount > 0 && (
                     <div className="mt-2 text-xs text-muted-foreground">
                       {contact.assignedFiles.slice(0, 2).map((key) => (
                         <div key={key} className="truncate">
@@ -632,7 +787,7 @@ export function EmergencyContactsPage() {
 
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" disabled={loading}>
+                      <Button variant="ghost" size="icon" disabled={loading} aria-label={`More actions for ${contact.name}`}>
                         <MoreHorizontal className="h-4 w-4" />
                       </Button>
                     </DropdownMenuTrigger>
@@ -644,7 +799,7 @@ export function EmergencyContactsPage() {
                       {!contact.verified && (
                         <DropdownMenuItem onClick={() => handleResendVerification(contact)}>
                           <Send className="mr-2 h-4 w-4" />
-                          Resend verification
+                          Resend confirmation email
                         </DropdownMenuItem>
                       )}
                       <DropdownMenuItem onClick={() => openDeleteModal(contact)} className="text-destructive">
@@ -656,7 +811,8 @@ export function EmergencyContactsPage() {
                 </div>
               </CardContent>
             </Card>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -664,7 +820,10 @@ export function EmergencyContactsPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Add emergency contact</DialogTitle>
-            <DialogDescription>This person will receive your assigned files if you miss check-ins.</DialogDescription>
+            <DialogDescription>
+              Once they confirm their email, this person can receive the files you assign to them if emergency
+              delivery starts.
+            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4">
@@ -755,10 +914,11 @@ export function EmergencyContactsPage() {
               />
               <div className="text-sm leading-snug">
                 <p className="font-medium text-foreground">
-                  I wish not to notify this person that they have been added as an emergency contact unless it's in case of emergency
+                  Don&apos;t send the confirmation email now
                 </p>
                 <p className="text-muted-foreground mt-1">
-                  We recommend notifying them so they can verify their email and be ready.
+                  This person must confirm before they can receive anything. Until you send the confirmation email
+                  and they click it, they won&apos;t receive files in an emergency.
                 </p>
               </div>
             </label>
@@ -788,9 +948,11 @@ export function EmergencyContactsPage() {
           <Dialog open={showSkipNotifyConfirm} onOpenChange={setShowSkipNotifyConfirm}>
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>Are you sure?</DialogTitle>
+                <DialogTitle>Add without sending the confirmation email?</DialogTitle>
                 <DialogDescription>
-                  If this person doesn't know they've been added as your emergency contact, they may not check their email when they need to.
+                  {formName.trim() || "This person"} won&apos;t be able to confirm and won&apos;t receive any files in
+                  an emergency until you send the confirmation email (&quot;Resend confirmation email&quot; on their
+                  contact card) and they click the link.
                 </DialogDescription>
               </DialogHeader>
 
@@ -813,7 +975,7 @@ export function EmergencyContactsPage() {
                   }}
                   disabled={loading}
                 >
-                  Yes, don't notify
+                  Yes, don&apos;t send it now
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -847,7 +1009,12 @@ export function EmergencyContactsPage() {
                 value={formEmail}
                 onChange={(e) => setFormEmail(e.target.value)}
                 disabled={loading}
+                aria-describedby="edit-email-help"
               />
+              <p id="edit-email-help" className="text-xs text-muted-foreground">
+                Changing the email removes this contact&apos;s verification and cancels links already sent to them.
+                They&apos;ll need to confirm the new address.
+              </p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="edit-relationship">Relationship</Label>
@@ -879,7 +1046,10 @@ export function EmergencyContactsPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Assign files to {selectedContact?.name}</DialogTitle>
-            <DialogDescription>Select which files this contact should receive.</DialogDescription>
+            <DialogDescription>
+              Select which files this contact should receive. Saving changes cancels any emergency links already
+              sent to them.
+            </DialogDescription>
           </DialogHeader>
 
           {filesLoading ? (

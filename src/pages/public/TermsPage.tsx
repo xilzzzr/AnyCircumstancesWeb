@@ -1,5 +1,3 @@
-import { motion } from 'framer-motion';
-
 export function TermsPage() {
   return (
     <div className="flex flex-col">
@@ -7,21 +5,12 @@ export function TermsPage() {
       <section className="py-16 lg:py-20 bg-gradient-hero">
         <div className="container mx-auto px-4">
           <div className="max-w-3xl mx-auto text-center">
-            <motion.h1
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="text-4xl md:text-5xl font-bold text-vault-foreground mb-4"
-            >
+            <h1 className="text-4xl md:text-5xl font-bold text-vault-foreground mb-4">
               Terms and Conditions
-            </motion.h1>
-            <motion.p
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1 }}
-              className="text-vault-foreground/70"
-            >
-              Last updated: January 2025
-            </motion.p>
+            </h1>
+            <p className="text-vault-foreground/70">
+              Last updated: November 4, 2026
+            </p>
           </div>
         </div>
       </section>
@@ -78,6 +67,8 @@ export function TermsPage() {
             <p className="text-muted-foreground mb-4">You understand and agree that:</p>
             <ul className="list-disc pl-6 space-y-2 text-muted-foreground">
               <li>Failure to check in within your configured timeframes may trigger delivery of your selected files to your trusted contacts</li>
+              <li>Entering your emergency PIN starts delivery to your verified contacts immediately, and delivery cannot be undone</li>
+              <li>Only contacts who have confirmed their email address, and only the files assigned to them, are included in a delivery</li>
               <li>It is your responsibility to keep your settings and contacts accurate</li>
               <li>We are not responsible for actions taken by your trusted contacts after receiving your files</li>
             </ul>
@@ -95,6 +86,9 @@ export function TermsPage() {
 
             <h2 className="text-2xl font-semibold text-foreground mt-10 mb-4">7. Termination</h2>
             <p className="text-muted-foreground mb-4">You may close your account at any time through your settings.</p>
+            <p className="text-muted-foreground mb-4">
+              Cancelling your plan from your account settings ends it immediately and permanently deletes your stored files. Deleting your account permanently deletes your files, trusted contacts, check-in history and any pending delivery links, and links that were already sent stop working.
+            </p>
             <p className="text-muted-foreground mb-4">We may suspend or terminate accounts that:</p>
             <ul className="list-disc pl-6 space-y-2 text-muted-foreground">
               <li>Violate these Terms</li>
@@ -107,7 +101,7 @@ export function TermsPage() {
 
             <h2 className="text-2xl font-semibold text-foreground mt-10 mb-4">8. Payments and refunds</h2>
             <p className="text-muted-foreground mb-4">
-              If your plan involves paid subscriptions or storage fees, you agree to the posted pricing and billing terms.
+              If your plan involves paid subscriptions or storage fees, you agree to the posted pricing and billing terms. Subscriptions renew automatically each month or each year, depending on the billing period you chose, until cancelled.
             </p>
             <p className="text-muted-foreground">
               Unless otherwise stated, fees are non-refundable except where required by law.
@@ -141,7 +135,7 @@ export function TermsPage() {
 
             <h2 className="text-2xl font-semibold text-foreground mt-10 mb-4">13. Contact us</h2>
             <p className="text-muted-foreground">
-              If you have questions about these Terms or the service, contact us at <a href="mailto:support@example.com" className="text-primary hover:underline">support@example.com</a>.
+              If you have questions about these Terms or the service, contact us at <a href="mailto:contact@anycircumstances.com" className="text-primary hover:underline">contact@anycircumstances.com</a>.
             </p>
           </div>
         </div>

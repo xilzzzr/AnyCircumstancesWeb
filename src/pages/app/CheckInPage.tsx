@@ -65,9 +65,11 @@ function getTimeUntil(dateString: string) {
 }
 
 function getApiBaseUrl() {
-  const v = (import.meta as any)?.env?.VITE_API_BASE_URL;
+  const v = import.meta.env?.VITE_API_BASE_URL;
   return (typeof v === "string" && v.trim()) ? v.trim() : "";
 }
+
+type ApiError = Error & { status?: number; payload?: { error?: string } | null };
 
 async function apiFetch(path: string, init?: RequestInit) {
   const base = getApiBaseUrl();
@@ -85,7 +87,7 @@ async function apiFetch(path: string, init?: RequestInit) {
 
   if (!res.ok) {
     const error = data?.error || data?.message || `http_${res.status}`;
-    const e: any = new Error(error);
+    const e = new Error(error) as ApiError;
     e.status = res.status;
     e.payload = data;
     throw e;
@@ -99,6 +101,9 @@ export function CheckInPage() {
   const [loading, setLoading] = useState(true);
   const [verifying, setVerifying] = useState(false);
   const [verified, setVerified] = useState(false);
+  // True when the check-in happened after the grace period had already ended. Based only on
+  // the schedule state loaded before the check-in, never on which PIN was entered.
+  const [checkedInAfterGrace, setCheckedInAfterGrace] = useState(false);
 
   const [settings, setSettings] = useState<VerificationSettings | null>(null);
   const [status, setStatus] = useState<VerificationStatus | null>(null);
@@ -133,7 +138,8 @@ export function CheckInPage() {
       } catch {
         setHistory([]);
       }
-    } catch (e: any) {
+    } catch (err: unknown) {
+      const e = err as ApiError;
       if (e?.status === 401) {
         toast({
           title: "Session expired",
@@ -172,12 +178,14 @@ export function CheckInPage() {
     }
 
     setVerifying(true);
+    const graceEndedBefore = status?.state === "expired";
     try {
       await apiFetch("/auth/verification-check-in", {
         method: "POST",
         body: JSON.stringify({ pin: trimmed })
       });
 
+      setCheckedInAfterGrace(graceEndedBefore);
       setVerified(true);
       setPin("");
 
@@ -187,7 +195,8 @@ export function CheckInPage() {
       });
 
       await loadAll();
-    } catch (e: any) {
+    } catch (err: unknown) {
+      const e = err as ApiError;
       if (e?.status === 401) {
         setPin("");
         const signOutReason = e?.payload?.error === "invalid_pin" ? "incorrect-check-in-pin" : "session-expired";
@@ -227,9 +236,11 @@ export function CheckInPage() {
     ? `Next check-in due in ${scheduleFrequency === "daily" ? "24 hours" : scheduleFrequency === "weekly" ? "7 days" : "30 days"}`
     : status?.state === "not_configured"
       ? "Set your schedule first in Verification Settings."
-      : isOverdue
-        ? "Please verify now to prevent emergency delivery"
-        : (timeRemaining || "");
+      : status?.state === "expired"
+        ? "Your grace period has ended, so emergency delivery may already have started. Check in now to restart your schedule."
+        : isOverdue
+          ? "Please verify now to prevent emergency delivery"
+          : (timeRemaining || "");
 
   return (
     <div className="p-6 lg:p-8 space-y-6">
@@ -305,7 +316,9 @@ export function CheckInPage() {
           ) : (
             <div className="text-center space-y-4">
               <p className="text-sm text-muted-foreground">
-                Your emergency contacts will not be notified. See you at your next scheduled check-in.
+                {checkedInAfterGrace
+                  ? "Your schedule has restarted. Your grace period had already ended, so emergency delivery may have started; emails that were already sent can't be recalled."
+                  : "Your emergency contacts will not be notified. See you at your next scheduled check-in."}
               </p>
               <Button variant="outline" onClick={handleReset}>
                 Check in again

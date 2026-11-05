@@ -31,3 +31,18 @@ test('sender aliases use a consistent brand without changing configured mailbox'
   assert.equal(emailSender({ SMTP_FROM: 'smtp@example.com' }).address, 'smtp@example.com');
   assert.equal(emailSender({ SMTP_USER: 'fallback@example.com' }).address, 'fallback@example.com');
 });
+test('all dark email text is white while the light CTA keeps dark lettering', () => {
+  const out = renderAnyCircumstancesEmail({ title:'Hello', bodyText:'Message', ctaText:'Open', ctaUrl:'https://example.com', verificationCode:'123456', info:{ text:'Info' }, securityNotice:'Notice' });
+  assert.doesNotMatch(out.html, /color:#(?:e0e5e1|f4f5f2|b8c5be|d6e6df|b3caba)/);
+  assert.match(out.html, /color:#ffffff/);
+  assert.match(out.html, /color:#111513/);
+});
+test('recipient subjects identify the owner, fall back to email, and strip header controls', () => {
+  const { emergencyEmailSubject } = require('./emails');
+  assert.match(emergencyEmailSubject('Arina', 'owner@example.com'), /^Arina: emergency information/);
+  assert.match(emergencyEmailSubject('', 'owner@example.com'), /^owner@example.com:/);
+  assert.doesNotMatch(emergencyEmailSubject('A\r\nBcc: attacker@example.com', ''), /[\r\n]/);
+  const out = renderEmergencyEmail({ ownerName:'<Arina>', links:['https://example.com/share'], scheduled:true });
+  assert.match(out.html, /&lt;Arina&gt;/);
+  assert.match(out.text, /<Arina>/);
+});

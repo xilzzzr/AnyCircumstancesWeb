@@ -25,6 +25,7 @@ const { default: SharePage } = await bundle('src/pages/SharePage.tsx', [{
       contents: path === 'react' ? `
         export const useState = (...args) => globalThis.shareHarness.useState(...args);
         export const useEffect = (...args) => globalThis.shareHarness.useEffect(...args);
+        export const useRef = (...args) => globalThis.shareHarness.useRef(...args);
       ` : path === 'react-router-dom' ? 'export const useParams = () => ({});' : `
         export const jsx = (type, props) => ({type, props});
         export const jsxs = jsx;
@@ -39,7 +40,15 @@ const nodes = (tree) =>
     ? []
     : [tree, ...[tree.props?.children].flat(Infinity).flatMap(nodes)];
 
-test('emergency share redeems the fragment once, clears it, and uses the HttpOnly share session afterward', async (t) => {
+const text = (tree) =>
+  !tree || typeof tree !== 'object'
+    ? (typeof tree === 'string' || typeof tree === 'number' ? String(tree) : '')
+    : [tree.props?.children].flat(Infinity).map(text).join('');
+
+const buttonNamed = (tree, name) =>
+  nodes(tree).find((node) => node.type === 'button' && text(node).trim() === name);
+
+test('emergency share waits for the button, redeems the fragment once, clears it, and uses the HttpOnly share session afterward', async (t) => {
   const original = new File(
     ['%PDF-1.4\nEmergency instructions\n%%EOF'],
     'Emergency instructions.pdf',
@@ -53,6 +62,7 @@ test('emergency share redeems the fragment once, clears it, and uses the HttpOnl
   );
   const token = 'ab'.repeat(32);
   const publicKeys = [];
+  let lookups = 0;
   let downloadedBlob;
   let failure = '';
 
@@ -73,6 +83,7 @@ test('emergency share redeems the fragment once, clears it, and uses the HttpOnl
 
     if (url === '/files/share-lookup') {
       assert.deepEqual(body, { token });
+      lookups++;
       return Response.json({
         ok: true,
         file: { id: 'users/1/opaque-key', content_type: original.type },
@@ -162,6 +173,11 @@ test('emergency share redeems the fragment once, clears it, and uses the HttpOnl
         if (first) states[i] = typeof initial === 'function' ? initial() : initial;
         return [states[i], (value) => { states[i] = value; }];
       },
+      useRef(initial) {
+        const i = cursor++;
+        if (first) states[i] = { current: initial };
+        return states[i];
+      },
       useEffect(fn) {
         if (first) effects.push(fn);
       },
@@ -174,31 +190,53 @@ test('emergency share redeems the fragment once, clears it, and uses the HttpOnl
       return tree;
     };
 
+    const lookupsBefore = lookups;
     render();
     effects.forEach((effect) => effect());
     await new Promise((resolve) => setImmediate(resolve));
 
+    // Nothing is redeemed on load: a link scanner or preview must not spend the single-use link.
     let tree = render();
-    assert.equal(window.location.hash, '');
+    assert.equal(lookups, lookupsBefore);
+    assert.equal(window.location.hash, `#token=${token}`);
+    assert.ok(text(tree).includes('Someone shared important information with you'));
     assert.ok(!JSON.stringify(tree).includes('Generate contact keys'));
 
-    const button = nodes(tree).find((node) => node.type === 'button');
-    assert.ok(button);
-    await button.props.onClick();
+    const open = buttonNamed(tree, 'Open shared file');
+    assert.ok(open, JSON.stringify(tree));
+    await open.props.onClick();
     tree = render();
+    assert.equal(lookups, lookupsBefore + 1);
+    assert.equal(window.location.hash, '');
+
+    const downloadLink = (current) => nodes(current).find((node) => node.type === 'a' && node.props.download);
 
     if (scenario) {
       const code = scenario === 'missing_file_escrow' ? scenario : `${scenario}_failed`;
-      assert.ok(JSON.stringify(tree).includes(code));
-      assert.ok(!nodes(tree).some((node) => node.type === 'a'));
-    } else {
-      const link = nodes(tree).find((node) => node.type === 'a');
-      assert.ok(link, JSON.stringify(tree));
-      assert.equal(link.props.download, original.name);
-      assert.equal(await downloadedBlob.text(), await original.text());
-      assert.ok(JSON.stringify(tree).includes(original.name));
+      const shown = text(tree);
+      assert.ok(!JSON.stringify(tree).includes(code), 'raw error code must not be shown');
+      assert.ok(
+        shown.includes(scenario === 'download' ? "The download didn't finish" : "The file couldn't be prepared"),
+        shown
+      );
+      assert.ok(!downloadLink(tree));
+
+      // Retrying after redemption reuses the share session and never redeems the link again.
+      failure = '';
+      const retry = buttonNamed(tree, 'Try again');
+      assert.ok(retry, JSON.stringify(tree));
+      await retry.props.onClick();
+      tree = render();
+      assert.equal(lookups, lookupsBefore + 1);
     }
+
+    const link = downloadLink(tree);
+    assert.ok(link, JSON.stringify(tree));
+    assert.equal(link.props.download, original.name);
+    assert.equal(await downloadedBlob.text(), await original.text());
+    assert.ok(JSON.stringify(tree).includes(original.name));
   }
 
-  assert.equal(publicKeys.length, 7);
+  // 7 opens plus 4 retries after the failure scenarios, each with a fresh temporary key.
+  assert.equal(publicKeys.length, 11);
 });

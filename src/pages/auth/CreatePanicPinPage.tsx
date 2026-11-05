@@ -82,6 +82,18 @@ export function CreatePanicPinPage() {
           toast({ title: 'Password required', description: 'Enter your current account password.', variant: 'destructive' });
           return;
         }
+        if (code === 'emergency_pin_conflicts_with_pin') {
+          toast({ title: 'Choose a different PIN', description: 'Your emergency PIN must be different from your check-in PIN.', variant: 'destructive' });
+          setStep('create');
+          setPin('');
+          setConfirmPin('');
+          return;
+        }
+        if (code === 'use_pin_reset_flow') {
+          toast({ title: 'Emergency PIN already set', description: 'Your emergency PIN was created earlier.' });
+          navigate('/onboarding');
+          return;
+        }
 
         toast({
           title: 'Could not save emergency PIN',
@@ -128,24 +140,27 @@ export function CreatePanicPinPage() {
           </h1>
           <p className="text-muted-foreground">
             {step === 'create'
-              ? 'This is not a backup check-in PIN. Entering it on the Check-in page immediately triggers emergency delivery. Choose 4 to 6 digits and keep it secret.'
+              ? 'This is not a backup check-in PIN. Choose 4 to 6 digits that are different from your check-in PIN, and keep it secret.'
               : 'Enter your emergency PIN again to confirm.'}
           </p>
         </div>
 
         <div className="space-y-6">
-          <div role="note" className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-left">
+          <section aria-labelledby="emergency-pin-warning" className="rounded-xl border-2 border-destructive/60 bg-destructive/10 p-4 text-left">
             <div className="flex items-center gap-2 text-destructive">
-              <AlertTriangle aria-hidden="true" className="h-4 w-4 shrink-0" />
-              <p className="text-sm font-semibold">Immediate emergency action</p>
+              <AlertTriangle aria-hidden="true" className="h-5 w-5 shrink-0" />
+              <h2 id="emergency-pin-warning" className="text-base font-semibold">Warning: this PIN sends your files immediately</h2>
             </div>
-            <p className="mt-2 text-sm leading-relaxed text-foreground">
-              Entering this PIN on the Check-in page immediately starts emergency delivery of the files you assigned to your verified emergency contacts.
+            <p className="mt-3 text-sm font-medium leading-relaxed text-foreground">
+              If you enter your emergency PIN where you would normally enter your check-in PIN, your verified emergency contacts are immediately emailed links to the files assigned to them.
             </p>
-            <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-              It does not wait for a missed check-in or for your grace period to end.
-            </p>
-          </div>
+            <ul className="mt-3 list-disc space-y-2 pl-5 text-sm leading-relaxed text-foreground">
+              <li>There is no delay and no grace period, and it cannot be undone.</li>
+              <li>On screen it looks like a normal check-in, so someone watching can’t tell (duress protection).</li>
+              <li>Entering it in the cancel-plan or delete-account confirmation also sends your files, and locks your account for 24 hours instead of cancelling or deleting.</li>
+              <li>It must be different from your check-in PIN.</li>
+            </ul>
+          </section>
 
           <div className="space-y-2">
             <Label htmlFor="panic-current-password">Current account password</Label>
@@ -204,8 +219,8 @@ export function CreatePanicPinPage() {
             </Button>
           )}
 
-          <p className="text-xs text-center text-muted-foreground">
-            Keep this PIN separate from your regular check-in PIN. Use your regular PIN whenever you are safe.
+          <p className="text-sm text-center text-muted-foreground">
+            Use your regular check-in PIN whenever you are safe. Use the emergency PIN only when you want your contacts to receive their files now.
           </p>
         </div>
       </div>

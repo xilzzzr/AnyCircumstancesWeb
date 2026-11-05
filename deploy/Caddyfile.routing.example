@@ -30,7 +30,7 @@ anycircumstances.com, www.anycircumstances.com {
 	# exact authentication pages and the private/dynamic namespaces in App.tsx.
 	@client_spa path /admin /admin/login /login /signup /verify-email /verification /email-verified /create-pin /create-panic-pin /onboarding /forgot-password /reset-password /app /app/* /share /share/* /cookies /status
 	handle @client_spa {
-		header Cache-Control "no-cache"
+		header Cache-Control "no-store"
 		rewrite * /spa.html
 		file_server
 	}
@@ -50,3 +50,4 @@ anycircumstances.com, www.anycircumstances.com {
 		file_server
 	}
 }
+

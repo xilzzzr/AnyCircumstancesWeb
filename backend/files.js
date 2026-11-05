@@ -2,9 +2,10 @@
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
+const { acquireVaultUserLock, releaseVaultUserLock } = require("./vault_mutation_lock");
 const { decryptEscrowedKey, escrowKeyId, getEscrowPublicKeyInfo } = require("./escrow_keys");
 
-const { S3Client, GetObjectCommand, DeleteObjectCommand, HeadObjectCommand } = require("@aws-sdk/client-s3");
+const { S3Client, GetObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, HeadObjectCommand, PutObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const { createPresignedPost } = require("@aws-sdk/s3-presigned-post");
 const { rateLimit } = require("express-rate-limit");
@@ -461,12 +462,14 @@ router.post(
         Fields: {
           "Content-Type": uploadContentType,
           "x-amz-server-side-encryption": "AES256",
+          "Cache-Control": "no-store",
         },
         Conditions: [
           // S3 evaluates the multipart request size, which includes form-field overhead.
           // The uploaded object's exact byte length is independently verified on confirm.
           ["content-length-range", uploadSize, uploadSize + 64 * 1024],
           ["eq", "$Content-Type", uploadContentType],
+          ["eq", "$Cache-Control", "no-store"],
           ["eq", "$x-amz-server-side-encryption", "AES256"],
         ],
       });
@@ -502,8 +505,12 @@ router.post(
     if (!key.startsWith(prefix)) return res.status(403).json({ ok: false, error: "forbidden" });
 
     const pool = getPool();
+    const conn = await pool.getConnection();
+    let lockName = null;
+    try {
+      lockName = await acquireVaultUserLock(conn, req.userId);
 
-    const [rows] = await pool.query("SELECT bucket FROM files WHERE id = ? AND user_id = ? LIMIT 1", [
+    const [rows] = await conn.query("SELECT bucket, storage_key FROM files WHERE id = ? AND user_id = ? LIMIT 1", [
       key,
       req.userId,
     ]);
@@ -513,15 +520,34 @@ router.post(
     if (!bucket) return res.status(500).json({ ok: false, error: "missing_bucket" });
 
     const s3 = new S3Client({ region });
-    await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+    const [revisionRows] = await conn.query("SELECT object_key FROM file_storage_objects WHERE file_id = ?", [key]);
+    const storedKeys = [...new Set([key, rows[0].storage_key, ...revisionRows.map((r) => r.object_key)].filter(Boolean))];
+    for (let i = 0; i < storedKeys.length; i += 1000) {
+      const result = await s3.send(new DeleteObjectsCommand({ Bucket: bucket, Delete: {
+        Objects: storedKeys.slice(i, i + 1000).map((Key) => ({ Key })), Quiet: true,
+      } }));
+      if (result.Errors?.length) throw new Error("file_object_delete_incomplete");
+    }
 
-    await pool.query("DELETE FROM contact_file_share_tokens WHERE file_id = ?", [key]);
-    await pool.query("DELETE FROM emergency_contact_file_assignments WHERE file_id = ?", [key]);
-    await pool.query("DELETE FROM file_key_envelopes WHERE file_id = ?", [key]);
-    await pool.query("DELETE FROM file_key_escrows WHERE file_id = ?", [key]);
-    await pool.query("DELETE FROM files WHERE id = ? AND user_id = ? LIMIT 1", [key, req.userId]);
+    await conn.beginTransaction();
+    try {
+    await conn.query("DELETE FROM contact_file_share_tokens WHERE file_id = ?", [key]);
+    await conn.query("DELETE FROM emergency_contact_file_assignments WHERE file_id = ?", [key]);
+    await conn.query("DELETE FROM file_key_envelopes WHERE file_id = ?", [key]);
+    await conn.query("DELETE FROM file_key_escrows WHERE file_id = ?", [key]);
+    await conn.query("DELETE FROM file_storage_objects WHERE file_id = ?", [key]);
+    await conn.query("DELETE FROM files WHERE id = ? AND user_id = ? LIMIT 1", [key, req.userId]);
+    await conn.commit();
+    } catch (error) {
+      try { await conn.rollback(); } catch {}
+      throw error;
+    }
 
     return res.json({ ok: true });
+    } finally {
+      try { await releaseVaultUserLock(conn, lockName); }
+      finally { conn.release(); }
+    }
   })
 );
 
@@ -590,12 +616,12 @@ router.post(
     if (!key.startsWith(prefix)) return res.status(403).json({ ok: false, error: "forbidden" });
 
     const pool = getPool();
-    const [rows] = await pool.query("SELECT bucket FROM files WHERE id = ? AND user_id = ? LIMIT 1", [key, req.userId]);
+    const [rows] = await pool.query("SELECT bucket, storage_key FROM files WHERE id = ? AND user_id = ? LIMIT 1", [key, req.userId]);
     if (!rows?.length) return res.status(404).json({ ok: false, error: "file_not_found" });
 
     const s3 = new S3Client({ region });
 
-    const cmd = new GetObjectCommand({ Bucket: String(rows[0].bucket || bucket), Key: key });
+    const cmd = new GetObjectCommand({ Bucket: String(rows[0].bucket || bucket), Key: String(rows[0].storage_key || key), ResponseCacheControl: "no-store" });
     const url = await getSignedUrl(s3, cmd, { expiresIn: 600 });
 
     return res.json({ ok: true, url });
@@ -620,7 +646,7 @@ router.post(
 
     if (!alg || alg.length > 32) return res.status(400).json({ ok: false, error: "invalid_alg" });
     if (!encKeyB64 || encKeyB64.length > 20000) return res.status(400).json({ ok: false, error: "invalid_enc_key" });
-    if (metaJson && metaJson.length > 20000) return res.status(400).json({ ok: false, error: "invalid_meta" });
+    if (metaJson && metaJson.length > 40000) return res.status(400).json({ ok: false, error: "invalid_meta" });
 
     const pool = getPool();
     const [fileRows] = await pool.query("SELECT 1 FROM files WHERE id = ? AND user_id = ? LIMIT 1", [fileId, req.userId]);
@@ -656,7 +682,7 @@ router.post(
 
     let meta = null;
     try {
-      meta = rows[0].meta_json ? JSON.parse(String(rows[0].meta_json)) : null;
+      meta = rows[0].meta_json ? require("./vault_documents").parseMeta(rows[0].meta_json) : null;
     } catch {
       meta = null;
     }
@@ -666,9 +692,18 @@ router.post(
       alg: String(rows[0].alg),
       enc_key_b64: String(rows[0].enc_key_b64),
       meta_json: meta,
+      revision: require("./vault_documents").revisionOf(meta),
     });
   })
 );
+
+require("./vault_documents").registerDocumentRoutes(router, {
+  requireUser, requirePaid, requireVaultAuthorization, limiter: confirmUploadLimiter, asyncHandler, getPool,
+  putDocument: ({ bucket, storageKey, ciphertext }) => getS3().send(new PutObjectCommand({
+    Bucket: bucket, Key: storageKey, Body: ciphertext, ContentType: "application/octet-stream", ServerSideEncryption: "AES256", CacheControl: "no-store",
+  })),
+  deleteDocument: ({ bucket, storageKey }) => getS3().send(new DeleteObjectCommand({ Bucket: bucket, Key: storageKey })),
+});
 
 router.post(
   "/create-contact-share-link",
@@ -908,7 +943,7 @@ router.post(
 
     const pool = getPool();
     const [rows] = await pool.query(
-      `SELECT t.contact_id, t.file_id, t.expires_at, t.used_at
+      `SELECT t.contact_id, t.file_id, t.expires_at, t.used_at, t.delivery_group_id
        FROM contact_file_share_tokens t
        JOIN emergency_contacts c ON c.id = t.contact_id
        JOIN files f ON f.id = t.file_id AND f.user_id = c.user_id
@@ -918,6 +953,9 @@ router.post(
     if (!rows?.length || !rows[0].used_at) return res.status(404).json({ ok: false, error: "invalid_share_session" });
     const share = rows[0];
     if (new Date(share.expires_at).getTime() < Date.now()) return res.status(410).json({ ok: false, error: "token_expired" });
+    const target = await require("./share_packages").authorizedPackageFile(pool, share, req.body?.file_id);
+    if (!target) return res.status(403).json({ ok: false, error: "file_not_in_package" });
+    share.file_id = target;
 
     const [escrowRows] = await pool.query(
       "SELECT alg, enc_key_b64, escrow_key_id FROM file_key_escrows WHERE file_id = ? LIMIT 1", [share.file_id]
@@ -975,7 +1013,7 @@ router.post(
 
     const pool = getPool();
     const [trows] = await pool.query(
-      `SELECT t.contact_id, t.file_id, t.expires_at, t.used_at
+      `SELECT t.contact_id, t.file_id, t.expires_at, t.used_at, t.delivery_group_id
        FROM contact_file_share_tokens t
        JOIN emergency_contacts c ON c.id = t.contact_id
        JOIN files f ON f.id = t.file_id AND f.user_id = c.user_id
@@ -986,9 +1024,12 @@ router.post(
 
     const t = trows[0];
     if (new Date(t.expires_at).getTime() < Date.now()) return res.status(410).json({ ok: false, error: "token_expired" });
+    const target = await require("./share_packages").authorizedPackageFile(pool, t, req.body?.file_id);
+    if (!target) return res.status(403).json({ ok: false, error: "file_not_in_package" });
+    t.file_id = target;
 
     const [frows] = await pool.query(
-      "SELECT bucket, content_type FROM files WHERE id = ? AND user_id = (SELECT user_id FROM emergency_contacts WHERE id = ? LIMIT 1) LIMIT 1",
+      "SELECT bucket, content_type, storage_key FROM files WHERE id = ? AND user_id = (SELECT user_id FROM emergency_contacts WHERE id = ? LIMIT 1) LIMIT 1",
       [String(t.file_id), String(t.contact_id)]
     );
     if (!frows?.length) return res.status(404).json({ ok: false, error: "file_not_found" });
@@ -1004,7 +1045,8 @@ router.post(
     const s3 = new S3Client({ region });
     const cmd = new GetObjectCommand({
       Bucket: bucket,
-      Key: fileId,
+      Key: String(frows[0].storage_key || fileId),
+      ResponseCacheControl: "no-store",
       ResponseContentType: String(frows[0].content_type || "application/octet-stream").slice(0, 255),
       ResponseContentDisposition: `attachment; filename="${basename.replace(/["\\\r\n]/g, "_")}"`,
     });
@@ -1055,7 +1097,7 @@ router.get(
 
       let meta = null;
       try {
-        meta = r.meta_json ? JSON.parse(String(r.meta_json)) : null;
+        meta = r.meta_json ? require("./vault_documents").parseMeta(r.meta_json) : null;
       } catch {
         meta = null;
       }
@@ -1069,6 +1111,8 @@ router.get(
         size_bytes: r.size_bytes === null || r.size_bytes === undefined ? null : Number(r.size_bytes),
         created_at: r.created_at,
         include_in_emergency: Boolean(r.include_in_emergency),
+        document_template: meta?.document_template || null,
+        has_recipient_note: Boolean(meta?.recipient_note),
       };
     });
 
@@ -1076,4 +1120,7 @@ router.get(
   })
 );
 
+require("./share_packages").registerPackageRoutes(router, { asyncHandler, getPool, getShareSession });
+
 module.exports = { filesRouter: router };
+

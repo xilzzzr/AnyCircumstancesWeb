@@ -3,7 +3,6 @@ export async function createCheckoutSession(payload: {
   checkInFrequency: "monthly" | "weekly" | "daily";
   billingInterval: "monthly" | "annual";
   addons: string[];
-  promoCode?: string;
 }) {
   const res = await fetch("/auth/billing/create-checkout-session", {
     method: "POST",

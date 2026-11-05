@@ -20,7 +20,10 @@ export function HelpPage() {
               </div>
               <div>
                 <h2 className="font-medium">Email support</h2>
-                <p className="mt-1 text-sm text-muted-foreground">Please don’t include passwords, recovery keys, or private vault contents.</p>
+                <p className="mt-1 text-sm text-muted-foreground">contact@anycircumstances.com</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Please don’t include your account password, vault passphrase, PINs, or private vault contents.
+                </p>
               </div>
             </div>
             <Button asChild className="shrink-0 gap-2">
