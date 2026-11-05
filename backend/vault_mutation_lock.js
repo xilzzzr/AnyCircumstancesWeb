@@ -2,7 +2,7 @@
 // MySQL advisory locks are connection-scoped and work across PM2 processes.
 function vaultUserLockName(userId) {
   const id = String(userId || "");
-  if (!/^\\d{1,32}$/.test(id)) throw new Error("invalid_vault_user_id");
+  if (!/^\d{1,32}$/.test(id)) throw new Error("invalid_vault_user_id");
   return "uac_vault_mutation_" + id;
 }
 
