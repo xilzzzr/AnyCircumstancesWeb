@@ -41,6 +41,8 @@ test("content edits enforce authentication, vault unlock, ownership, revision ch
       rollback: async () => {},
       release() {},
       query: async (sql, params) => {
+        if (sql.startsWith("SELECT GET_LOCK")) return [[{ acquired: 1 }]];
+        if (sql.startsWith("SELECT RELEASE_LOCK")) return [[{ released: 1 }]];
         if (sql.startsWith("SELECT storage_limit"))
           return [[{ storage_limit_gb: limitGb }]];
         if (sql.startsWith("SELECT f.bucket"))
@@ -144,6 +146,8 @@ test("content edits enforce authentication, vault unlock, ownership, revision ch
   assert.equal(result.status, 200);
   assert.equal(puts.length, 1);
   assert.deepEqual(puts[0].ciphertext, encrypted);
+  assert.notEqual(puts[0].storageKey, body.file_id, "encrypted edits must never overwrite the live object");
+  assert.match(puts[0].storageKey, /^users\/1\/a\.revisions\/[a-f0-9-]+$/);
   assert.equal(storedMeta.original_name, "Updated.pdf");
   assert.ok(
     writes.some((w) => w.sql.startsWith("UPDATE files SET size_bytes")),
