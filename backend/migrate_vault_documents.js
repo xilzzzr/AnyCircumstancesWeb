@@ -17,6 +17,26 @@ async function migrate(connection) {
     await connection.query(
       "ALTER TABLE contact_file_share_tokens ADD INDEX idx_share_delivery_group (contact_id, delivery_group_id)",
     );
+  const [storageColumns] = await connection.query(
+    "SHOW COLUMNS FROM files LIKE 'storage_key'",
+  );
+  if (!storageColumns.length)
+    await connection.query(
+      "ALTER TABLE files ADD COLUMN storage_key VARCHAR(512) NULL",
+    );
+  const [objectTables] = await connection.query(
+    "SHOW TABLES LIKE 'file_storage_objects'",
+  );
+  if (!objectTables.length)
+    await connection.query(
+      `CREATE TABLE IF NOT EXISTS file_storage_objects (
+        object_key VARCHAR(512) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY,
+        file_id VARCHAR(512) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+        created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+        INDEX idx_file_storage_objects_file_id (file_id)
+      ) ENGINE=InnoDB`,
+    );
+
 }
 async function main() {
   initializeEnvironment();
