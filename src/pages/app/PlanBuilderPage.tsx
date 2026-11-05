@@ -106,7 +106,7 @@ export default function PlanBuilderPage() {
   };
 
   const checkInLabel = (freq: CheckInFrequencyId) => {
-    if (freq === "daily") return "Daily";
+    if (freq === "daily") return "Daily / scheduled";
     if (freq === "weekly") return "Weekly";
     return "Monthly";
   };
@@ -114,7 +114,7 @@ export default function PlanBuilderPage() {
   const checkInHint = (freq: CheckInFrequencyId) => {
     if (freq === "monthly") return "Every 30 days · included";
     if (freq === "weekly") return `Every 7 days · +${formatMoney(getFrequencyPrice("weekly"))}/mo`;
-    return `Every day · +${formatMoney(getFrequencyPrice("daily"))}/mo`;
+    return `Daily or custom calendar · +${formatMoney(getFrequencyPrice("daily"))}/mo`;
   };
 
   return (
