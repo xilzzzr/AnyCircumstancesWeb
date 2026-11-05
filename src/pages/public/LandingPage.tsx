@@ -19,7 +19,7 @@ const steps = [
   {
     icon: Timer,
     title: 'Check in on your schedule',
-    text: 'Daily, weekly or monthly, with your check-in PIN. Miss one and you get reminder emails during a grace period of 6 to 72 hours that you choose.',
+    text: 'Daily or custom scheduled days, weekly or monthly, with your check-in PIN. Miss one and you get reminder emails during a grace period of 6 to 72 hours that you choose.',
   },
   {
     icon: Mail,
