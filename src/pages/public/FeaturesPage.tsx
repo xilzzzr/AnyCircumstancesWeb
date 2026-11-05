@@ -21,7 +21,7 @@ const featureList = [
     icon: Clock,
     title: "Scheduled check-ins",
     description:
-      "Check in daily, weekly or every 30 days with your check-in PIN. Miss one and a grace period of 6 to 72 hours starts, with 1 to 5 reminder emails."
+      "Check in daily or on custom scheduled days and times, weekly, or every 30 days with your check-in PIN. Miss one and a grace period of 6 to 72 hours starts, with 1 to 5 reminder emails."
   },
   {
     icon: Users,
