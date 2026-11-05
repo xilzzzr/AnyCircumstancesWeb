@@ -1,21 +1,24 @@
 const { S3Client, DeleteObjectsCommand } = require("@aws-sdk/client-s3");
 
 async function purgeVaultFiles(pool, userId) {
-  const [files] = await pool.query("SELECT id, bucket FROM files WHERE user_id = ?", [String(userId)]);
+  const [files] = await pool.query("SELECT f.id, f.bucket, f.storage_key, o.object_key AS revision_key FROM files f LEFT JOIN file_storage_objects o ON o.file_id = f.id WHERE f.user_id = ?", [String(userId)]);
   const byBucket = new Map();
   for (const file of files || []) {
     const bucket = String(file.bucket || "").trim();
     const key = String(file.id || "").trim();
     if (!bucket || !key) continue;
-    if (!byBucket.has(bucket)) byBucket.set(bucket, []);
-    byBucket.get(bucket).push(key);
+    if (!byBucket.has(bucket)) byBucket.set(bucket, new Set());
+    for (const storageKey of [key, file.storage_key, file.revision_key]) {
+      if (storageKey) byBucket.get(bucket).add(String(storageKey));
+    }
   }
 
   if (byBucket.size) {
     const region = String(process.env.AWS_REGION || "").trim();
     if (!region) throw new Error("AWS_REGION missing");
     const s3 = new S3Client({ region });
-    for (const [bucket, keys] of byBucket) {
+    for (const [bucket, storedKeys] of byBucket) {
+      const keys = [...storedKeys];
       for (let i = 0; i < keys.length; i += 1000) {
         const result = await s3.send(new DeleteObjectsCommand({
           Bucket: bucket,
@@ -37,6 +40,7 @@ async function purgeVaultFiles(pool, userId) {
     await conn.query("DELETE ecfa FROM emergency_contact_file_assignments ecfa JOIN files f ON f.id = ecfa.file_id WHERE f.user_id = ?", [String(userId)]);
     await conn.query("DELETE fke FROM file_key_envelopes fke JOIN files f ON f.id = fke.file_id WHERE f.user_id = ?", [String(userId)]);
     await conn.query("DELETE fks FROM file_key_escrows fks JOIN files f ON f.id = fks.file_id WHERE f.user_id = ?", [String(userId)]);
+    await conn.query("DELETE o FROM file_storage_objects o JOIN files f ON f.id = o.file_id WHERE f.user_id = ?", [String(userId)]);
     await conn.query("DELETE FROM files WHERE user_id = ?", [String(userId)]);
     await conn.commit();
   } catch (error) {
