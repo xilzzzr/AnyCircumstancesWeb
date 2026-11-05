@@ -1,4 +1,5 @@
 const crypto = require("crypto");
+const { acquireVaultUserLock, releaseVaultUserLock } = require("./vault_mutation_lock");
 const DOCUMENT_TYPE = "application/vnd.anycircumstances.document+json";
 const MAX_ENCRYPTED_DOCUMENT_BYTES = 132 * 1024;
 function parseMeta(value) {
@@ -83,7 +84,9 @@ function registerDocumentRoutes(
             .json({ ok: false, error: "invalid_document_name" });
       }
       const conn = await getPool().getConnection();
+      let vaultLockName = null;
       try {
+        vaultLockName = await acquireVaultUserLock(conn, req.userId);
         await conn.beginTransaction();
         // Use the same lock order as new upload reservations to serialize storage accounting.
         const [profiles] = await conn.query(
@@ -210,7 +213,8 @@ function registerDocumentRoutes(
         } catch {}
         throw error;
       } finally {
-        conn.release();
+        try { await releaseVaultUserLock(conn, vaultLockName); }
+        finally { conn.release(); }
       }
     }),
   );
