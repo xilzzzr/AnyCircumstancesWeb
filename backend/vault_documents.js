@@ -94,7 +94,7 @@ function registerDocumentRoutes(
           [req.userId],
         );
         const [rows] = await conn.query(
-          "SELECT f.bucket, f.content_type, f.size_bytes, e.meta_json FROM files f JOIN file_key_envelopes e ON e.file_id=f.id AND e.recipient_type='user' AND e.recipient_id=f.user_id WHERE f.id=? AND f.user_id=? LIMIT 1 FOR UPDATE",
+          "SELECT f.bucket, f.content_type, f.size_bytes, f.storage_key, e.meta_json FROM files f JOIN file_key_envelopes e ON e.file_id=f.id AND e.recipient_type='user' AND e.recipient_id=f.user_id WHERE f.id=? AND f.user_id=? LIMIT 1 FOR UPDATE",
           [fileId, req.userId],
         );
         const row = rows?.[0];
