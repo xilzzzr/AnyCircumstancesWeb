@@ -74,14 +74,42 @@ AWS_REGION=<your-region>
 
 ## 4. Apply the database migration
 
-From the production checkout at `/srv/uac-web`, apply:
+From the production checkout at `/srv/uac-web`, install the dependencies and
+check which schema changes are missing:
 
 ```bash
-mysql --ssl-mode=VERIFY_CA \
-  --ssl-ca=/etc/ssl/certs/rds-global-bundle.pem \
-  -h "$DB_HOST" -P "${DB_PORT:-3306}" -u "$DB_USER" -p "$DB_NAME" \
-  < backend/20260923_prelaunch_security_hardening.sql
+cd /srv/uac-web
+npm ci --prefix backend
+npm run migrate:security:check --prefix backend
 ```
+
+Check mode is read-only. Exit code 2 means schema changes are missing. After
+taking a database backup/snapshot, apply them and check again:
+
+```bash
+npm run migrate:security --prefix backend
+npm run migrate:security:check --prefix backend
+```
+
+The runner uses the existing backend database connection and TLS configuration.
+It reads `backend/.env`, then missing settings from `/srv/uac-web/.env`;
+variables supplied by PM2 or the shell remain authoritative. Do not commit
+either environment file or paste credentials into commands.
+
+It skips existing columns and tables, including an existing reminder `sent_at`
+column. Existing reminder timestamps and pending NULL values are preserved.
+Only when `sent_at` is newly introduced are legacy reminder rows marked complete,
+as required by the bundled SQL migration. A database advisory lock serializes
+concurrent apply commands, and any SQL failure stops the migration.
+
+This runner adds missing schema; it does not repair conflicting pre-existing
+column definitions. It runs explicitly during deployment, never automatically
+at server startup. If login reports `Unknown column 'session_version'`, use this
+runner before restarting the matching backend code.
+
+Database changes persist separately from Git. Pulling or merging application
+code does not reset these columns, tables, or their data. Future deployments
+can rerun the check, and applying an already-complete migration is a no-op.
 
 The migration adds:
 

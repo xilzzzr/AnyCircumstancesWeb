@@ -47,11 +47,17 @@ test("emergency link is redeemed once into a short-lived HttpOnly share session"
     JWT_ACCESS_SECRET: process.env.JWT_ACCESS_SECRET,
     ESCROW_PRIVATE_KEY_PEM: process.env.ESCROW_PRIVATE_KEY_PEM,
     ESCROW_KMS_KEY_ID: process.env.ESCROW_KMS_KEY_ID,
+    AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID,
+    AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY,
+    AWS_REGION: process.env.AWS_REGION,
   };
   process.env.NODE_ENV = "test";
   process.env.JWT_ACCESS_SECRET = "test-share-secret-that-is-definitely-long-enough";
   process.env.ESCROW_PRIVATE_KEY_PEM = escrow.privateKey.export({ type: "pkcs8", format: "pem" });
   delete process.env.ESCROW_KMS_KEY_ID;
+  process.env.AWS_ACCESS_KEY_ID = "local-test-access";
+  process.env.AWS_SECRET_ACCESS_KEY = "local-test-signing-secret";
+  process.env.AWS_REGION = "us-east-1";
 
   let usedAt = null;
   const expiresAt = new Date(Date.now() + 60_000);
@@ -89,6 +95,9 @@ test("emergency link is redeemed once into a short-lived HttpOnly share session"
     if (sql.includes("FROM file_key_envelopes")) {
       assert.deepEqual(params, ["users/1/file", "1"]);
       return [[{ meta_json: JSON.stringify(meta) }]];
+    }
+    if (sql.includes("SELECT bucket, content_type, storage_key FROM files")) {
+      return [[{ bucket: "local-test-bucket", content_type: "application/pdf" }]];
     }
 
     throw new Error(`Unexpected SQL: ${sql}`);
@@ -166,6 +175,16 @@ test("emergency link is redeemed once into a short-lived HttpOnly share session"
   );
   assert.deepEqual(opened, rawAes);
 
+  const downloadResponse = await fetch(base + "/share-presign-download", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Cookie: cookie },
+    body: JSON.stringify({}),
+  });
+  assert.equal(downloadResponse.status, 200);
+  const signedDownload = new URL((await downloadResponse.json()).url);
+  assert.equal(signedDownload.searchParams.get("response-cache-control"), "no-store");
+  assert.ok(signedDownload.searchParams.get("X-Amz-Signature"));
+
   const noSession = await fetch(base + "/share-get-contact-envelope", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -174,3 +193,4 @@ test("emergency link is redeemed once into a short-lived HttpOnly share session"
   assert.equal(noSession.status, 401);
   assert.equal((await noSession.json()).error, "share_session_required");
 });
+

@@ -1,3 +1,4 @@
+import type { FileMeta, TemplateId } from "./vaultDocuments";
 export type VaultFile = {
   key: string;
   name: string;
@@ -5,6 +6,8 @@ export type VaultFile = {
   size_bytes: number | null;
   created_at: string;
   include_in_emergency: boolean;
+  document_template?: TemplateId;
+  has_recipient_note?: boolean;
 };
 
 type PaywallEventDetail = {
@@ -21,9 +24,9 @@ function emitPaywall(detail: PaywallEventDetail) {
 class ApiError extends Error {
   status: number;
   code: string;
-  data: any;
+  data: unknown;
 
-  constructor(code: string, status: number, data: any) {
+  constructor(code: string, status: number, data: unknown) {
     super(code);
     this.name = "ApiError";
     this.status = status;
@@ -35,7 +38,7 @@ class ApiError extends Error {
 async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
-    credentials: "include",
+    credentials: "include", cache: "no-store",
     headers: {
       "Content-Type": "application/json",
       ...(init?.headers || {}),
@@ -43,7 +46,7 @@ async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   const text = await res.text();
-  let data: any = null;
+  let data: { error?: unknown } | null = null;
   try {
     data = text ? JSON.parse(text) : null;
   } catch {
@@ -93,9 +96,11 @@ export function getUserEnvelope(fileId: string) {
   return apiJson<{
     ok: boolean;
     enc_key_b64: string;
-    meta_json: { original_name?: string; original_content_type?: string; iv_b64?: string } | null;
+    meta_json: FileMeta | null;
+    revision: string;
   }>("/files/get-user-envelope", {
     method: "POST",
     body: JSON.stringify({ file_id: fileId }),
   });
 }
+

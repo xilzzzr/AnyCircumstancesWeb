@@ -1,248 +1,428 @@
 import { useEffect, useState } from "react";
-import { decryptUacBytes } from "@/lib/uacChunk";
 import { useParams } from "react-router-dom";
+import { Button } from "@/components/ui/button";
+import { bytesFromB64, b64FromBytes } from "@/lib/vaultCrypto";
+import { decryptUacBytes } from "@/lib/uacChunk";
+import {
+  DOCUMENT_TYPE,
+  documentText,
+  openRecipientNote,
+  parseDocument,
+  type FileMeta,
+  type VaultDocument,
+} from "@/lib/vaultDocuments";
+import {
+  documentPdf,
+  downloadBlob,
+  downloadPackage,
+  textPdf,
+  type PackageItem,
+} from "@/lib/vaultExports";
 
-type ShareLookup = {
-  ok: boolean;
-  file?: { id: string; content_type: string };
-  token?: { expires_at: string; used_at?: string | null };
-  error?: string;
+type ReleasedFile = {
+  id: string;
+  name: string;
+  content_type: string;
+  size_bytes: number;
 };
-
-type EnvelopeRes = {
-  ok: boolean;
-  contact_id?: number;
-  file_id?: string;
-  alg?: string;
-  enc_key_b64?: string;
-  meta_json?: any;
-  error?: string;
+type OpenFile = ReleasedFile & {
+  rawKey: Uint8Array;
+  meta: FileMeta;
+  note: string;
 };
-
-function unb64(s: string) {
-  return Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+async function shareRequest(path: string, body: unknown = {}) {
+  const response = await fetch(`/files/${path}`, {
+    method: "POST",
+    credentials: "include", cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await response.json();
+  if (!response.ok || !data.ok)
+    throw new Error(data.error || "secure_access_failed");
+  return data;
 }
-
-function b64(u8: Uint8Array) {
-  let out = "";
-  for (let i = 0; i < u8.length; i++) out += String.fromCharCode(u8[i]);
-  return btoa(out);
-}
-
-function deriveFilenameFromKey(key: string) {
-  const base = key.split("/").pop() || "file.bin";
-  if (base.length > 38 && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-/i.test(base)) {
-    return base.slice(37);
-  }
-  return base;
-}
-
-const shareErrorCodes = new Set([
-  "invalid_token", "token_expired", "missing_file_escrow", "escrow_private_key_missing",
-  "missing_envelope_meta", "invalid_envelope_meta", "missing_public_key", "public_key_too_large",
-  "invalid_public_key", "unwrap_failed", "download_failed", "decrypt_failed",
-  "envelope_create_failed", "presign_failed", "rate_limited", "server_error",
-]);
-
-function safeShareError(error: unknown) {
-  const code = error instanceof Error ? error.message.split(":")[0] : "";
-  return shareErrorCodes.has(code) ? code : "secure_access_failed: Please retry or reload the link.";
-}
-
+const friendlyError = (e: unknown) => {
+  const code = e instanceof Error ? e.message : "";
+  if (code === "token_expired") return "This access link has expired.";
+  if (code === "token_already_redeemed")
+    return "This link has already been opened. Use the browser where you first opened it.";
+  if (code === "share_session_required" || code === "invalid_share_session")
+    return "Your secure session has expired. Open another unused access link from your email.";
+  if (code === "package_too_large")
+    return "This package is too large to download together in this browser. Download the files individually.";
+  return "Could not securely open the files. Please retry. If the problem continues, contact support.";
+};
 export default function SharePage() {
   const { token: pathToken = "" } = useParams();
-  const [token] = useState(() => {
-    const fragmentToken = new URLSearchParams(window.location.hash.slice(1)).get("token") || "";
-    return fragmentToken || pathToken;
-  });
-
-  const [lookup, setLookup] = useState<ShareLookup | null>(null);
-  const [status, setStatus] = useState<string>("Loading link…");
+  const [token] = useState(
+    () =>
+      new URLSearchParams(window.location.hash.slice(1)).get("token") ||
+      pathToken,
+  );
+  const [files, setFiles] = useState<ReleasedFile[]>([]);
+  const [opened, setOpened] = useState<OpenFile[]>([]);
+  const [preview, setPreview] = useState<Record<string, VaultDocument>>({});
   const [busy, setBusy] = useState(false);
-  const [downloadUrl, setDownloadUrl] = useState<string>("");
-  const [downloadFilename, setDownloadFilename] = useState("");
-  const [errorMsg, setErrorMsg] = useState<string>("");
-
-  const fileId = lookup?.file?.id || "";
-  const contentType = lookup?.file?.content_type || "application/octet-stream";
-  const filename = downloadFilename || deriveFilenameFromKey(fileId);
-
+  const [status, setStatus] = useState("Loading your secure link…");
+  const [error, setError] = useState("");
   useEffect(() => {
-    return () => { if (downloadUrl) URL.revokeObjectURL(downloadUrl); };
-  }, [downloadUrl]);
-
-  useEffect(() => {
+    let cancelled = false;
     (async () => {
-      setBusy(false);
-      setDownloadUrl("");
-      setErrorMsg("");
       try {
-        setStatus("Loading link…");
-        const res: ShareLookup = await fetch("/files/share-lookup", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({ token }),
-        }).then((r) => r.json());
-
-        setLookup(res);
-
-        if (!res.ok) {
-          setStatus(res.error || "Invalid link");
-          return;
+        await shareRequest("share-lookup", { token });
+        if (window.location.hash)
+          window.history.replaceState(
+            null,
+            "",
+            window.location.pathname + window.location.search,
+          );
+        const data = await shareRequest("share-package");
+        if (!cancelled) {
+          setFiles(data.files);
+          setStatus("Your files are ready to open.");
         }
-
-        if (window.location.hash) {
-          window.history.replaceState(null, "", window.location.pathname + window.location.search);
+      } catch (e) {
+        if (!cancelled) {
+          setStatus("Could not open the link.");
+          setError(friendlyError(e));
         }
-        setStatus("Link loaded.");
-      } catch {
-        setStatus("Failed to load link.");
-        setErrorMsg("Could not load the link. Please retry.");
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, [token]);
-
-  async function downloadAndDecrypt() {
+  async function unlock() {
     setBusy(true);
-    setDownloadUrl("");
-    setErrorMsg("");
+    setError("");
+    setStatus("Opening your files and instructions…");
     try {
-      setStatus("Creating secure session…");
-      const keyPair = await crypto.subtle.generateKey(
-        { name: "RSA-OAEP", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
+      const pair = await crypto.subtle.generateKey(
+        {
+          name: "RSA-OAEP",
+          modulusLength: 2048,
+          publicExponent: new Uint8Array([1, 0, 1]),
+          hash: "SHA-256",
+        },
         true,
-        ["encrypt", "decrypt"]
+        ["encrypt", "decrypt"],
       );
-      const privKey = keyPair.privateKey;
-      const publicSpki = new Uint8Array(await crypto.subtle.exportKey("spki", keyPair.publicKey));
-      const publicKeyB64 = b64(publicSpki);
-
-      setStatus("Fetching envelope…");
-      const env: EnvelopeRes = await fetch("/files/share-get-contact-envelope", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ public_key: publicKeyB64 })
-      }).then((r) => r.json());
-
-      if (!env.ok) throw new Error(env.error || "envelope_create_failed");
-
-      let meta;
-      try {
-        meta = typeof env.meta_json === "string" ? JSON.parse(env.meta_json) : env.meta_json;
-      } catch {
-        throw new Error("invalid_envelope_meta");
-      }
-      if (!meta) throw new Error("missing_envelope_meta");
-      if (typeof meta !== "object" || Array.isArray(meta)) throw new Error("invalid_envelope_meta");
-      setDownloadFilename(
-        typeof meta.original_name === "string" && meta.original_name ? meta.original_name : deriveFilenameFromKey(fileId)
+      const publicKey = b64FromBytes(
+        new Uint8Array(await crypto.subtle.exportKey("spki", pair.publicKey)),
       );
-
-      setStatus("Unwrapping key…");
-      const wrappedB64Raw = String(env.enc_key_b64 || "");
-      const wrappedB64 = wrappedB64Raw.replace(/\s+/g,"").replace(/-/g,"+").replace(/_/g,"/");
-      const wrappedB64Padded = wrappedB64 + "===".slice((wrappedB64.length + 3) % 4);
-      let rawAes: Uint8Array;
-      try {
-        const wrappedAes = unb64(wrappedB64Padded);
-        rawAes = new Uint8Array(await crypto.subtle.decrypt({ name: "RSA-OAEP" }, privKey, wrappedAes));
-      } catch {
-        throw new Error("unwrap_failed: RSA unwrap failed for the temporary emergency-access key.");
+      const results: OpenFile[] = [];
+      const unavailable: string[] = [];
+      for (const file of files) {
+        try {
+          const env = await shareRequest("share-get-contact-envelope", {
+            file_id: file.id,
+            public_key: publicKey,
+          });
+          const rawKey = new Uint8Array(
+            await crypto.subtle.decrypt(
+              { name: "RSA-OAEP" },
+              pair.privateKey,
+              bytesFromB64(env.enc_key_b64),
+            ),
+          );
+          const meta =
+            typeof env.meta_json === "string"
+              ? JSON.parse(env.meta_json)
+              : env.meta_json;
+          if (!meta || typeof meta !== "object")
+            throw new Error("invalid_envelope_meta");
+          results.push({
+            ...file,
+            name: meta.original_name || file.name,
+            rawKey,
+            meta,
+            note: await openRecipientNote(meta.recipient_note, rawKey),
+          });
+        } catch {
+          unavailable.push(file.name);
+        }
       }
-
-      const aesKey = await crypto.subtle.importKey("raw", rawAes, { name: "AES-GCM" }, false, ["decrypt"]);
-
-      setStatus("Requesting download URL…");
-      const dl = await fetch("/files/share-presign-download", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({})
-      }).then((r) => r.json());
-
-      if (!dl.ok) throw new Error(dl.error || "presign_failed");
-
-      setStatus("Downloading encrypted bytes…");
-      let ciphertext: Uint8Array;
-      try {
-        const encRes = await fetch(dl.url);
-        if (!encRes.ok) throw new Error("download_failed");
-        ciphertext = new Uint8Array(await encRes.arrayBuffer());
-      } catch {
-        throw new Error("download_failed: could not download encrypted bytes.");
+      if (!results.length) throw new Error("secure_access_failed");
+      const introductions: Record<string, VaultDocument> = {};
+      for (const file of results.filter(
+        (f) => f.meta.document_template === "introduction",
+      )) {
+        try {
+          const item = await retrieve(file);
+          if (item.document) introductions[file.id] = item.document;
+        } catch {
+          unavailable.push(file.name);
+        }
       }
-
-      setStatus("Decrypting…");
-      let plaintext: Uint8Array;
-      try {
-        plaintext = await decryptUacBytes(aesKey, ciphertext, meta);
-      } catch {
-        throw new Error("decrypt_failed: could not decrypt the file.");
-      }
-
-      const blob = new Blob([plaintext], { type: contentType });
-      const url = URL.createObjectURL(blob);
-      setDownloadUrl(url);
-      setStatus("Decrypted. Use the download button.");
-    } catch (e: unknown) {
-      setStatus(`Error: ${safeShareError(e)}`);
+      setPreview(introductions);
+      setOpened(results);
+      setStatus("Files opened. Read the notes below before downloading.");
+      if (unavailable.length)
+        setError(
+          `Some files or instructions could not be opened: ${unavailable.join(", ")}. You can download the available files individually and retry opening the package.`,
+        );
+    } catch (e) {
+      setError(friendlyError(e));
+      setStatus("Could not open all files. Please retry.");
     } finally {
       setBusy(false);
     }
   }
+  async function retrieve(file: OpenFile): Promise<PackageItem> {
+    const data = await shareRequest("share-presign-download", {
+      file_id: file.id,
+    });
+    const response = await fetch(data.url, { cache: "no-store", referrerPolicy: "no-referrer" });
+    if (!response.ok) throw new Error("download_failed");
+    const key = await crypto.subtle.importKey(
+      "raw",
+      file.rawKey,
+      "AES-GCM",
+      false,
+      ["decrypt"],
+    );
+    const plain = await decryptUacBytes(
+      key,
+      new Uint8Array(await response.arrayBuffer()),
+      file.meta,
+    );
+    if (file.content_type === DOCUMENT_TYPE) {
+      const document = parseDocument(new TextDecoder().decode(plain));
+      return {
+        name: file.name,
+        note: file.note,
+        document,
+        blob: await documentPdf(document, file.note),
+      };
+    }
+    return {
+      name: file.name,
+      note: file.note,
+      blob: new Blob([plain], {
+        type: file.meta.original_content_type || file.content_type,
+      }),
+    };
+  }
+  async function action(task: () => Promise<void>) {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await task();
+    } catch (e) {
+      setError(friendlyError(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function instructions() {
+    const intro: string[] = [];
+    for (const file of opened.filter(
+      (f) => f.meta.document_template === "introduction",
+    )) {
+      const item = await retrieve(file);
+      if (item.document) intro.push(documentText(item.document));
+    }
+    const missing = files.filter((f) => !opened.some((o) => o.id === f.id));
+    if (missing.length)
+      intro.push(
+        "Files not available in this download: " +
+          missing.map((f) => f.name).join(", "),
+      );
+    const text = [
+      ...intro,
+      ...opened.map(
+        (f) => `${f.name}\n${f.note || "No additional instructions."}`,
+      ),
+    ].join("\n\n");
+    downloadBlob(
+      await textPdf("Your files and instructions", text),
+      "Start here.pdf",
+    );
+  }
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <div className="mx-auto max-w-2xl px-6 py-10">
-        <h1 className="text-2xl font-bold">Emergency File Access</h1>
-        <p className="mt-2 text-sm opacity-80">Use this page to securely retrieve the file assigned to you.</p>
-
-        <div className="mt-6 rounded-xl border p-5">
-          <div className="text-sm">
-            <div>
-              <span className="opacity-70">Status:</span> {status}
-            </div>
-
-            {lookup?.ok && (
-              <>
-                <div className="mt-3">
-                  <span className="opacity-70">File:</span> {filename}
-                </div>
-                <div className="mt-1">
-                  <span className="opacity-70">Type:</span> {contentType}
-                </div>
-              </>
+    <main className="min-h-screen bg-background text-foreground">
+      <div className="mx-auto max-w-3xl px-5 py-10 space-y-6">
+        <header>
+          <h1 className="text-2xl font-bold">Your files and instructions</h1>
+          <p className="mt-2 text-muted-foreground">
+            Read the owner's notes, then open or download the files they left
+            for you.
+          </p>
+        </header>
+        <p role="status" aria-live="polite">
+          {status}
+        </p>
+        {error && (
+          <p
+            role="alert"
+            className="rounded-xl border border-destructive p-4 text-destructive"
+          >
+            {error}
+          </p>
+        )}
+        {!!files.length && !opened.length && (
+          <>
+            <ul className="list-disc pl-6">
+              {files.map((f) => (
+                <li key={f.id}>{f.name}</li>
+              ))}
+            </ul>
+            <Button disabled={busy} onClick={unlock}>
+              {busy ? "Opening…" : "Open files and instructions"}
+            </Button>
+          </>
+        )}
+        {!!opened.length && (
+          <>
+            {!!error && (
+              <Button disabled={busy} variant="outline" onClick={unlock}>
+                Retry opening files and instructions
+              </Button>
             )}
-
-            {!lookup?.ok && lookup?.error && <div className="mt-3 text-red-500">Error: {lookup.error}</div>}
-
-            {errorMsg && (
-              <div className="mt-3 rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-red-200 break-words">
-                {errorMsg}
+            <div className="rounded-xl border p-4 space-y-3">
+              <h2 className="font-semibold">Start here</h2>
+              {opened
+                .filter(
+                  (file) =>
+                    file.meta.document_template === "introduction" &&
+                    preview[file.id],
+                )
+                .map((file) => (
+                  <div key={file.id} className="rounded-lg bg-muted p-4">
+                    <h3 className="font-medium">{preview[file.id].title}</h3>
+                    <p className="whitespace-pre-wrap break-words mt-2">
+                      {preview[file.id].body}
+                    </p>
+                  </div>
+                ))}
+              <p className="text-sm text-muted-foreground">
+                The instructions download lists your files and the notes
+                attached to each one. The package download includes the files
+                and a copy of these instructions.
+              </p>
+              <div className="flex flex-wrap gap-3">
+                <Button
+                  disabled={busy}
+                  variant="outline"
+                  onClick={() => action(instructions)}
+                >
+                  Download instructions
+                </Button>
+                <Button
+                  disabled={busy || opened.length !== files.length}
+                  onClick={() =>
+                    action(async () => {
+                      if (
+                        opened.reduce((sum, f) => sum + f.size_bytes, 0) >
+                        256 * 1024 * 1024
+                      )
+                        throw new Error("package_too_large");
+                      const items: PackageItem[] = [];
+                      for (const file of opened)
+                        items.push(await retrieve(file));
+                      await downloadPackage(items);
+                    })
+                  }
+                >
+                  {busy ? "Working…" : "Download all files and notes"}
+                </Button>
               </div>
-            )}
-          </div>
-
-          {lookup?.ok && (
-            <div className="mt-5 flex flex-col gap-3">
-              <button
-                className="rounded-lg bg-black text-white px-4 py-2 text-sm hover:opacity-90 disabled:opacity-50"
-                disabled={busy}
-                onClick={downloadAndDecrypt}
-              >
-                Download + decrypt
-              </button>
-
-              {downloadUrl && (
-                <a className="rounded-lg border px-4 py-2 text-sm hover:opacity-90 text-center" href={downloadUrl} download={downloadFilename || filename}>
-                  Download decrypted file
-                </a>
-              )}
             </div>
-          )}
-        </div>
+            {opened.map((file) => (
+              <section
+                key={file.id}
+                className="rounded-xl border p-5 space-y-4"
+              >
+                <h2 className="text-lg font-semibold break-words">
+                  {file.name}
+                </h2>
+                {file.note ? (
+                  <div className="rounded-lg bg-muted p-4">
+                    <h3 className="font-medium mb-2">Note from the owner</h3>
+                    <p className="whitespace-pre-wrap break-words">
+                      {file.note}
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    No additional instructions for this file.
+                  </p>
+                )}
+                <div className="flex flex-wrap gap-3">
+                  <Button
+                    disabled={busy}
+                    onClick={() =>
+                      action(async () => {
+                        const item = await retrieve(file);
+                        downloadBlob(item.blob, item.name);
+                      })
+                    }
+                  >
+                    Download{" "}
+                    {file.content_type === DOCUMENT_TYPE ? "PDF" : "file"}
+                  </Button>
+                  {file.content_type === DOCUMENT_TYPE && (
+                    <Button
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() =>
+                        action(async () => {
+                          if (preview[file.id]) {
+                            setPreview((p) => {
+                              const next = { ...p };
+                              delete next[file.id];
+                              return next;
+                            });
+                            return;
+                          }
+                          const item = await retrieve(file);
+                          if (item.document)
+                            setPreview((p) => ({
+                              ...p,
+                              [file.id]: item.document!,
+                            }));
+                        })
+                      }
+                    >
+                      {preview[file.id] ? "Hide document" : "Read document"}
+                    </Button>
+                  )}
+                  {file.note && (
+                    <Button
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() =>
+                        action(async () => {
+                          downloadBlob(
+                            await textPdf(
+                              `Instructions for ${file.name}`,
+                              file.note,
+                            ),
+                            `${file.name}-instructions.pdf`,
+                          );
+                        })
+                      }
+                    >
+                      Download this note
+                    </Button>
+                  )}
+                </div>
+                {preview[file.id] && (
+                  <pre className="whitespace-pre-wrap break-words font-sans rounded-lg bg-muted p-4">
+                    {documentText(preview[file.id])}
+                  </pre>
+                )}
+              </section>
+            ))}
+            <p className="text-sm text-muted-foreground">
+              Downloads may contain passwords or private information. Anyone
+              with access to the downloaded files may be able to read them.
+            </p>
+          </>
+        )}
       </div>
-    </div>
+    </main>
   );
 }
