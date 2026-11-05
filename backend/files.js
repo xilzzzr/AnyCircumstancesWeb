@@ -2,6 +2,7 @@
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
+const { acquireVaultUserLock, releaseVaultUserLock } = require("./vault_mutation_lock");
 const { decryptEscrowedKey, escrowKeyId, getEscrowPublicKeyInfo } = require("./escrow_keys");
 
 const { S3Client, GetObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, HeadObjectCommand, PutObjectCommand } = require("@aws-sdk/client-s3");
@@ -504,8 +505,12 @@ router.post(
     if (!key.startsWith(prefix)) return res.status(403).json({ ok: false, error: "forbidden" });
 
     const pool = getPool();
+    const conn = await pool.getConnection();
+    let lockName = null;
+    try {
+      lockName = await acquireVaultUserLock(conn, req.userId);
 
-    const [rows] = await pool.query("SELECT bucket, storage_key FROM files WHERE id = ? AND user_id = ? LIMIT 1", [
+    const [rows] = await conn.query("SELECT bucket, storage_key FROM files WHERE id = ? AND user_id = ? LIMIT 1", [
       key,
       req.userId,
     ]);
@@ -515,7 +520,7 @@ router.post(
     if (!bucket) return res.status(500).json({ ok: false, error: "missing_bucket" });
 
     const s3 = new S3Client({ region });
-    const [revisionRows] = await pool.query("SELECT object_key FROM file_storage_objects WHERE file_id = ?", [key]);
+    const [revisionRows] = await conn.query("SELECT object_key FROM file_storage_objects WHERE file_id = ?", [key]);
     const storedKeys = [...new Set([key, rows[0].storage_key, ...revisionRows.map((r) => r.object_key)].filter(Boolean))];
     for (let i = 0; i < storedKeys.length; i += 1000) {
       const result = await s3.send(new DeleteObjectsCommand({ Bucket: bucket, Delete: {
@@ -524,14 +529,25 @@ router.post(
       if (result.Errors?.length) throw new Error("file_object_delete_incomplete");
     }
 
-    await pool.query("DELETE FROM contact_file_share_tokens WHERE file_id = ?", [key]);
-    await pool.query("DELETE FROM emergency_contact_file_assignments WHERE file_id = ?", [key]);
-    await pool.query("DELETE FROM file_key_envelopes WHERE file_id = ?", [key]);
-    await pool.query("DELETE FROM file_key_escrows WHERE file_id = ?", [key]);
-    await pool.query("DELETE FROM file_storage_objects WHERE file_id = ?", [key]);
-    await pool.query("DELETE FROM files WHERE id = ? AND user_id = ? LIMIT 1", [key, req.userId]);
+    await conn.beginTransaction();
+    try {
+    await conn.query("DELETE FROM contact_file_share_tokens WHERE file_id = ?", [key]);
+    await conn.query("DELETE FROM emergency_contact_file_assignments WHERE file_id = ?", [key]);
+    await conn.query("DELETE FROM file_key_envelopes WHERE file_id = ?", [key]);
+    await conn.query("DELETE FROM file_key_escrows WHERE file_id = ?", [key]);
+    await conn.query("DELETE FROM file_storage_objects WHERE file_id = ?", [key]);
+    await conn.query("DELETE FROM files WHERE id = ? AND user_id = ? LIMIT 1", [key, req.userId]);
+    await conn.commit();
+    } catch (error) {
+      try { await conn.rollback(); } catch {}
+      throw error;
+    }
 
     return res.json({ ok: true });
+    } finally {
+      try { await releaseVaultUserLock(conn, lockName); }
+      finally { conn.release(); }
+    }
   })
 );
 
