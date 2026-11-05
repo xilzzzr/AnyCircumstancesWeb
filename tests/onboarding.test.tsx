@@ -45,7 +45,8 @@ describe('new account routes', () => {
     const router = app('/signup');
     const navigations: string[] = [];
     const unsubscribe = router.subscribe(state => navigations.push(state.location.pathname));
-    fireEvent.change(await screen.findByLabelText('Email'), { target: { value: 'new@example.test' } });
+    fireEvent.change(await screen.findByLabelText('Your name'), { target: { value: 'Arina' } });
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'new@example.test' } });
     fireEvent.change(screen.getByLabelText('Password', { exact: true }), { target: { value: 'Password12345' } });
     fireEvent.change(screen.getByLabelText('Confirm Password'), { target: { value: 'Password12345' } });
     fireEvent.click(screen.getByRole('checkbox'));
@@ -53,6 +54,8 @@ describe('new account routes', () => {
     await screen.findByRole('heading', { name: 'Verify your email' });
     expect(navigations.filter(p => p === '/verify-email')).toHaveLength(1);
     expect(sessionStorage.getItem('pending_verify_email')).toBe('new@example.test');
+    const registration = fetchMock.mock.calls.find(([path]) => path === '/auth/register');
+    expect(JSON.parse(String(registration?.[1]?.body))).toMatchObject({ displayName: 'Arina', email: 'new@example.test' });
     await verify();
     await waitFor(() => expect(router.state.location.pathname).toBe('/create-pin'));
     expect(sessionStorage.getItem('pending_verify_email')).toBeNull();
@@ -72,7 +75,7 @@ describe('new account routes', () => {
     ['/app/plan', /Choose your protection plan/, /plan/i],
     ['/app/verification', /Set up your check-ins/, /Verification Settings/],
     ['/app/emergency-contacts', /Choose your emergency contacts/, /Emergency Contacts/],
-    ['/app/upload', /Add your first file/, /Add to your vault/],
+    ['/app/upload', /Add your first file/, /Upload Files/],
   ])('onboarding links render %s', async (destination, link, heading) => {
     mockServer(true);
     const router = app('/onboarding');
@@ -130,4 +133,3 @@ test('production recovery does not display exception details', () => {
     expect(screen.getByRole('alert').textContent).not.toContain('sensitive-internal-value');
   } finally { vi.unstubAllEnvs(); }
 });
-

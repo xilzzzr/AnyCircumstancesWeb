@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AlertTriangle, Loader2, Trash2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,10 @@ import { useAuth } from "@/contexts/AuthContext";
 type Action = "cancel" | "delete" | null;
 
 export function AccountSettingsPage() {
+  const [displayName, setDisplayName] = useState("");
+  const [profileReady, setProfileReady] = useState(false);
+  const [profileError, setProfileError] = useState(false);
+  const [profileSaving, setProfileSaving] = useState(false);
   const [action, setAction] = useState<Action>(null);
   const [confirmation, setConfirmation] = useState("");
   const [pin, setPin] = useState("");
@@ -20,6 +24,27 @@ export function AccountSettingsPage() {
   const { toast } = useToast();
   const navigate = useNavigate();
   const phrase = action === "delete" ? "DELETE MY ACCOUNT" : "DELETE MY FILES";
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/auth/profile', { credentials: 'include' }).then(async response => {
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error('profile_unavailable');
+      if (!cancelled) { setDisplayName(data.displayName || ''); setProfileReady(true); }
+    }).catch(() => { if (!cancelled) setProfileError(true); });
+    return () => { cancelled = true; };
+  }, []);
+  async function saveName() {
+    setProfileSaving(true);
+    try {
+      const response = await fetch('/auth/profile', { method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ displayName }) });
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error('save_failed');
+      setDisplayName(data.displayName);
+      toast({ title: 'Name saved', description: 'Recipient email subjects will include this name.' });
+    } catch { toast({ title: 'Could not save name', description: 'Enter a name of 1–120 characters and try again.', variant: 'destructive' }); }
+    finally { setProfileSaving(false); }
+  }
 
   async function submit() {
     if (!action || confirmation !== phrase || !/^\d{4,6}$/.test(pin)) return;
@@ -52,15 +77,9 @@ export function AccountSettingsPage() {
         },
       });
     } catch (error) {
-      const code = String((error as Error)?.message || "");
       toast({
         title: "Action could not be completed",
-        description:
-          code === "invalid_pin"
-            ? "That PIN is incorrect. Enter your check-in PIN."
-            : code === "rate_limited"
-              ? "Too many attempts. Please wait a while and try again."
-              : "Please try again. If it keeps failing, email contact@anycircumstances.com.",
+        description: String((error as Error)?.message || error),
         variant: "destructive",
       });
     } finally {
@@ -85,12 +104,16 @@ export function AccountSettingsPage() {
       </div>
 
       <Card className="editorial-card">
+        <CardHeader><CardTitle>Your name</CardTitle><CardDescription>Help recipients recognize you. This name appears in emergency email subjects. Until you add a name, we use your email address.</CardDescription></CardHeader>
+        <CardContent className="space-y-3"><Label htmlFor="owner-name">Name recipients will recognize</Label><Input id="owner-name" autoComplete="name" value={displayName} maxLength={120} disabled={!profileReady || profileSaving} onChange={e => setDisplayName(e.target.value)} />{profileError && <p role="alert">Could not load your name. Refresh to try again.</p>}<Button onClick={saveName} disabled={!profileReady || profileSaving || !displayName.trim()}>Save name</Button></CardContent>
+      </Card>
+
+      <Card className="editorial-card">
         <CardHeader>
           <CardTitle>Subscription</CardTitle>
           <CardDescription>
-            Cancelling ends your plan immediately and permanently deletes every file in your vault.
-            Emergency links already sent for those files stop working. This cannot be undone. Apple
-            subscriptions must also be cancelled through Apple.
+            Cancelling immediately removes access and permanently deletes every file in your vault.
+            This cannot be undone.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -104,9 +127,9 @@ export function AccountSettingsPage() {
         <CardHeader>
           <CardTitle>Delete account</CardTitle>
           <CardDescription>
-            Permanently deletes your vault files, emergency contacts, pending emergency links, settings,
-            account, and other associated personal data. Stripe billing is cancelled automatically. Apple
-            billing continues until you cancel it through Apple.
+            Permanently deletes your vault files, contacts, settings, account, and other associated
+            personal data. Stripe billing is cancelled automatically. Apple billing continues until
+            you cancel it through Apple.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -125,28 +148,22 @@ export function AccountSettingsPage() {
             </DialogTitle>
             <DialogDescription id="destructive-action-help" className="space-y-3 pt-2">
               <span className="block">
-                This is immediate and irreversible when confirmed with your check-in PIN. Every encrypted
+                This is immediate and irreversible when confirmed with your safety PIN. Every encrypted
                 vault file and its recovery information will be permanently deleted.
               </span>
-              {action === "delete" ? (
+              {action === "delete" && (
                 <span className="block">
                   If you subscribed through Apple, deleting your account does not stop Apple billing.
                   Cancel it in your Apple subscription settings before continuing.
                 </span>
-              ) : (
-                <span className="block">
-                  If you subscribed through Apple, this does not stop Apple billing. Cancel it in your Apple
-                  subscription settings as well.
-                </span>
               )}
               <span className="block">
-                Enter your check-in PIN (not your account password), then type{" "}
-                <strong className="text-foreground">{phrase}</strong> to confirm.
+                Enter your safety PIN, then type <strong className="text-foreground">{phrase}</strong> to confirm.
               </span>
             </DialogDescription>
           </DialogHeader>
 
-          <Label htmlFor="destructive-pin">Check-in PIN</Label>
+          <Label htmlFor="destructive-pin">Safety PIN</Label>
           <Input
             id="destructive-pin"
             type="password"
