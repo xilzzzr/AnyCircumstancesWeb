@@ -1,48 +1,39 @@
 {
   "switch": {
-    "title": "Dead Man's Switch Email for Encrypted Files | AnyCircumstances",
-    "description": "Set recurring check-ins, email reminders, a grace period, and trusted recipients. If you stop responding, AnyCircumstances can securely release assigned files.",
+    "title": "Online Dead Man's Switch for Documents | AnyCircumstances",
+    "description": "Release documents to chosen recipients if you stop checking in. Encrypted uploads, email reminders, a grace period, and private file access.",
     "eyebrow": "DIGITAL DEAD MAN'S SWITCH",
-    "h1": "A Dead Man's Switch for Email, Check-Ins, and Encrypted Files",
-    "intro": "A digital dead man's switch waits for a signal from you. With AnyCircumstances, that signal is a scheduled check-in. If you miss one, your grace period begins. If you still do not respond before the grace period expires, your designated recipients are emailed secure access to the files you assigned to them.",
+    "h1": "An Online Dead Man's Switch for Your Documents",
+    "intro": "AnyCircumstances is an online dead man's switch that releases your documents to the people you choose if you stop checking in and your grace period expires. Upload encrypted files, assign them to trusted recipients, and set a check-in schedule. Recipients receive secure access links by email when your release conditions are met.",
     "sections": [
       {
-        "heading": "How a dead man's switch email works",
+        "heading": "How to set up automatic document release",
         "paragraphs": [
-          "When people search for a dead man's switch email, they are usually looking for a system that contacts someone automatically if they stop responding. The safest version is not a single delayed email waiting to fire. It uses repeated check-ins, reminders, and a grace period so one forgotten deadline does not immediately release sensitive information.",
-          "AnyCircumstances uses that model. You choose the check-in schedule, choose how reminders are sent, set the grace period, and decide which recipients should receive which files."
+          "Prepare the documents and instructions someone would need if you became unavailable. AnyCircumstances combines encrypted storage with scheduled check-ins, email reminders, and a grace period before release."
         ],
+        "ordered": true,
         "cards": [
           {
-            "heading": "A check-in becomes due",
-            "text": "AnyCircumstances expects a scheduled confirmation from you."
+            "heading": "Upload documents to your encrypted vault",
+            "text": "Files are encrypted on your device before upload. Include important records, personal letters, account recovery instructions, or business handover documents."
           },
           {
-            "heading": "You receive email reminders",
-            "text": "Reminder emails are sent according to the reminder settings you configured."
+            "heading": "Choose who receives each file",
+            "text": "Add trusted contacts, complete recipient verification, and assign the files each person should receive. A recipient is not automatically given access to your whole vault."
           },
           {
-            "heading": "You check in",
-            "text": "Enter your PIN to confirm the check-in."
+            "heading": "Set check-ins, reminders, and a grace period",
+            "text": "Choose a schedule you can keep and configure email reminders. For example, a weekly check-in gives you a regular opportunity to confirm you are available."
           },
           {
-            "heading": "You miss the check-in",
-            "text": "Missing the deadline does not immediately notify recipients. Your configured grace period begins."
+            "heading": "Check in, or use the grace period after a missed deadline",
+            "text": "Enter your PIN to check in. A missed check-in starts your configured grace period. Check in before it expires to stop the pending scheduled release and reset the schedule."
           },
           {
-            "heading": "You still have time to respond",
-            "text": "You can check in during the grace period and stop the pending release."
-          },
-          {
-            "heading": "The grace period expires",
-            "text": "If you still have not checked in, the release process begins."
-          },
-          {
-            "heading": "Recipients are emailed",
-            "text": "Each designated recipient receives a secure link for accessing the files assigned to them."
+            "heading": "Recipients receive secure access links",
+            "text": "If you remain unresponsive after the grace period, the release workflow emails verified recipients secure links to their assigned files. Documents are accessed through those links rather than sent as ordinary email attachments."
           }
-        ],
-        "ordered": true
+        ]
       },
       {
         "heading": "A missed check-in is not proof of death",
@@ -61,11 +52,65 @@
             "path": "/guides/what-happens-to-crypto-when-you-die"
           }
         ]
+      },
+      {
+        "heading": "What documents can I leave for someone?",
+        "paragraphs": [
+          "Use your vault for information a trusted person may need without you there to explain it. Add context about what to do first and where authoritative originals are kept."
+        ],
+        "cards": [
+          {
+            "heading": "Family and personal records",
+            "text": "Insurance documents, property information, personal letters, household instructions, and directions to signed legal originals."
+          },
+          {
+            "heading": "Account and business instructions",
+            "text": "Account inventories, password-manager recovery directions, important contacts, contracts, and business handover notes. File delivery does not grant legal authority to use an account or act for you."
+          }
+        ],
+        "links": [
+          {
+            "label": "Build an emergency document checklist",
+            "path": "/guides/emergency-information-checklist"
+          },
+          {
+            "label": "See encrypted document storage",
+            "path": "/digital-vault"
+          }
+        ]
+      },
+      {
+        "heading": "Does it send documents privately or publish them online?",
+        "paragraphs": [
+          "AnyCircumstances delivers secure access links by email to the verified recipients you selected, for the files assigned to them. Its release workflow does not publish your documents on a public website or post them to social media.",
+          "Treat access links as sensitive and choose people you trust. Once someone accesses a document, they may save or share a copy. Review your recipient list and file assignments whenever your plans change."
+        ]
+      },
+      {
+        "heading": "What should I check before choosing a dead man's switch service?",
+        "paragraphs": [
+          "Check whether the service supports file uploads or only text messages, how files are encrypted, who receives them, what triggers release, and how reminders and grace periods work. Review current pricing and storage limits before uploading your documents.",
+          "For AnyCircumstances, verify your recipients, confirm file assignments, and check that reminder emails arrive. Keep important originals and backups outside this service too. Delivery depends on service availability, working email addresses, and recipients being able to use their access links."
+        ],
+        "links": [
+          {
+            "label": "Review plans and storage options",
+            "path": "/pricing"
+          },
+          {
+            "label": "Read the encryption and recovery model",
+            "path": "/security"
+          },
+          {
+            "label": "See the full check-in and release flow",
+            "path": "/how-it-works"
+          }
+        ]
       }
     ],
     "links": [
       {
-        "label": "dead man's switch email",
+        "label": "How dead man's switch email delivery works",
         "path": "/guides/dead-mans-switch-email"
       },
       {
@@ -87,7 +132,7 @@
     "description": "A personal digital vault for encrypted documents, emergency information, recovery instructions, and controlled delivery to trusted recipients.",
     "eyebrow": "SECURE DIGITAL VAULT",
     "h1": "A Secure Digital Vault for Important Documents and Emergency Information",
-    "intro": "Store important documents and instructions in an encrypted vault instead of leaving them in an ordinary shared folder. AnyCircumstances adds recurring check-ins and controlled recipient delivery so the files can stay private until your release conditions are met.",
+    "intro": "Store important documents and instructions in an encrypted vault instead of leaving them in an ordinary shared folder. AnyCircumstances adds recurring check-ins and controlled recipient delivery, so files are sent to the people you chose only when your release conditions are met.",
     "sections": [
       {
         "heading": "What can a personal digital vault hold?",
@@ -162,7 +207,7 @@
     "description": "See the full flow: encrypted files, trusted recipients, scheduled check-ins, email reminders, a customizable grace period, and secure recipient delivery.",
     "eyebrow": "FROM PRIVATE STORAGE TO CONTROLLED DELIVERY",
     "h1": "How AnyCircumstances Works",
-    "intro": "Store important files in an encrypted vault, choose the people who may eventually need them, and create a check-in schedule. As long as you keep checking in, your files stay private. If you stop responding and your grace period expires, your designated recipients are emailed secure access to the files you assigned to them.",
+    "intro": "Store important files in an encrypted vault, choose the people who may eventually need them, and create a check-in schedule. As long as you keep checking in, your recipients receive nothing. If you stop responding and your grace period expires, your designated recipients are emailed secure access to the files you assigned to them.",
     "sections": [
       {
         "heading": "The full check-in and release flow",
@@ -173,23 +218,23 @@
           },
           {
             "heading": "Choose trusted recipients",
-            "text": "Add the people who should receive specific files if your release conditions are eventually met. Different files can be assigned according to who actually needs them."
+            "text": "Add the people who should receive specific files if your release conditions are eventually met. Each person confirms their email address once; only confirmed contacts can receive files. Different files can be assigned according to who actually needs them."
           },
           {
             "heading": "Choose your check-in schedule",
-            "text": "Set how often AnyCircumstances should expect you to check in. A successful check-in confirms that you still have access to your account and resets the schedule."
+            "text": "Check in daily, weekly or every 30 days, depending on your plan. A successful check-in confirms that you still have access to your account and resets the schedule."
           },
           {
             "heading": "Configure your email reminders",
-            "text": "Reminder emails are sent according to the reminder settings you configured."
+            "text": "Choose how many reminder emails (1 to 5) you get during your grace period. The first is sent when a check-in becomes overdue."
           },
           {
             "heading": "Set your grace period",
-            "text": "Choose how much extra time you want after a missed check-in. The grace period exists so one forgotten deadline does not immediately release sensitive files."
+            "text": "Choose 6 to 72 hours of extra time after a missed check-in. The grace period exists so one forgotten deadline does not immediately release sensitive files."
           },
           {
             "heading": "You check in",
-            "text": "Enter your PIN to confirm the check-in."
+            "text": "Sign in and enter your check-in PIN. You also have a separate emergency PIN: entering it instead starts delivery immediately."
           },
           {
             "heading": "If you miss a check-in, the grace period begins",
@@ -211,7 +256,13 @@
       {
         "heading": "What does a recipient receive?",
         "paragraphs": [
-          "The recipient receives an email containing a secure link for accessing the files assigned to them. The recipient does not automatically receive every file in your account. Access follows the recipient and file assignments you configured."
+          "The recipient receives an email containing secure access links to the files assigned to them, rather than ordinary document attachments. Recipients must complete verification to be eligible for delivery. They do not automatically receive every file in your vault, and this workflow does not publish your documents publicly online."
+        ],
+        "links": [
+          {
+            "label": "See a sample delivery email and recipient walkthrough",
+            "path": "/recipients"
+          }
         ]
       },
       {
@@ -276,11 +327,11 @@
     ]
   },
   "home": {
-    "eyebrow": "ENCRYPTED STORAGE + SCHEDULED CHECK-INS",
-    "h1": "A Secure Digital Vault with a Built-In Dead Man's Switch",
-    "intro": "Encrypt important files on your device, choose trusted recipients, and set a check-in schedule. If you miss a check-in, your grace period starts. If it expires without a response, your recipients receive secure access to the files you assigned to them.",
-    "heading": "What AnyCircumstances actually does",
-    "sectionIntro": "AnyCircumstances combines encrypted file storage with a check-in system. Your files stay private while you are active. If you stop checking in and your grace period expires, the people you chose can receive the files you assigned to them.",
+    "eyebrow": "ENCRYPTED VAULT + CHECK-INS",
+    "h1": "Make sure your family can get to what matters when you can’t.",
+    "intro": "Keep important documents, account instructions and letters in an encrypted vault, and choose who should receive each one. If you stop checking in, they’re emailed secure links to their files. Until then, they receive nothing.",
+    "heading": "Four steps, then it runs in the background",
+    "sectionIntro": "Set it up once. Your regular check-ins hold everything back, and a grace period with reminders gives you time if you miss one.",
     "cards": [
       {
         "heading": "Secure digital vault",
@@ -295,9 +346,9 @@
         "path": "/how-it-works"
       },
       {
-        "heading": "Conditional delivery",
+        "heading": "Automatic document release",
         "text": "Missing one check-in does not immediately release anything. Your grace period begins first. If you still do not check in before it expires, designated recipients are emailed secure access to the files assigned to them.",
-        "label": "Learn about the dead man's switch",
+        "label": "Explore the online dead man's switch",
         "path": "/dead-mans-switch"
       }
     ]
