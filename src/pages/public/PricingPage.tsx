@@ -5,6 +5,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { Check, ArrowRight, Phone, MessageSquare, MapPin, Calendar } from "lucide-react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
@@ -79,6 +80,9 @@ export function PricingPage() {
   const [selectedAddons, setSelectedAddons] = useState<string[]>([]);
   const [checkInFrequency, setCheckInFrequency] = useState("monthly");
   const [isAnnual, setIsAnnual] = useState(false);
+  const [promoCode, setPromoCode] = useState("");
+  const [promoError, setPromoError] = useState("");
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
 
   const pricing = useMemo(() => {
     const storagePrice = getStoragePrice(storageGb);
@@ -102,12 +106,16 @@ export function PricingPage() {
   }, [storageGb, selectedAddons, checkInFrequency]);
 
   const onCheckout = async () => {
+    if (checkoutLoading) return;
+    setPromoError("");
+    setCheckoutLoading(true);
     try {
       const payload: Parameters<typeof createCheckoutSession>[0] = {
         storageGb,
         checkInFrequency: checkInFrequency as "monthly" | "weekly" | "daily",
         billingInterval: isAnnual ? "annual" : "monthly",
         addons: selectedAddons,
+        promoCode: promoCode.trim(),
       };
 
       const data = await createCheckoutSession(payload);
@@ -122,12 +130,15 @@ export function PricingPage() {
             checkInFrequency,
             billingInterval: isAnnual ? "annual" : "monthly",
             addons: selectedAddons,
+            promoCode: promoCode.trim(),
           })
         );
         window.location.href = "/signup?next=/pricing";
         return;
       }
-      throw e;
+      setPromoError(code === "invalid_promo_code" ? "This code is invalid or has already been used." : "Unable to start checkout. Please try again.");
+    } finally {
+      setCheckoutLoading(false);
     }
   };
 

@@ -6,6 +6,7 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const nodemailer = require("nodemailer");
 const Stripe = require("stripe");
+const { findPromotion, isPioneer } = require("./pioneer_promo");
 const { escapeHtml, emailSender, renderAnyCircumstancesEmail, renderEmergencyEmail } = require("./emails");
 const { currentApnsEnv } = require("./push_notifications");
 const {
@@ -1977,13 +1978,39 @@ router.post(
     const successUrl = `${publicWebBaseUrl}/app/billing?checkout=success`;
     const cancelUrl = `${publicWebBaseUrl}/app/billing?checkout=cancel`;
 
+    // Validate at the server: only marked one-use pioneer codes grant a trial.
+    // Stripe enforces max_redemptions when the code is applied at checkout.
+    const enteredCode = String(req.body?.promoCode || "").trim();
+    const promotion = enteredCode ? await findPromotion(stripe, enteredCode) : null;
+    if (enteredCode && !promotion) {
+      return res.status(400).json({ ok: false, error: "invalid_promo_code" });
+    }
+    const pioneer = promotion ? isPioneer(promotion) : false;
+    const subscriptionData = {
+      metadata: {
+        user_id: String(userId),
+        storage_gb: String(safeStorageGb),
+        checkin_frequency: checkInFrequency,
+        billing_interval: billingInterval,
+        addons_json: JSON.stringify(addons),
+        ...(pioneer ? { pioneer_offer: "one_month_free_20_percent_forever" } : {}),
+      },
+      ...(pioneer ? {
+        trial_period_days: 30,
+        trial_settings: { end_behavior: { missing_payment_method: "cancel" } },
+      } : {}),
+    };
+
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       customer: customerId,
       client_reference_id: String(userId),
       success_url: successUrl,
       cancel_url: cancelUrl,
-      allow_promotion_codes: true,
+      // Website-side promo entry is necessary to grant the trial before Stripe Checkout.
+      allow_promotion_codes: false,
+      ...(promotion ? { discounts: [{ promotion_code: promotion.id }] } : {}),
+      ...(pioneer ? { payment_method_collection: "always" } : {}),
       line_items: [
         {
           price_data: {
@@ -1995,15 +2022,7 @@ router.post(
           quantity: 1,
         },
       ],
-      subscription_data: {
-        metadata: {
-          user_id: String(userId),
-          storage_gb: String(safeStorageGb),
-          checkin_frequency: checkInFrequency,
-          billing_interval: billingInterval,
-          addons_json: JSON.stringify(addons),
-        },
-      },
+      subscription_data: subscriptionData,
       metadata: { user_id: String(userId) },
     });
 
