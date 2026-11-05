@@ -497,7 +497,7 @@ export function UploadPage() {
       </Dialog>
 
       <div>
-        <h1 className="text-2xl font-bold text-foreground">Add to your vault</h1>
+        <h1 className="text-2xl font-bold text-foreground">Upload Files</h1>
         <p className="text-muted-foreground">Upload a file or write down passwords, instructions, and messages. Contents and recipient notes are encrypted on your device before saving.</p>
       </div>
 
