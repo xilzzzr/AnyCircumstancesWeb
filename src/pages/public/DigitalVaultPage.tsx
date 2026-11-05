@@ -177,7 +177,7 @@ export function DigitalVaultPage() {
             <div className="grid md:grid-cols-3 gap-6">
               {[
                 { step: "01", icon: Lock, title: "Encrypt & upload", desc: "File contents are encrypted in your browser before upload." },
-                { step: "02", icon: Clock, title: "Set check-ins", desc: "Check in daily, weekly or monthly, with reminders and a grace period you choose." },
+                { step: "02", icon: Clock, title: "Set check-ins", desc: "Check in daily or on custom scheduled days, weekly or monthly, with reminders and a grace period you choose." },
                 { step: "03", icon: Users, title: "Choose recipients", desc: "Contacts confirm their email once, and receive their files only if a release happens." },
               ].map((s, idx) => (
                 <motion.div
