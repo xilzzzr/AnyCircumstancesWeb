@@ -34,7 +34,7 @@ type CheckoutError = { message: string; action?: { href: string; label: string }
 const FREQUENCY_DETAIL: Record<CheckInFrequencyId, string> = {
   monthly: "Check in every 30 days",
   weekly: "Check in every 7 days",
-  daily: "Check in every day",
+  daily: "Daily or choose a custom check-in calendar",
 };
 
 const included = [
@@ -337,7 +337,7 @@ export function PricingPage() {
                       <span className="text-foreground">{formatMoney(charge.storage)}/month</span>
                     </div>
                     <div className="flex justify-between gap-3">
-                      <span className="text-muted-foreground">Check-ins ({frequency === "monthly" ? "Monthly" : frequency === "weekly" ? "Weekly" : "Daily"})</span>
+                      <span className="text-muted-foreground">Check-ins ({frequency === "monthly" ? "Monthly" : frequency === "weekly" ? "Weekly" : "Daily / scheduled"})</span>
                       <span className="text-foreground">{charge.frequency === 0 ? "Included" : `+${formatMoney(charge.frequency)}/month`}</span>
                     </div>
 
