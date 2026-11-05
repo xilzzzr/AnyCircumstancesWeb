@@ -9,7 +9,10 @@
     "test": "node --test *.test.js",
     "dispatch": "node dispatch_emergency.js",
     "migrate:escrow-kms": "node migrate_escrow_to_kms.js",
-    "migrate:scheduled-checkins": "node migrate_scheduled_checkins.js"
+    "migrate:scheduled-checkins": "node migrate_scheduled_checkins.js",
+    "migrate:vault-documents": "node migrate_vault_documents.js",
+    "migrate:security:check": "node migrate_security_schema.js --check",
+    "migrate:security": "node migrate_security_schema.js --apply"
   },
   "dependencies": {
     "@apple/app-store-server-library": "^3.1.0",
