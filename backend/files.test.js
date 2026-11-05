@@ -96,7 +96,7 @@ test("emergency link is redeemed once into a short-lived HttpOnly share session"
       assert.deepEqual(params, ["users/1/file", "1"]);
       return [[{ meta_json: JSON.stringify(meta) }]];
     }
-    if (sql.includes("SELECT bucket, content_type FROM files")) {
+    if (sql.includes("SELECT bucket, content_type, storage_key FROM files")) {
       return [[{ bucket: "local-test-bucket", content_type: "application/pdf" }]];
     }
 
