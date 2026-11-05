@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { bytesFromB64, b64FromBytes } from "@/lib/vaultCrypto";
@@ -55,6 +55,23 @@ const friendlyError = (e: unknown) => {
     return "This package is too large to download together in this browser. Download the files individually.";
   return "Could not securely open the files. Please retry. If the problem continues, contact support.";
 };
+type ShareOpenError = { title: string; body: string; canRetry: boolean };
+function classifyOpenError(error: unknown): ShareOpenError {
+  const code = error instanceof Error ? error.message : "";
+  if (code === "token_already_redeemed")
+    return { title: "This link has already been opened", body: "For security each link works once. If you didn't open it, contact the person who set this up or their family through a trusted channel.", canRetry: false };
+  if (code === "token_expired")
+    return { title: "This link has expired", body: "This emergency link has expired and can no longer be opened. Contact the sender through a trusted channel.", canRetry: false };
+  if (code === "invalid_token" || code === "missing_token")
+    return { title: "This link isn't valid", body: "Open it again directly from the email. If that fails, contact the person who shared it.", canRetry: false };
+  if (code === "share_session_required" || code === "invalid_share_session")
+    return { title: "Your access time has ended", body: "After a link is opened, the 20 minutes of access in that browser cannot be restarted. Ask the owner or their family for help.", canRetry: false };
+  if (code === "rate_limited")
+    return { title: "Too many requests right now", body: "Please wait a minute, then try again.", canRetry: true };
+  if (code === "server_error" || code === "secure_access_failed")
+    return { title: "The file couldn't be prepared", body: "Please try again. If the problem continues, contact@anycircumstances.com can help.", canRetry: true };
+  return { title: "We couldn't connect", body: "Check your internet connection and try again.", canRetry: true };
+}
 export default function SharePage() {
   const { token: pathToken = "" } = useParams();
   const [token] = useState(
@@ -69,6 +86,9 @@ export default function SharePage() {
   const [status, setStatus] = useState(token ? "Open the link when you are ready." : "Checking this browser for an open share session…");
   const [error, setError] = useState("");
   const [linkOpened, setLinkOpened] = useState(false);
+  const [openError, setOpenError] = useState<ShareOpenError | null>(null);
+  const headingRef = useRef<HTMLHeadingElement | null>(null);
+  useEffect(() => { if (openError) headingRef.current?.focus(); }, [openError]);
 
   // Email link scanners and previews must never consume a one-use token.
   // Only a real click on Open shared file is allowed to redeem it.
@@ -76,18 +96,20 @@ export default function SharePage() {
     if (busy) return;
     setBusy(true);
     setError("");
+    setOpenError(null);
     setStatus("Opening the secure link…");
     try {
       await shareRequest("share-lookup", { token });
-      const data = await shareRequest("share-package");
-      // Remove both fragment and route tokens after successful redemption.
+      // Remove one-time token immediately after redemption even if package lookup fails.
       window.history.replaceState(null, "", "/share" + window.location.search);
+      setLinkOpened(true);
+      const data = await shareRequest("share-package");
       setLinkOpened(true);
       setFiles(data.files);
       setStatus("Your files are ready to open.");
     } catch (e) {
-      setStatus("Could not open the link.");
-      setError(friendlyError(e));
+      setStatus("");
+      setOpenError(classifyOpenError(e));
     } finally {
       setBusy(false);
     }
@@ -107,8 +129,8 @@ export default function SharePage() {
         setStatus("Your files are ready to open.");
       } catch (e) {
         if (cancelled) return;
-        setStatus("Could not open the link.");
-        setError(friendlyError(e));
+        setStatus("");
+        setOpenError(classifyOpenError(e));
       }
     })();
     return () => { cancelled = true; };
@@ -266,21 +288,24 @@ export default function SharePage() {
     <main className="min-h-screen bg-background text-foreground">
       <div className="mx-auto max-w-3xl px-5 py-10 space-y-6">
         <header>
-          <h1 className="text-2xl font-bold">{!linkOpened && token ? "Someone shared important information with you" : !linkOpened && error ? "This link isn't valid" : "Your shared file"}</h1>
+          <h1 ref={headingRef} tabIndex={-1} className="text-2xl font-bold">{openError?.title ?? (!linkOpened && token ? "Someone shared important information with you" : "Your shared file")}</h1>
           <p className="mt-2 text-muted-foreground">
             You can read the owner's notes, then open or download the files they left
             for you.
           </p>
         </header>
-        {!!token && !linkOpened && (
+        {!!token && !linkOpened && (!openError || openError.canRetry) && (
           <div className="space-y-3 rounded-xl border p-5">
-            <p className="text-sm text-muted-foreground">This link is single-use and remains unopened until you press the button. You will have 20 minutes to access its files in this browser.</p>
-            <Button disabled={busy} onClick={openSharedFile}>{busy ? "Opening…" : "Open shared file"}</Button>
+            <p className="text-sm text-muted-foreground">The link works once. After you open it, you have 20 minutes in this browser. The email was sent on behalf of the account owner.</p>
+            <Button disabled={busy} onClick={openSharedFile}>{busy ? "Opening…" : openError ? "Try again" : "Open shared file"}</Button>
           </div>
         )}
         <p role="status" aria-live="polite">
           {status}
         </p>
+        {openError && (
+          <p role="alert" className="rounded-xl border border-destructive p-4 text-destructive">{openError.body}</p>
+        )}
         {error && (
           <p
             role="alert"
