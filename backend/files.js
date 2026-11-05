@@ -4,7 +4,7 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const { decryptEscrowedKey, escrowKeyId, getEscrowPublicKeyInfo } = require("./escrow_keys");
 
-const { S3Client, GetObjectCommand, DeleteObjectCommand, HeadObjectCommand, PutObjectCommand } = require("@aws-sdk/client-s3");
+const { S3Client, GetObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, HeadObjectCommand, PutObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const { createPresignedPost } = require("@aws-sdk/s3-presigned-post");
 const { rateLimit } = require("express-rate-limit");
@@ -505,7 +505,7 @@ router.post(
 
     const pool = getPool();
 
-    const [rows] = await pool.query("SELECT bucket FROM files WHERE id = ? AND user_id = ? LIMIT 1", [
+    const [rows] = await pool.query("SELECT bucket, storage_key FROM files WHERE id = ? AND user_id = ? LIMIT 1", [
       key,
       req.userId,
     ]);
@@ -515,12 +515,20 @@ router.post(
     if (!bucket) return res.status(500).json({ ok: false, error: "missing_bucket" });
 
     const s3 = new S3Client({ region });
-    await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+    const [revisionRows] = await pool.query("SELECT object_key FROM file_storage_objects WHERE file_id = ?", [key]);
+    const storedKeys = [...new Set([key, rows[0].storage_key, ...revisionRows.map((r) => r.object_key)].filter(Boolean))];
+    for (let i = 0; i < storedKeys.length; i += 1000) {
+      const result = await s3.send(new DeleteObjectsCommand({ Bucket: bucket, Delete: {
+        Objects: storedKeys.slice(i, i + 1000).map((Key) => ({ Key })), Quiet: true,
+      } }));
+      if (result.Errors?.length) throw new Error("file_object_delete_incomplete");
+    }
 
     await pool.query("DELETE FROM contact_file_share_tokens WHERE file_id = ?", [key]);
     await pool.query("DELETE FROM emergency_contact_file_assignments WHERE file_id = ?", [key]);
     await pool.query("DELETE FROM file_key_envelopes WHERE file_id = ?", [key]);
     await pool.query("DELETE FROM file_key_escrows WHERE file_id = ?", [key]);
+    await pool.query("DELETE FROM file_storage_objects WHERE file_id = ?", [key]);
     await pool.query("DELETE FROM files WHERE id = ? AND user_id = ? LIMIT 1", [key, req.userId]);
 
     return res.json({ ok: true });
@@ -592,12 +600,12 @@ router.post(
     if (!key.startsWith(prefix)) return res.status(403).json({ ok: false, error: "forbidden" });
 
     const pool = getPool();
-    const [rows] = await pool.query("SELECT bucket FROM files WHERE id = ? AND user_id = ? LIMIT 1", [key, req.userId]);
+    const [rows] = await pool.query("SELECT bucket, storage_key FROM files WHERE id = ? AND user_id = ? LIMIT 1", [key, req.userId]);
     if (!rows?.length) return res.status(404).json({ ok: false, error: "file_not_found" });
 
     const s3 = new S3Client({ region });
 
-    const cmd = new GetObjectCommand({ Bucket: String(rows[0].bucket || bucket), Key: key, ResponseCacheControl: "no-store" });
+    const cmd = new GetObjectCommand({ Bucket: String(rows[0].bucket || bucket), Key: String(rows[0].storage_key || key), ResponseCacheControl: "no-store" });
     const url = await getSignedUrl(s3, cmd, { expiresIn: 600 });
 
     return res.json({ ok: true, url });
@@ -675,9 +683,10 @@ router.post(
 
 require("./vault_documents").registerDocumentRoutes(router, {
   requireUser, requirePaid, requireVaultAuthorization, limiter: confirmUploadLimiter, asyncHandler, getPool,
-  putDocument: ({ bucket, fileId, ciphertext }) => getS3().send(new PutObjectCommand({
-    Bucket: bucket, Key: fileId, Body: ciphertext, ContentType: "application/octet-stream", ServerSideEncryption: "AES256", CacheControl: "no-store",
+  putDocument: ({ bucket, storageKey, ciphertext }) => getS3().send(new PutObjectCommand({
+    Bucket: bucket, Key: storageKey, Body: ciphertext, ContentType: "application/octet-stream", ServerSideEncryption: "AES256", CacheControl: "no-store",
   })),
+  deleteDocument: ({ bucket, storageKey }) => getS3().send(new DeleteObjectCommand({ Bucket: bucket, Key: storageKey })),
 });
 
 router.post(
@@ -1004,7 +1013,7 @@ router.post(
     t.file_id = target;
 
     const [frows] = await pool.query(
-      "SELECT bucket, content_type FROM files WHERE id = ? AND user_id = (SELECT user_id FROM emergency_contacts WHERE id = ? LIMIT 1) LIMIT 1",
+      "SELECT bucket, content_type, storage_key FROM files WHERE id = ? AND user_id = (SELECT user_id FROM emergency_contacts WHERE id = ? LIMIT 1) LIMIT 1",
       [String(t.file_id), String(t.contact_id)]
     );
     if (!frows?.length) return res.status(404).json({ ok: false, error: "file_not_found" });
@@ -1020,7 +1029,7 @@ router.post(
     const s3 = new S3Client({ region });
     const cmd = new GetObjectCommand({
       Bucket: bucket,
-      Key: fileId,
+      Key: String(frows[0].storage_key || fileId),
       ResponseCacheControl: "no-store",
       ResponseContentType: String(frows[0].content_type || "application/octet-stream").slice(0, 255),
       ResponseContentDisposition: `attachment; filename="${basename.replace(/["\\\r\n]/g, "_")}"`,
