@@ -20,3 +20,13 @@ test("promotion lookup checks active and redemption status", async () => {
  assert.equal(await findPromotion(stripe,"PIONEERABC"),null);
  assert.equal(await findPromotion(stripe,"bad code"),null);
 });
+
+test("modern Stripe promotion.coupon ID is resolved before offer validation", async () => {
+ const promo = makePromo({coupon:undefined,promotion:{type:"coupon",coupon:"coupon_pioneer"}});
+ const stripe = {
+  promotionCodes:{list:async () => ({data:[promo]})},
+  coupons:{retrieve:async id => ({id,percent_off:20,duration:"forever",valid:true})}
+ };
+ const found = await findPromotion(stripe,"pioneerabc");
+ assert.equal(isPioneer(found),true);
+});
