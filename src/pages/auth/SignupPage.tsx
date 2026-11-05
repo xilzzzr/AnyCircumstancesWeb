@@ -17,6 +17,7 @@ const requirements = [
 ];
 
 export function SignupPage() {
+  const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -41,6 +42,11 @@ export function SignupPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!displayName.trim()) {
+      toast({ title: 'Your name is required', description: 'Enter the name your emergency contacts will recognize.', variant: 'destructive' });
+      return;
+    }
 
     if (!email) {
       toast({
@@ -85,7 +91,7 @@ export function SignupPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ email, password, ageConfirmed: true }),
+        body: JSON.stringify({ email, password, displayName: displayName.trim(), ageConfirmed: true }),
       });
 
       let data: { ok?: boolean; error?: string } | null = null;
@@ -198,6 +204,14 @@ export function SignupPage() {
           {plan && <PlanSummary plan={plan} editHref={pricingHrefForPlan(plan)} className="mb-6" />}
 
           <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="displayName">Your name</Label>
+              <Input id="displayName" name="displayName" type="text" autoComplete="name"
+                placeholder="How your trusted contacts know you" maxLength={120}
+                value={displayName} onChange={(e) => setDisplayName(e.target.value)}
+                required disabled={loading} />
+              <p className="text-xs text-muted-foreground">Your name identifies you in emergency emails to recipients.</p>
+            </div>
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <Input
