@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
@@ -10,6 +11,7 @@ import { computePlanPrice, formatMoney, getFrequencyPrice, type CheckInFrequency
 import { DEFAULT_PLAN, clearPendingPlan, isFrequency, planFromSearchParams, readPendingPlan } from "@/lib/pendingPlan";
 import { StorageSlider } from "@/components/pricing/StorageSlider";
 import { PlannedFeaturesNote } from "@/components/pricing/PlannedFeaturesNote";
+import { readPendingPromoCode, savePendingPromoCode, clearPendingPromoCode } from "@/lib/pioneerPromoStorage";
 
 type ApiResult = { ok: boolean; url?: string; error?: string };
 
@@ -29,6 +31,7 @@ function checkoutErrorMessage(code: string | undefined) {
   if (code === "subscription_already_active") return "You already have an active plan. You can change it from Billing.";
   if (code === "not_authenticated" || code === "invalid_session") return "Your session has expired. Please sign in again.";
   if (code === "invalid_plan") return "That plan selection isn’t valid. Adjust your choices and try again.";
+  if (code === "invalid_promo_code") return "That promotion code is invalid, expired, or already redeemed. Check your code and try again.";
   return "We couldn’t start checkout. You have not been charged. Please try again in a moment.";
 }
 
@@ -44,6 +47,7 @@ export default function PlanBuilderPage() {
   const [checkInFrequency, setCheckInFrequency] = useState<CheckInFrequencyId>(initialPlan.frequency);
   const [isAnnual, setIsAnnual] = useState(initialPlan.billing === "annual");
   const [loading, setLoading] = useState(false);
+  const [promoCode, setPromoCode] = useState(() => readPendingPromoCode());
   const [error, setError] = useState<string | null>(null);
 
   const billingInterval: "monthly" | "annual" = isAnnual ? "annual" : "monthly";
@@ -85,6 +89,7 @@ export default function PlanBuilderPage() {
         checkInFrequency,
         billingInterval,
         addons: [],
+        promoCode: promoCode.trim(),
       });
 
       if (!out.ok || !out.url) {
@@ -96,6 +101,7 @@ export default function PlanBuilderPage() {
       }
 
       clearPendingPlan();
+      clearPendingPromoCode();
       window.location.href = out.url;
     } catch {
       const message = checkoutErrorMessage(undefined);
@@ -214,6 +220,24 @@ export default function PlanBuilderPage() {
                   : "Charged every month, renews monthly. USD."}
               </div>
             </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="plan-promo-code">Promotion code (optional)</Label>
+            <Input id="plan-promo-code" type="text" name="promotionCode"
+              autoComplete="off" autoCapitalize="characters" spellCheck={false}
+              maxLength={40} placeholder="Enter your code" value={promoCode}
+              onChange={(e) => {
+                const code = e.target.value.toUpperCase();
+                setPromoCode(code);
+                savePendingPromoCode(code);
+                setError(null);
+              }}
+              disabled={loading} aria-describedby="plan-promo-explainer" />
+            <p id="plan-promo-explainer" className="text-xs leading-relaxed text-muted-foreground">
+              Eligible Pioneer invitations give 30 days free, then 20% off your recurring subscription for its lifetime.
+              A payment method is required. Your offer will be verified at checkout; other codes may have different terms.
+            </p>
           </div>
 
           <PlannedFeaturesNote />
