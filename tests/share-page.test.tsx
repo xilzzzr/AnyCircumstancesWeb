@@ -81,7 +81,7 @@ describe('emergency share landing', () => {
   test('an expired 20-minute session after redemption is explained, the token is removed, and no retry is offered', async () => {
     const fetchMock = mockServer({
       '/files/share-lookup': lookupOk,
-      '/files/share-get-contact-envelope': { status: 401, body: { ok: false, error: 'share_session_required' } },
+      '/files/share-package': { status: 401, body: { ok: false, error: 'share_session_required' } },
     });
     renderShare();
     fireEvent.click(screen.getByRole('button', { name: 'Open shared file' }));
@@ -105,7 +105,7 @@ describe('share page without a token', () => {
   });
 
   test('offers Download + decrypt when this browser still has an open session', async () => {
-    mockServer({ '/files/share-lookup': lookupOk });
+    mockServer({ '/files/share-lookup': lookupOk, '/files/share-package': { body: { ok: true, files: [{ id: 'users/1/opaque-key', name: 'Letter', content_type: 'application/pdf', size_bytes: 64 }] } } });
     renderShare('');
     await screen.findByRole('heading', { level: 1, name: 'Your shared file' });
     expect(screen.getByRole('button', { name: 'Download + decrypt' })).toBeTruthy();
