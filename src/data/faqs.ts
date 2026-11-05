@@ -22,7 +22,7 @@ export const faqGroups: FaqGroup[] = [
       {
         question: "How much does it cost?",
         answer:
-          "The price depends on how much storage you choose (5 to 200 GB) and how often you check in. Monthly check-ins are included, weekly check-ins add $1.99 a month and daily check-ins add $2.99 a month. Annual billing costs 10 times the monthly price and is charged once a year. Prices are in US dollars.",
+          "The price depends on how much storage you choose (5 to 200 GB) and how often you check in. Monthly check-ins are included, weekly check-ins add $1.99 a month and daily / scheduled check-ins add $2.99 a month. Annual billing costs 10 times the monthly price and is charged once a year. Prices are in US dollars.",
         links: [{ label: "See pricing", to: "/pricing" }],
       },
       {
@@ -107,7 +107,7 @@ export const faqGroups: FaqGroup[] = [
       {
         question: "How do I check in?",
         answer:
-          "Sign in and enter your check-in PIN on the Check-in page. Check-ins repeat every day, week or 30 days, depending on your plan. A check-in resets the schedule.",
+          "Sign in and enter your check-in PIN on the Check-in page. Monthly and weekly plans check in every 30 or 7 days; the Daily / scheduled plan can use daily or custom recurring days and times. A successful check-in advances the due date, while a scheduled plan keeps its chosen calendar.",
         links: [{ label: "Check in (sign-in required)", to: "/app/check-in" }],
       },
       {
@@ -119,7 +119,7 @@ export const faqGroups: FaqGroup[] = [
       {
         question: "Can I set a one-off timer, for example for a trip?",
         answer:
-          "Not at the moment. Check-ins repeat on a fixed schedule (daily, weekly or every 30 days) that’s part of your plan. The shortest possible time from your last check-in to a scheduled release is 30 hours: a daily schedule plus a 6-hour grace period.",
+          "A one-off timer isn’t available, but the paid Daily / scheduled tier lets you choose calendar dates, weekdays, every N days or alternate weeks, and a time zone. Your chosen grace period still applies after a missed due time; editing a schedule cannot clear an overdue check-in.",
       },
       {
         question: "Does missing a check-in mean AnyCircumstances thinks I died?",
