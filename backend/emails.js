@@ -61,7 +61,7 @@ function renderEmergencyEmail({ name, ownerName, ownerEmail, links, scheduled = 
   });
 }
 function emergencyEmailSubject(ownerName, ownerEmail) {
-  const owner = String(ownerName || ownerEmail || 'Your trusted contact').replace(/[\\r\\n\\x00-\\x1f\\x7f]/g, ' ').trim().slice(0, 160);
+  const owner = String(ownerName || ownerEmail || 'Your trusted contact').replace(/[\r\n\x00-\x1f\x7f]/g, ' ').trim().slice(0, 160);
   return `${owner}: emergency information shared with you | AnyCircumstances`;
 }
 module.exports = { emergencyEmailSubject, escapeHtml, emailSender, emailButton, renderAnyCircumstancesEmail, renderEmergencyEmail };
