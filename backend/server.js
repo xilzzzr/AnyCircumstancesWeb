@@ -45,7 +45,7 @@ const webhookCircuitBreaker = createFixedWindowLimiter({
 app.post(
   "/stripe/webhook",
   webhookCircuitBreaker,
-  require("express").raw({ type: "application/json" }),
+  require("./body_parser_security").stripeWebhookBodyParser(),
   stripeWebhookHandler
 );
 
@@ -127,7 +127,7 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json({ limit: "1mb" }));
+app.use(require("./body_parser_security").apiJsonBodyParser());
 app.use(cookieParser());
 
 const publicEmailDestinationLimiter = createFixedWindowLimiter({
