@@ -1,459 +1,427 @@
-import { useEffect, useRef, useState } from "react";
-import { decryptUacBytes } from "@/lib/uacChunk";
+import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
+import { Button } from "@/components/ui/button";
+import { bytesFromB64, b64FromBytes } from "@/lib/vaultCrypto";
+import { decryptUacBytes } from "@/lib/uacChunk";
+import {
+  DOCUMENT_TYPE,
+  documentText,
+  openRecipientNote,
+  parseDocument,
+  type FileMeta,
+  type VaultDocument,
+} from "@/lib/vaultDocuments";
+import {
+  documentPdf,
+  downloadBlob,
+  downloadPackage,
+  textPdf,
+  type PackageItem,
+} from "@/lib/vaultExports";
 
-type ShareFile = { id: string; content_type: string };
-
-type ShareLookup = {
-  ok: boolean;
-  file?: ShareFile;
-  token?: { expires_at: string; used_at?: string | null; redeemed?: boolean };
-  error?: string;
+type ReleasedFile = {
+  id: string;
+  name: string;
+  content_type: string;
+  size_bytes: number;
 };
-
-type EnvelopeRes = {
-  ok: boolean;
-  contact_id?: number;
-  file_id?: string;
-  alg?: string;
-  enc_key_b64?: string;
-  meta_json?: unknown;
-  error?: string;
+type OpenFile = ReleasedFile & {
+  rawKey: Uint8Array;
+  meta: FileMeta;
+  note: string;
 };
-
-// checking: no token in the address, looking for an already-open session in this browser.
-// landing: token held in memory, nothing redeemed yet.
-// working: redeeming and/or downloading + decrypting.
-// opened: a share session is active in this browser but the file isn't decrypted yet.
-// ready: decrypted file available to save.
-type Phase = "checking" | "landing" | "working" | "opened" | "ready" | "error";
-type ErrorStage = "open" | "download";
-type ShareErrorKind =
-  | "already_redeemed"
-  | "expired"
-  | "invalid"
-  | "session_expired"
-  | "rate_limited"
-  | "network"
-  | "download"
-  | "processing";
-
-const SUPPORT_EMAIL = "contact@anycircumstances.com";
-const TRUSTED_CHANNEL = "contact the person who set this up or their family through a trusted channel.";
-
-const shareErrorCopy: Record<ShareErrorKind, { title: string; body: string; retry: boolean }> = {
-  already_redeemed: {
-    title: "This link has already been opened",
-    body: `For security each link works once. If you didn't open it, ${TRUSTED_CHANNEL}`,
-    retry: false,
-  },
-  expired: {
-    title: "This link has expired",
-    body: `Emergency links stop working after a set time, so this one can no longer be opened. If you still need the file, ${TRUSTED_CHANNEL}`,
-    retry: false,
-  },
-  invalid: {
-    title: "This link isn't valid",
-    body: `The link may be incomplete or no longer active. Open it again directly from the email and make sure the whole link is used. If it still doesn't work, ${TRUSTED_CHANNEL}`,
-    retry: false,
-  },
-  session_expired: {
-    title: "Your access time has ended",
-    body: `After a link is opened, the file can be downloaded for 20 minutes, and only in the browser where it was opened. For security the link can't be opened again. If you still need the file, ${TRUSTED_CHANNEL}`,
-    retry: false,
-  },
-  rate_limited: {
-    title: "Too many requests right now",
-    body: "Please wait a minute, then try again.",
-    retry: true,
-  },
-  network: {
-    title: "We couldn't connect",
-    body: "Check your internet connection, then try again.",
-    retry: true,
-  },
-  download: {
-    title: "The download didn't finish",
-    body: "Check your internet connection, then try again.",
-    retry: true,
-  },
-  processing: {
-    title: "The file couldn't be prepared",
-    body: "Please try again in a moment. If it keeps happening, email",
-    retry: true,
-  },
-};
-
-function classifyShareError(code: string): ShareErrorKind {
-  switch (code) {
-    case "token_already_redeemed":
-      return "already_redeemed";
-    case "token_expired":
-      return "expired";
-    case "invalid_token":
-    case "missing_token":
-      return "invalid";
-    case "share_session_required":
-    case "invalid_share_session":
-      return "session_expired";
-    case "rate_limited":
-      return "rate_limited";
-    case "network_error":
-      return "network";
-    case "download_failed":
-      return "download";
-    default:
-      return "processing";
-  }
-}
-
-function errorCode(error: unknown) {
-  return error instanceof Error ? error.message.split(":")[0].trim() : "";
-}
-
-async function postJson(url: string, body: unknown) {
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify(body),
-    });
-  } catch {
-    throw new Error("network_error");
-  }
-  const data = await res.json().catch(() => null);
-  if (!data || typeof data !== "object") throw new Error(res.status === 429 ? "rate_limited" : "server_error");
+async function shareRequest(path: string, body: unknown = {}) {
+  const response = await fetch(`/files/${path}`, {
+    method: "POST",
+    credentials: "include", cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await response.json();
+  if (!response.ok || !data.ok)
+    throw new Error(data.error || "secure_access_failed");
   return data;
 }
-
-function unb64(s: string) {
-  return Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
-}
-
-function b64(u8: Uint8Array) {
-  let out = "";
-  for (let i = 0; i < u8.length; i++) out += String.fromCharCode(u8[i]);
-  return btoa(out);
-}
-
-function deriveFilenameFromKey(key: string) {
-  const base = key.split("/").pop() || "file.bin";
-  if (base.length > 38 && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-/i.test(base)) {
-    return base.slice(37);
-  }
-  return base;
-}
-
-const primaryButton =
-  "inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50 sm:w-auto";
-const headingClass = "text-2xl font-semibold leading-tight tracking-tight focus:outline-none";
-
+const friendlyError = (e: unknown) => {
+  const code = e instanceof Error ? e.message : "";
+  if (code === "token_expired") return "This access link has expired.";
+  if (code === "token_already_redeemed")
+    return "This link has already been opened. Use the browser where you first opened it.";
+  if (code === "share_session_required" || code === "invalid_share_session")
+    return "Your secure session has expired. Open another unused access link from your email.";
+  if (code === "package_too_large")
+    return "This package is too large to download together in this browser. Download the files individually.";
+  return "Could not securely open the files. Please retry. If the problem continues, contact support.";
+};
 export default function SharePage() {
   const { token: pathToken = "" } = useParams();
-  const [token] = useState(() => {
-    const fragmentToken = new URLSearchParams(window.location.hash.slice(1)).get("token") || "";
-    return fragmentToken || pathToken;
-  });
-
-  const [phase, setPhase] = useState<Phase>(() => (token ? "landing" : "checking"));
-  const [fileInfo, setFileInfo] = useState<ShareFile | null>(null);
-  const [status, setStatus] = useState("");
-  const [errorKind, setErrorKind] = useState<ShareErrorKind | null>(null);
-  const [errorStage, setErrorStage] = useState<ErrorStage>("open");
-  const [downloadUrl, setDownloadUrl] = useState("");
-  const [downloadFilename, setDownloadFilename] = useState("");
-
-  const headingRef = useRef<HTMLHeadingElement | null>(null);
-  const focusPending = useRef(false);
-
-  const contentType = fileInfo?.content_type || "application/octet-stream";
-  const filename = downloadFilename || deriveFilenameFromKey(fileInfo?.id || "");
-
+  const [token] = useState(
+    () =>
+      new URLSearchParams(window.location.hash.slice(1)).get("token") ||
+      pathToken,
+  );
+  const [files, setFiles] = useState<ReleasedFile[]>([]);
+  const [opened, setOpened] = useState<OpenFile[]>([]);
+  const [preview, setPreview] = useState<Record<string, VaultDocument>>({});
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState("Loading your secure link…");
+  const [error, setError] = useState("");
   useEffect(() => {
-    return () => { if (downloadUrl) URL.revokeObjectURL(downloadUrl); };
-  }, [downloadUrl]);
-
-  // Move focus to the new heading after a state change the user started, so keyboard
-  // and screen-reader users land on the new content instead of a removed button.
-  useEffect(() => {
-    if (!focusPending.current) return;
-    focusPending.current = false;
-    headingRef.current?.focus();
-  }, [phase, errorKind]);
-
-  // Without a token nothing can be redeemed. Only check whether this browser already has
-  // an open share session (for example after a reload once the token was removed).
-  useEffect(() => {
-    if (token) return;
     let cancelled = false;
     (async () => {
       try {
-        const res = (await postJson("/files/share-lookup", { token: "" })) as ShareLookup;
-        if (cancelled) return;
-        if (res.ok && res.file) {
-          setFileInfo(res.file);
-          setPhase("opened");
-        } else {
-          setErrorKind(classifyShareError(res.error || "missing_token"));
-          setErrorStage("open");
-          setPhase("error");
+        await shareRequest("share-lookup", { token });
+        if (window.location.hash)
+          window.history.replaceState(
+            null,
+            "",
+            window.location.pathname + window.location.search,
+          );
+        const data = await shareRequest("share-package");
+        if (!cancelled) {
+          setFiles(data.files);
+          setStatus("Your files are ready to open.");
         }
-      } catch (e: unknown) {
-        if (cancelled) return;
-        setErrorKind(classifyShareError(errorCode(e)));
-        setErrorStage("open");
-        setPhase("error");
+      } catch (e) {
+        if (!cancelled) {
+          setStatus("Could not open the link.");
+          setError(friendlyError(e));
+        }
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [token]);
-
-  function fail(code: string, stage: ErrorStage) {
-    focusPending.current = true;
-    setStatus("");
-    setErrorKind(classifyShareError(code));
-    setErrorStage(stage);
-    setPhase("error");
-  }
-
-  function removeTokenFromAddress() {
-    if (window.location.hash || pathToken) {
-      const path = pathToken ? "/share" : window.location.pathname;
-      window.history.replaceState(null, "", path + window.location.search);
-    }
-  }
-
-  async function openSharedFile() {
-    focusPending.current = true;
-    setErrorKind(null);
-    setDownloadUrl("");
-    setPhase("working");
-    setStatus("Opening the secure link…");
-
-    let res: ShareLookup;
+  async function unlock() {
+    setBusy(true);
+    setError("");
+    setStatus("Opening your files and instructions…");
     try {
-      res = (await postJson("/files/share-lookup", { token })) as ShareLookup;
-    } catch (e: unknown) {
-      fail(errorCode(e), "open");
-      return;
-    }
-
-    if (!res.ok || !res.file) {
-      fail(res.error || "invalid_token", "open");
-      return;
-    }
-
-    // The link is single-use and now redeemed; keep it out of the address bar and history.
-    removeTokenFromAddress();
-    setFileInfo(res.file);
-    await downloadAndDecrypt(res.file);
-  }
-
-  async function downloadAndDecrypt(target: ShareFile) {
-    focusPending.current = true;
-    setErrorKind(null);
-    setDownloadUrl("");
-    setPhase("working");
-    try {
-      setStatus("Preparing a temporary key…");
-      const keyPair = await crypto.subtle.generateKey(
-        { name: "RSA-OAEP", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
+      const pair = await crypto.subtle.generateKey(
+        {
+          name: "RSA-OAEP",
+          modulusLength: 2048,
+          publicExponent: new Uint8Array([1, 0, 1]),
+          hash: "SHA-256",
+        },
         true,
-        ["encrypt", "decrypt"]
+        ["encrypt", "decrypt"],
       );
-      const privKey = keyPair.privateKey;
-      const publicSpki = new Uint8Array(await crypto.subtle.exportKey("spki", keyPair.publicKey));
-      const publicKeyB64 = b64(publicSpki);
-
-      setStatus("Requesting the file key…");
-      const env = (await postJson("/files/share-get-contact-envelope", { public_key: publicKeyB64 })) as EnvelopeRes;
-
-      if (!env.ok) throw new Error(env.error || "envelope_create_failed");
-
-      let meta;
-      try {
-        meta = typeof env.meta_json === "string" ? JSON.parse(env.meta_json) : env.meta_json;
-      } catch {
-        throw new Error("invalid_envelope_meta");
-      }
-      if (!meta) throw new Error("missing_envelope_meta");
-      if (typeof meta !== "object" || Array.isArray(meta)) throw new Error("invalid_envelope_meta");
-      setDownloadFilename(
-        typeof meta.original_name === "string" && meta.original_name ? meta.original_name : deriveFilenameFromKey(target.id)
+      const publicKey = b64FromBytes(
+        new Uint8Array(await crypto.subtle.exportKey("spki", pair.publicKey)),
       );
-
-      const wrappedB64Raw = String(env.enc_key_b64 || "");
-      const wrappedB64 = wrappedB64Raw.replace(/\s+/g,"").replace(/-/g,"+").replace(/_/g,"/");
-      const wrappedB64Padded = wrappedB64 + "===".slice((wrappedB64.length + 3) % 4);
-      let rawAes: Uint8Array;
-      try {
-        const wrappedAes = unb64(wrappedB64Padded);
-        rawAes = new Uint8Array(await crypto.subtle.decrypt({ name: "RSA-OAEP" }, privKey, wrappedAes));
-      } catch {
-        throw new Error("unwrap_failed: RSA unwrap failed for the temporary emergency-access key.");
+      const results: OpenFile[] = [];
+      const unavailable: string[] = [];
+      for (const file of files) {
+        try {
+          const env = await shareRequest("share-get-contact-envelope", {
+            file_id: file.id,
+            public_key: publicKey,
+          });
+          const rawKey = new Uint8Array(
+            await crypto.subtle.decrypt(
+              { name: "RSA-OAEP" },
+              pair.privateKey,
+              bytesFromB64(env.enc_key_b64),
+            ),
+          );
+          const meta =
+            typeof env.meta_json === "string"
+              ? JSON.parse(env.meta_json)
+              : env.meta_json;
+          if (!meta || typeof meta !== "object")
+            throw new Error("invalid_envelope_meta");
+          results.push({
+            ...file,
+            name: meta.original_name || file.name,
+            rawKey,
+            meta,
+            note: await openRecipientNote(meta.recipient_note, rawKey),
+          });
+        } catch {
+          unavailable.push(file.name);
+        }
       }
-
-      const aesKey = await crypto.subtle.importKey("raw", rawAes, { name: "AES-GCM" }, false, ["decrypt"]);
-
-      setStatus("Requesting the download…");
-      const dl = await postJson("/files/share-presign-download", {});
-
-      if (!dl.ok || typeof dl.url !== "string") throw new Error(dl.error || "presign_failed");
-
-      setStatus("Downloading the encrypted file…");
-      let ciphertext: Uint8Array;
-      try {
-        const encRes = await fetch(dl.url);
-        if (!encRes.ok) throw new Error("download_failed");
-        ciphertext = new Uint8Array(await encRes.arrayBuffer());
-      } catch {
-        throw new Error("download_failed: could not download encrypted bytes.");
+      if (!results.length) throw new Error("secure_access_failed");
+      const introductions: Record<string, VaultDocument> = {};
+      for (const file of results.filter(
+        (f) => f.meta.document_template === "introduction",
+      )) {
+        try {
+          const item = await retrieve(file);
+          if (item.document) introductions[file.id] = item.document;
+        } catch {
+          unavailable.push(file.name);
+        }
       }
-
-      setStatus("Decrypting in your browser…");
-      let plaintext: Uint8Array;
-      try {
-        plaintext = await decryptUacBytes(aesKey, ciphertext, meta);
-      } catch {
-        throw new Error("decrypt_failed: could not decrypt the file.");
-      }
-
-      const blob = new Blob([plaintext], { type: target.content_type || "application/octet-stream" });
-      const url = URL.createObjectURL(blob);
-      setDownloadUrl(url);
-      setStatus("");
-      focusPending.current = true;
-      setPhase("ready");
-    } catch (e: unknown) {
-      fail(errorCode(e), "download");
+      setPreview(introductions);
+      setOpened(results);
+      setStatus("Files opened. Read the notes below before downloading.");
+      if (unavailable.length)
+        setError(
+          `Some files or instructions could not be opened: ${unavailable.join(", ")}. You can download the available files individually and retry opening the package.`,
+        );
+    } catch (e) {
+      setError(friendlyError(e));
+      setStatus("Could not open all files. Please retry.");
+    } finally {
+      setBusy(false);
     }
   }
-
-  function retry() {
-    // After redemption, retrying reuses this browser's share session instead of the spent link.
-    return errorStage === "download" && fileInfo ? downloadAndDecrypt(fileInfo) : openSharedFile();
+  async function retrieve(file: OpenFile): Promise<PackageItem> {
+    const data = await shareRequest("share-presign-download", {
+      file_id: file.id,
+    });
+    const response = await fetch(data.url, { cache: "no-store", referrerPolicy: "no-referrer" });
+    if (!response.ok) throw new Error("download_failed");
+    const key = await crypto.subtle.importKey(
+      "raw",
+      file.rawKey,
+      "AES-GCM",
+      false,
+      ["decrypt"],
+    );
+    const plain = await decryptUacBytes(
+      key,
+      new Uint8Array(await response.arrayBuffer()),
+      file.meta,
+    );
+    if (file.content_type === DOCUMENT_TYPE) {
+      const document = parseDocument(new TextDecoder().decode(plain));
+      return {
+        name: file.name,
+        note: file.note,
+        document,
+        blob: await documentPdf(document, file.note),
+      };
+    }
+    return {
+      name: file.name,
+      note: file.note,
+      blob: new Blob([plain], {
+        type: file.meta.original_content_type || file.content_type,
+      }),
+    };
   }
-
-  const errorCopy = errorKind ? shareErrorCopy[errorKind] : null;
-  const fileDetails = fileInfo && (
-    <dl className="mt-5 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-      <dt className="text-muted-foreground">File</dt>
-      <dd className="break-words">{filename}</dd>
-      <dt className="text-muted-foreground">Type</dt>
-      <dd className="break-words">{contentType}</dd>
-    </dl>
-  );
-
+  async function action(task: () => Promise<void>) {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await task();
+    } catch (e) {
+      setError(friendlyError(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function instructions() {
+    const intro: string[] = [];
+    for (const file of opened.filter(
+      (f) => f.meta.document_template === "introduction",
+    )) {
+      const item = await retrieve(file);
+      if (item.document) intro.push(documentText(item.document));
+    }
+    const missing = files.filter((f) => !opened.some((o) => o.id === f.id));
+    if (missing.length)
+      intro.push(
+        "Files not available in this download: " +
+          missing.map((f) => f.name).join(", "),
+      );
+    const text = [
+      ...intro,
+      ...opened.map(
+        (f) => `${f.name}\n${f.note || "No additional instructions."}`,
+      ),
+    ].join("\n\n");
+    downloadBlob(
+      await textPdf("Your files and instructions", text),
+      "Start here.pdf",
+    );
+  }
   return (
     <main className="min-h-screen bg-background text-foreground">
-      <div className="mx-auto max-w-xl px-4 py-12 sm:px-6">
-        <p className="micro-label">
-          <span className="status-dot" aria-hidden="true" /> ANYCIRCUMSTANCES
+      <div className="mx-auto max-w-3xl px-5 py-10 space-y-6">
+        <header>
+          <h1 className="text-2xl font-bold">Your files and instructions</h1>
+          <p className="mt-2 text-muted-foreground">
+            Read the owner's notes, then open or download the files they left
+            for you.
+          </p>
+        </header>
+        <p role="status" aria-live="polite">
+          {status}
         </p>
-
-        <div className="editorial-card mt-6 p-6 sm:p-8">
-          {phase === "landing" && (
-            <>
-              <h1 ref={headingRef} tabIndex={-1} className={headingClass}>
-                Someone shared important information with you
-              </h1>
-              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-                It was sent through AnyCircumstances on behalf of the account owner.
+        {error && (
+          <p
+            role="alert"
+            className="rounded-xl border border-destructive p-4 text-destructive"
+          >
+            {error}
+          </p>
+        )}
+        {!!files.length && !opened.length && (
+          <>
+            <ul className="list-disc pl-6">
+              {files.map((f) => (
+                <li key={f.id}>{f.name}</li>
+              ))}
+            </ul>
+            <Button disabled={busy} onClick={unlock}>
+              {busy ? "Opening…" : "Open files and instructions"}
+            </Button>
+          </>
+        )}
+        {!!opened.length && (
+          <>
+            {!!error && (
+              <Button disabled={busy} variant="outline" onClick={unlock}>
+                Retry opening files and instructions
+              </Button>
+            )}
+            <div className="rounded-xl border p-4 space-y-3">
+              <h2 className="font-semibold">Start here</h2>
+              {opened
+                .filter(
+                  (file) =>
+                    file.meta.document_template === "introduction" &&
+                    preview[file.id],
+                )
+                .map((file) => (
+                  <div key={file.id} className="rounded-lg bg-muted p-4">
+                    <h3 className="font-medium">{preview[file.id].title}</h3>
+                    <p className="whitespace-pre-wrap break-words mt-2">
+                      {preview[file.id].body}
+                    </p>
+                  </div>
+                ))}
+              <p className="text-sm text-muted-foreground">
+                The instructions download lists your files and the notes
+                attached to each one. The package download includes the files
+                and a copy of these instructions.
               </p>
-              <ul className="mt-5 list-disc space-y-2 pl-5 text-sm leading-relaxed">
-                <li>Open it on the device where you want to save the file.</li>
-                <li>
-                  The link works once. After you open it, you have 20 minutes in this browser to download and
-                  decrypt the file.
-                </li>
-                <li>Links also expire, by default 30 days after they are sent.</li>
-              </ul>
-              <button type="button" className={`${primaryButton} mt-6`} onClick={openSharedFile}>
-                Open shared file
-              </button>
-              <p className="mt-3 text-xs text-muted-foreground">The link isn&apos;t used until you press this button.</p>
-            </>
-          )}
-
-          {phase === "checking" && (
-            <>
-              <h1 ref={headingRef} tabIndex={-1} className={headingClass}>Emergency file access</h1>
-              <p role="status" aria-live="polite" className="mt-3 text-sm text-muted-foreground">
-                Checking this browser for an open link…
-              </p>
-            </>
-          )}
-
-          {phase === "working" && (
-            <>
-              <h1 ref={headingRef} tabIndex={-1} className={headingClass}>Preparing your file</h1>
-              <p className="mt-3 text-sm text-muted-foreground">Keep this page open. This can take a moment for large files.</p>
-              <p role="status" aria-live="polite" className="mt-4 text-sm">{status}</p>
-              {fileDetails}
-            </>
-          )}
-
-          {phase === "opened" && (
-            <>
-              <h1 ref={headingRef} tabIndex={-1} className={headingClass}>Your shared file</h1>
-              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-                This link was already opened in this browser. Download and decrypt the file before your 20 minutes of
-                access end.
-              </p>
-              {fileDetails}
-              <button
-                type="button"
-                className={`${primaryButton} mt-6`}
-                onClick={() => (fileInfo ? downloadAndDecrypt(fileInfo) : undefined)}
-              >
-                Download + decrypt
-              </button>
-            </>
-          )}
-
-          {phase === "ready" && (
-            <>
-              <h1 ref={headingRef} tabIndex={-1} className={headingClass}>Your file is ready</h1>
-              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-                It was decrypted in this browser. Save it now: access through this link ends 20 minutes after it was
-                opened, and the link can&apos;t be opened again.
-              </p>
-              {fileDetails}
-              {downloadUrl && (
-                <a className={`${primaryButton} mt-6`} href={downloadUrl} download={downloadFilename || filename}>
-                  Download decrypted file
-                </a>
-              )}
-            </>
-          )}
-
-          {phase === "error" && errorCopy && (
-            <div role="alert">
-              <h1 ref={headingRef} tabIndex={-1} className={headingClass}>{errorCopy.title}</h1>
-              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-                {errorCopy.body}
-                {errorKind === "processing" && (
-                  <>
-                    {" "}
-                    <a className="underline underline-offset-4" href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>.
-                  </>
-                )}
-              </p>
-              {errorCopy.retry && errorStage === "download" && (
-                <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                  You can retry until your 20 minutes of access in this browser end.
-                </p>
-              )}
-              {errorCopy.retry && (
-                <button type="button" className={`${primaryButton} mt-6`} onClick={retry}>
-                  Try again
-                </button>
-              )}
+              <div className="flex flex-wrap gap-3">
+                <Button
+                  disabled={busy}
+                  variant="outline"
+                  onClick={() => action(instructions)}
+                >
+                  Download instructions
+                </Button>
+                <Button
+                  disabled={busy || opened.length !== files.length}
+                  onClick={() =>
+                    action(async () => {
+                      if (
+                        opened.reduce((sum, f) => sum + f.size_bytes, 0) >
+                        256 * 1024 * 1024
+                      )
+                        throw new Error("package_too_large");
+                      const items: PackageItem[] = [];
+                      for (const file of opened)
+                        items.push(await retrieve(file));
+                      await downloadPackage(items);
+                    })
+                  }
+                >
+                  {busy ? "Working…" : "Download all files and notes"}
+                </Button>
+              </div>
             </div>
-          )}
-        </div>
+            {opened.map((file) => (
+              <section
+                key={file.id}
+                className="rounded-xl border p-5 space-y-4"
+              >
+                <h2 className="text-lg font-semibold break-words">
+                  {file.name}
+                </h2>
+                {file.note ? (
+                  <div className="rounded-lg bg-muted p-4">
+                    <h3 className="font-medium mb-2">Note from the owner</h3>
+                    <p className="whitespace-pre-wrap break-words">
+                      {file.note}
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    No additional instructions for this file.
+                  </p>
+                )}
+                <div className="flex flex-wrap gap-3">
+                  <Button
+                    disabled={busy}
+                    onClick={() =>
+                      action(async () => {
+                        const item = await retrieve(file);
+                        downloadBlob(item.blob, item.name);
+                      })
+                    }
+                  >
+                    Download{" "}
+                    {file.content_type === DOCUMENT_TYPE ? "PDF" : "file"}
+                  </Button>
+                  {file.content_type === DOCUMENT_TYPE && (
+                    <Button
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() =>
+                        action(async () => {
+                          if (preview[file.id]) {
+                            setPreview((p) => {
+                              const next = { ...p };
+                              delete next[file.id];
+                              return next;
+                            });
+                            return;
+                          }
+                          const item = await retrieve(file);
+                          if (item.document)
+                            setPreview((p) => ({
+                              ...p,
+                              [file.id]: item.document!,
+                            }));
+                        })
+                      }
+                    >
+                      {preview[file.id] ? "Hide document" : "Read document"}
+                    </Button>
+                  )}
+                  {file.note && (
+                    <Button
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() =>
+                        action(async () => {
+                          downloadBlob(
+                            await textPdf(
+                              `Instructions for ${file.name}`,
+                              file.note,
+                            ),
+                            `${file.name}-instructions.pdf`,
+                          );
+                        })
+                      }
+                    >
+                      Download this note
+                    </Button>
+                  )}
+                </div>
+                {preview[file.id] && (
+                  <pre className="whitespace-pre-wrap break-words font-sans rounded-lg bg-muted p-4">
+                    {documentText(preview[file.id])}
+                  </pre>
+                )}
+              </section>
+            ))}
+            <p className="text-sm text-muted-foreground">
+              Downloads may contain passwords or private information. Anyone
+              with access to the downloaded files may be able to read them.
+            </p>
+          </>
+        )}
       </div>
     </main>
   );

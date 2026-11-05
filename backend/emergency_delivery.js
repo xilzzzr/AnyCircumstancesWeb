@@ -165,14 +165,15 @@ async function createShareLinks(pool, contactId, userId, fileIds) {
   const validIds = new Set((rows || []).map((row) => String(row.id)));
   const links = [];
   const tokenHashes = [];
+  const deliveryGroupId = crypto.randomUUID();
 
   for (const fileId of fileIds) {
     if (!validIds.has(String(fileId))) continue;
     const token = crypto.randomBytes(32).toString("hex");
     const tokenHash = sha256Hex(token);
     await pool.query(
-      "INSERT INTO contact_file_share_tokens (contact_id, file_id, token_hash, expires_at) VALUES (?, ?, ?, ?)",
-      [String(contactId), String(fileId), tokenHash, shareExpiresAt()]
+      "INSERT INTO contact_file_share_tokens (contact_id, file_id, token_hash, expires_at, delivery_group_id) VALUES (?, ?, ?, ?, ?)",
+      [String(contactId), String(fileId), tokenHash, shareExpiresAt(), deliveryGroupId]
     );
     tokenHashes.push(tokenHash);
     links.push(publicAppBase() + "/share#token=" + encodeURIComponent(token));
@@ -428,3 +429,4 @@ module.exports = {
   queueAndDeliverEmergency,
   queueEmergencyDispatch,
 };
+
