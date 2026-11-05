@@ -44,11 +44,13 @@ async function shareRequest(path: string, body: unknown = {}) {
 }
 const friendlyError = (e: unknown) => {
   const code = e instanceof Error ? e.message : "";
-  if (code === "token_expired") return "This access link has expired.";
+  if (code === "token_expired") return "This link has expired.";
+  if (code === "invalid_token" || code === "missing_token") return "This link isn't valid.";
+  if (code === "rate_limited") return "Too many requests. Please try again shortly.";
   if (code === "token_already_redeemed")
     return "This link has already been opened. Use the browser where you first opened it.";
   if (code === "share_session_required" || code === "invalid_share_session")
-    return "Your secure session has expired. Open another unused access link from your email.";
+    return "Your access time has ended. Open another unused access link from your email.";
   if (code === "package_too_large")
     return "This package is too large to download together in this browser. Download the files individually.";
   return "Could not securely open the files. Please retry. If the problem continues, contact support.";
@@ -64,35 +66,54 @@ export default function SharePage() {
   const [opened, setOpened] = useState<OpenFile[]>([]);
   const [preview, setPreview] = useState<Record<string, VaultDocument>>({});
   const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState("Loading your secure link…");
+  const [status, setStatus] = useState(token ? "Open the link when you are ready." : "Checking this browser for an open share session…");
   const [error, setError] = useState("");
+  const [linkOpened, setLinkOpened] = useState(false);
+
+  // Email link scanners and previews must never consume a one-use token.
+  // Only a real click on Open shared file is allowed to redeem it.
+  async function openSharedFile() {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    setStatus("Opening the secure link…");
+    try {
+      await shareRequest("share-lookup", { token });
+      const data = await shareRequest("share-package");
+      // Remove both fragment and route tokens after successful redemption.
+      window.history.replaceState(null, "", "/share" + window.location.search);
+      setLinkOpened(true);
+      setFiles(data.files);
+      setStatus("Your files are ready to open.");
+    } catch (e) {
+      setStatus("Could not open the link.");
+      setError(friendlyError(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   useEffect(() => {
+    if (token) return;
     let cancelled = false;
     (async () => {
       try {
-        await shareRequest("share-lookup", { token });
-        if (window.location.hash)
-          window.history.replaceState(
-            null,
-            "",
-            window.location.pathname + window.location.search,
-          );
+        // No token means an existing browser session, not a new redemption.
+        await shareRequest("share-lookup", { token: "" });
         const data = await shareRequest("share-package");
-        if (!cancelled) {
-          setFiles(data.files);
-          setStatus("Your files are ready to open.");
-        }
+        if (cancelled) return;
+        setFiles(data.files);
+        setLinkOpened(true);
+        setStatus("Your files are ready to open.");
       } catch (e) {
-        if (!cancelled) {
-          setStatus("Could not open the link.");
-          setError(friendlyError(e));
-        }
+        if (cancelled) return;
+        setStatus("Could not open the link.");
+        setError(friendlyError(e));
       }
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [token]);
+
   async function unlock() {
     setBusy(true);
     setError("");
@@ -245,12 +266,18 @@ export default function SharePage() {
     <main className="min-h-screen bg-background text-foreground">
       <div className="mx-auto max-w-3xl px-5 py-10 space-y-6">
         <header>
-          <h1 className="text-2xl font-bold">Your files and instructions</h1>
+          <h1 className="text-2xl font-bold">{!linkOpened && token ? "Someone shared important information with you" : !linkOpened && error ? "This link isn't valid" : "Your shared file"}</h1>
           <p className="mt-2 text-muted-foreground">
-            Read the owner's notes, then open or download the files they left
+            You can read the owner's notes, then open or download the files they left
             for you.
           </p>
         </header>
+        {!!token && !linkOpened && (
+          <div className="space-y-3 rounded-xl border p-5">
+            <p className="text-sm text-muted-foreground">This link is single-use and remains unopened until you press the button. You will have 20 minutes to access its files in this browser.</p>
+            <Button disabled={busy} onClick={openSharedFile}>{busy ? "Opening…" : "Open shared file"}</Button>
+          </div>
+        )}
         <p role="status" aria-live="polite">
           {status}
         </p>
@@ -270,7 +297,7 @@ export default function SharePage() {
               ))}
             </ul>
             <Button disabled={busy} onClick={unlock}>
-              {busy ? "Opening…" : "Open files and instructions"}
+              {busy ? "Opening…" : "Download + decrypt"}
             </Button>
           </>
         )}
