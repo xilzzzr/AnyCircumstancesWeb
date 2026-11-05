@@ -35,7 +35,7 @@ export const plannedFeatures = [
 export const checkInFrequencies = [
   { id: "monthly", label: "Monthly", price: 0.0, days: 30 },
   { id: "weekly", label: "Weekly", price: 1.99, days: 7 },
-  { id: "daily", label: "Daily", price: 2.99, days: 1 },
+  { id: "daily", label: "Daily / scheduled", price: 2.99, days: 1 },
 ] as const;
 
 export type CheckInFrequencyId = "monthly" | "weekly" | "daily";
