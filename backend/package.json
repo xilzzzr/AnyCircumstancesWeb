@@ -13,19 +13,19 @@
   },
   "dependencies": {
     "@apple/app-store-server-library": "^3.1.0",
-    "@aws-sdk/client-s3": "^3.1149.0",
+    "@aws-sdk/client-s3": "^3.1161.0",
     "@aws-sdk/credential-provider-node": "^3.972.79",
-    "@aws-sdk/s3-presigned-post": "^3.1149.0",
-    "@aws-sdk/s3-request-presigner": "^3.1149.0",
+    "@aws-sdk/s3-presigned-post": "^3.1161.0",
+    "@aws-sdk/s3-request-presigner": "^3.1161.0",
     "@smithy/signature-v4": "^5.7.3",
     "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
-    "dotenv": "^18.0.7",
+    "dotenv": "^18.0.9",
     "express": "^5.3.0",
     "jsonwebtoken": "^9.0.3",
     "mysql2": "^3.24.5",
-    "nodemailer": "^10.1.0",
+    "nodemailer": "^10.3.1",
     "stripe": "^22.6.2"
   }
 }
