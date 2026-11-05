@@ -95,7 +95,7 @@ if (process.env.NODE_ENV === "production") {
   }
 }
 
-const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
+const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2026-08-26.dahlia" }) : null;
 // Equalizes the expensive password-check path when an email is not registered.
 const DUMMY_PASSWORD_HASH = "$2b$12$Bzp.v2dUrXUXjidOrU6Nre9/CR1KzXktUVuqYfy1m.WXOKuf7CV2K";
 const emergencyGlobalGate = createFixedWindowGate({
