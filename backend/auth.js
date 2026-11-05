@@ -7,6 +7,7 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const nodemailer = require("nodemailer");
 const Stripe = require("stripe");
+const { findPromotion, checkoutTerms } = require("./pioneer_promo");
 const { escapeHtml, emailSender, renderAnyCircumstancesEmail, renderEmergencyEmail } = require("./emails");
 const { currentApnsEnv } = require("./push_notifications");
 const {
@@ -1995,13 +1996,40 @@ router.post(
     const successUrl = `${publicWebBaseUrl}/app/billing?checkout=success`;
     const cancelUrl = `${publicWebBaseUrl}/app/billing?checkout=cancel`;
 
-    const session = await stripe.checkout.sessions.create({
+    // Validate discounts on the server. Only our marked, unused, one-redemption
+    // Pioneer codes can grant a trial. Ordinary Stripe codes never grant one.
+    const rawPromo = req.body?.promoCode;
+    if (rawPromo != null && typeof rawPromo !== "string") {
+      return res.status(400).json({ ok: false, error: "invalid_promo_code" });
+    }
+    const enteredCode = String(rawPromo || "").trim();
+    const promotion = enteredCode ? await findPromotion(stripe, enteredCode) : null;
+    if (enteredCode && !promotion) {
+      return res.status(400).json({ ok: false, error: "invalid_promo_code" });
+    }
+    const offer = checkoutTerms(promotion);
+
+    const subscriptionData = {
+      metadata: {
+        user_id: String(userId),
+        storage_gb: String(safeStorageGb),
+        checkin_frequency: checkInFrequency,
+        billing_interval: billingInterval,
+        addons_json: JSON.stringify(addons),
+        ...(offer.pioneer ? { pioneer_offer: "one_month_free_20_percent_forever" } : {}),
+      },
+      ...offer.subscription,
+    };
+
+    let session;
+    try {
+      session = await stripe.checkout.sessions.create({
       mode: "subscription",
       customer: customerId,
       client_reference_id: String(userId),
       success_url: successUrl,
       cancel_url: cancelUrl,
-      allow_promotion_codes: true,
+      ...offer.checkout,
       line_items: [
         {
           price_data: {
@@ -2013,17 +2041,17 @@ router.post(
           quantity: 1,
         },
       ],
-      subscription_data: {
-        metadata: {
-          user_id: String(userId),
-          storage_gb: String(safeStorageGb),
-          checkin_frequency: checkInFrequency,
-          billing_interval: billingInterval,
-          addons_json: JSON.stringify(addons),
-        },
-      },
+      subscription_data: subscriptionData,
       metadata: { user_id: String(userId) },
-    });
+      });
+    } catch (error) {
+      // A code may be used or revoked between lookup and Checkout creation.
+      // Preserve a user-facing invalid-code response; never grant a trial by fallback.
+      if (promotion && /^(discounts|promotion_code)/.test(String(error?.param || ""))) {
+        return res.status(400).json({ ok: false, error: "invalid_promo_code" });
+      }
+      throw error;
+    }
 
     await pool.query(
       `UPDATE billing_profiles
