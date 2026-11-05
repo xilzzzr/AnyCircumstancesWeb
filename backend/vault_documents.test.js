@@ -28,6 +28,8 @@ test("encrypted notes are bounded and malformed fields are rejected", () => {
 test("content edits enforce authentication, vault unlock, ownership, revision checks, and storage quotas", async (t) => {
   let writes = [];
   let puts = [];
+  let deletedKeys = [];
+  let storageKey = null;
   let limitGb = 1;
   let storedMeta = {
     original_name: "Accounts.pdf",
@@ -35,6 +37,7 @@ test("content edits enforce authentication, vault unlock, ownership, revision ch
   };
   let exists = true;
   const pool = {
+    query: async (sql, params) => { writes.push({ sql, params }); return [{ affectedRows: 1 }]; },
     getConnection: async () => ({
       beginTransaction: async () => {},
       commit: async () => {},
@@ -54,6 +57,7 @@ test("content edits enforce authentication, vault unlock, ownership, revision ch
                     content_type:
                       "application/vnd.anycircumstances.document+json",
                     size_bytes: 100,
+                    storage_key: storageKey,
                     meta_json: JSON.stringify(storedMeta),
                   },
                 ]
@@ -61,6 +65,7 @@ test("content edits enforce authentication, vault unlock, ownership, revision ch
           ];
         if (sql.startsWith("SELECT COALESCE")) return [[{ used_bytes: 100 }]];
         writes.push({ sql, params });
+        if (sql.startsWith("UPDATE files SET size_bytes")) storageKey = params[1];
         if (sql.startsWith("UPDATE file_key_envelopes"))
           storedMeta = JSON.parse(params[0]);
         return [{ affectedRows: 1 }];
@@ -88,6 +93,7 @@ test("content edits enforce authentication, vault unlock, ownership, revision ch
     putDocument: async (input) => {
       puts.push(input);
     },
+    deleteDocument: async (input) => { deletedKeys.push(input.storageKey); },
   });
   app.use(router);
   const server = app.listen(0, "127.0.0.1");
@@ -157,6 +163,11 @@ test("content edits enforce authentication, vault unlock, ownership, revision ch
     409,
     "stale edits cannot overwrite a saved revision",
   );
+  const second = await request({ ...body, expected_revision: revisionOf(storedMeta) });
+  assert.equal(second.status, 200, "later edits must preserve the previously saved ciphertext");
+  assert.equal(puts.length, 2);
+  assert.equal(deletedKeys[1], puts[0].storageKey, "superseded revision is deleted after commit");
+  assert.ok(writes.some(w => w.sql.startsWith("DELETE FROM file_storage_objects")));
   exists = false;
   assert.equal(
     (await request({ ...base, expected_revision: revisionOf(storedMeta) }))
