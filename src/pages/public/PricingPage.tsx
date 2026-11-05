@@ -1,11 +1,14 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { ArrowRight, Calendar, Check, HardDrive, Loader2, Receipt } from "lucide-react";
 import { motion } from "@/components/public/staticMotion";
 import { cn } from "@/lib/utils";
 import { createCheckoutSession } from "@/lib/billingClient";
+import { readPendingPromoCode, savePendingPromoCode, clearPendingPromoCode } from "@/lib/pioneerPromoStorage";
 import { loadAuthSession } from "@/lib/authSession";
 import {
   checkInFrequencies,
@@ -63,6 +66,7 @@ function checkoutErrorFor(code: string): CheckoutError {
       action: { href: "/app/billing", label: "Go to Billing" },
     };
   }
+  if (code === "invalid_promo_code") return { message: "That promotion code is invalid, expired, or has already been used. Please check it and try again." };
   if (code === "invalid_plan") {
     return { message: "That plan selection isn’t valid. Adjust your choices and try again." };
   }
@@ -133,6 +137,8 @@ export function PricingPage() {
   const [authState, setAuthState] = useState<AuthState>("unknown");
   const [submitting, setSubmitting] = useState(false);
   const [checkoutError, setCheckoutError] = useState<CheckoutError | null>(null);
+  const [promoCode, setPromoCode] = useState("");
+  useEffect(() => { setPromoCode(readPendingPromoCode()); }, []);
 
   // Restore a selection from ?storage=&frequency=&billing= (e.g. "Edit plan" links).
   // Applied after mount so the prerendered HTML hydrates with the defaults.
@@ -182,6 +188,7 @@ export function PricingPage() {
   ];
 
   const goToSignup = () => {
+    savePendingPromoCode(promoCode);
     savePendingPlan(plan);
     navigate(`/signup?${planQuery}`);
   };
@@ -193,9 +200,11 @@ export function PricingPage() {
         checkInFrequency: frequency,
         billingInterval: billing,
         addons: [],
+        promoCode: promoCode.trim(),
       });
       if (!data?.url) throw new Error("checkout_url_missing");
       clearPendingPlan();
+      clearPendingPromoCode();
       window.location.href = data.url;
     } catch (e) {
       const code = errorCode(e);
@@ -356,6 +365,25 @@ export function PricingPage() {
                     </div>
                   </div>
 
+                  <div className="mt-5 space-y-2">
+                    <Label htmlFor="pricing-promo-code">Promotion code (optional)</Label>
+                    <Input id="pricing-promo-code" name="promotionCode" type="text"
+                      autoComplete="off" autoCapitalize="characters" spellCheck={false}
+                      maxLength={40} placeholder="Enter your code" value={promoCode}
+                      onChange={(e) => {
+                        const code = e.target.value.toUpperCase();
+                        setPromoCode(code);
+                        savePendingPromoCode(code);
+                        setCheckoutError(null);
+                      }}
+                      disabled={submitting} aria-describedby="pricing-promo-explainer" />
+                    <p id="pricing-promo-explainer" className="text-xs leading-relaxed text-muted-foreground">
+                      Eligible Pioneer invitations give 30 days free, then 20% off recurring payments for the lifetime of your subscription.
+                      A payment method is required and regular codes may have different terms.
+                      Your offer is verified when checkout begins.
+                    </p>
+                  </div>
+
                   <Button className="w-full mt-6 min-h-11" onClick={onPrimary} disabled={submitting}>
                     {submitting ? (
                       <>
@@ -398,7 +426,7 @@ export function PricingPage() {
                       Cancel from Account settings at any time. Cancelling ends your plan immediately and permanently deletes your stored files. Payments are non-refundable except where required by law — see{" "}
                       <Link to="/terms" className="text-primary underline underline-offset-4">Terms</Link>.
                     </p>
-                    <p>There’s no free plan or trial — you choose a plan before storing files.</p>
+                    <p>There’s no standard free plan or trial. Eligible Pioneer codes offer a 30-day trial, after which the subscription renews unless you cancel.</p>
                   </div>
                 </div>
               </div>
