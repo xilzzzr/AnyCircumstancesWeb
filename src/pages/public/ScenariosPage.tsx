@@ -47,7 +47,8 @@ export function ScenariosPage() {
         </div>
       </section>
 
-      <section className="scenario-library container mx-auto px-4">
+      <section className="scenario-library container mx-auto px-4" aria-labelledby="scenario-library-title">
+        <h2 id="scenario-library-title" className="sr-only">All scenarios</h2>
         <div className="scenario-filter" role="group" aria-label="Filter scenarios">{categories.map((item) => <button key={item} aria-pressed={category === item} className={category === item ? "active" : ""} onClick={() => setCategory(item)}>{item}</button>)}</div>
         <div className="scenario-library-grid">{filtered.map((scenario) => <div id={`scenario-${scenario.id}`} key={scenario.id}><ScenarioCard scenario={scenario} expanded={expanded === scenario.id} onToggle={() => setExpanded(expanded === scenario.id ? null : scenario.id)} /></div>)}</div>
         <div className="scenario-shuffle"><Button variant="outline" onClick={shuffle}><RefreshCw /> Show me another situation</Button><Link to="/signup">I already know what I need <ArrowRight /></Link></div>
