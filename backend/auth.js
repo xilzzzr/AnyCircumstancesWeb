@@ -28,6 +28,12 @@ const { createFixedWindowGate, positiveInt } = require("./security");
 const { sameEmail } = require("./email_identity");
 const { createEmergencyDispatchQuota } = require("./emergency_quota");
 const { planFromSubscription } = require("./stripe_checkout_plan");
+const {
+  createStripeSubscriptionSync,
+  invoiceSubscriptionId,
+  stripeAccess,
+  subscriptionPeriodEnd,
+} = require("./stripe_subscription_state");
 const { consumeEmailVerificationByTokenOnly } = require("./email_verification");
 const { createEmailVerificationHandler } = require("./email_verification_route");
 const router = express.Router();
@@ -101,6 +107,7 @@ if (process.env.NODE_ENV === "production") {
 }
 
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2026-08-26.dahlia" }) : null;
+const syncStripeSubscription = createStripeSubscriptionSync({ pool, stripe, refreshAggregateBillingStatus });
 // Equalizes the expensive password-check path when an email is not registered.
 const DUMMY_PASSWORD_HASH = "$2b$12$Bzp.v2dUrXUXjidOrU6Nre9/CR1KzXktUVuqYfy1m.WXOKuf7CV2K";
 const takeEmergencyDispatchQuota = createEmergencyDispatchQuota({
@@ -404,7 +411,8 @@ async function requireUserId(req, res) {
     Number(payload.sv || 0) !== Number(user.session_version || 1)
   ) {
     clearAuthCookies(res);
-    res.status(401).json({ ok: false, error: isDuressLocked(user) ? "account_temporarily_locked" : "invalid_session" });
+    // A duress-locked account must look exactly like a deleted one.
+    res.status(401).json({ ok: false, error: "invalid_session" });
     return null;
   }
 
@@ -686,7 +694,7 @@ router.post(
     if (!isSixDigitCode(code)) return res.status(400).json({ ok: false, error: "invalid_code" });
 
     const user = await getUserByEmail(email);
-    if (!user) return res.status(400).json({ ok: false, error: "invalid_code" });
+    if (!user || isDuressLocked(user)) return res.status(400).json({ ok: false, error: "invalid_code" });
     if (user.status !== "active") return res.status(403).json({ ok: false, error: "account_disabled" });
 
     const conn = await pool.getConnection();
@@ -733,9 +741,9 @@ router.post(
 
     const user = await getUserByEmail(email);
     const passwordOk = await bcrypt.compare(password, user?.password_hash || DUMMY_PASSWORD_HASH);
-    if (!user || !passwordOk) return res.status(401).json({ ok: false, error: "invalid_credentials" });
+    // A duress-locked account answers exactly like a deleted one would.
+    if (!user || !passwordOk || isDuressLocked(user)) return res.status(401).json({ ok: false, error: "invalid_credentials" });
     if (user.status !== "active") return res.status(403).json({ ok: false, error: "account_disabled" });
-    if (isDuressLocked(user)) return res.status(423).json({ ok: false, error: "account_temporarily_locked" });
     if (!user.email_verified_at) return res.status(403).json({ ok: false, error: "email_not_verified" });
 
     const conn = await pool.getConnection();
@@ -773,7 +781,11 @@ router.post(
 
       const rotated = await rotateRefreshToken(conn, raw);
       if (!rotated.ok) {
-        await conn.rollback();
+        // A reused (already rotated) token means it may have been stolen:
+        // keep the revocation of every session rotateRefreshToken just made.
+        // Rolling back here would undo it.
+        if (rotated.reason === "refresh_reuse_detected") await conn.commit();
+        else await conn.rollback();
         clearAuthCookies(res);
         return res.status(401).json({ ok: false, error: rotated.reason });
       }
@@ -782,7 +794,7 @@ router.post(
       if (!user || user.status !== "active" || !user.email_verified_at || isDuressLocked(user)) {
         await conn.rollback();
         clearAuthCookies(res);
-        return res.status(401).json({ ok: false, error: isDuressLocked(user) ? "account_temporarily_locked" : "invalid_user" });
+        return res.status(401).json({ ok: false, error: "invalid_user" });
       }
 
       const access = signAccessTokenForUser(user);
@@ -845,7 +857,7 @@ router.post(
     if (!validateEmail(email) || email.length > 254) return res.status(400).json({ ok: false, error: "invalid_email" });
 
     const user = await getUserByEmail(email);
-    if (!user) return res.json({ ok: true });
+    if (!user || isDuressLocked(user)) return res.json({ ok: true });
     if (user.email_verified_at) return res.json({ ok: true });
     if (user.status !== "active") return res.json({ ok: true });
 
@@ -1140,7 +1152,8 @@ router.post(
 
     const user = await getUserByEmail(email);
 
-    if (!user || user.status !== "active" || !user.email_verified_at) {
+    // No reset email for a duress-locked account: it must look deleted.
+    if (!user || user.status !== "active" || !user.email_verified_at || isDuressLocked(user)) {
       return res.json({ ok: true });
     }
 
@@ -3013,6 +3026,8 @@ async function invalidateAllSessions(userId, {
   }
 }
 
+// Locks the account and commits the emergency trigger. Returns the trigger
+// job id; deliver it with deliverDuressTrigger after replying.
 async function activateDuressLockout(userId, req, res) {
   const triggerJobId = await invalidateAllSessions(userId, {
     duressHours: 24,
@@ -3023,15 +3038,18 @@ async function activateDuressLockout(userId, req, res) {
     },
   });
   clearAuthCookies(res);
+  return triggerJobId;
+}
 
+// Runs after the reply has been sent, so the duress path doesn't take visibly
+// longer than the real action. The trigger was committed with the lockout; if
+// this fails, the dispatcher delivers it.
+async function deliverDuressTrigger(userId, triggerJobId) {
+  if (!triggerJobId) return;
   try {
-    if (triggerJobId) {
-      await processEmergencyTriggerJobs(pool, { jobId: triggerJobId, limit: 1 });
-      await deliverPendingEmergencyDispatches(pool, { userId, limit: 50 });
-    }
+    await processEmergencyTriggerJobs(pool, { jobId: triggerJobId, limit: 1 });
+    await deliverPendingEmergencyDispatches(pool, { userId, limit: 50 });
   } catch (error) {
-    // The durable trigger was committed with the lockout and will retry later.
-    // Do not reveal duress behavior to the browser.
     logError("duress-dispatch", error);
   }
 }
@@ -3053,6 +3071,11 @@ router.post(
     if (!userId) return;
     if (String(req.body?.confirmation || "") !== "DELETE MY FILES") {
       return res.status(400).json({ ok: false, error: "confirmation_required" });
+    }
+    // Password first, then the PIN: a stolen session plus a guessed PIN must
+    // not be enough to erase files. The emergency PIN still works with it.
+    if (!(await verifyCurrentPassword(userId, req.body?.password))) {
+      return res.status(401).json({ ok: false, error: "reauthentication_failed" });
     }
 
     const pinType = await classifySafetyPin(userId, req.body?.pin);
@@ -3081,8 +3104,10 @@ router.post(
     };
 
     if (pinType === "panic") {
-      await activateDuressLockout(userId, req, res);
-      return res.json(responseBody);
+      const triggerJobId = await activateDuressLockout(userId, req, res);
+      res.json(responseBody);
+      await deliverDuressTrigger(userId, triggerJobId);
+      return;
     }
 
     const stripeSubscriptionId = String(profile.stripe_subscription_id || "");
@@ -3107,15 +3132,15 @@ router.delete(
     if (String(req.body?.confirmation || "") !== "DELETE MY ACCOUNT") {
       return res.status(400).json({ ok: false, error: "confirmation_required" });
     }
+    // Password first, then the PIN: a stolen session plus a guessed PIN must
+    // not be enough to delete the account. The emergency PIN still works with it.
+    if (!(await verifyCurrentPassword(userId, req.body?.password))) {
+      return res.status(401).json({ ok: false, error: "reauthentication_failed" });
+    }
 
     const pinType = await classifySafetyPin(userId, req.body?.pin);
     if (pinType === "invalid") {
       return res.status(401).json({ ok: false, error: "invalid_pin" });
-    }
-
-    if (pinType === "panic") {
-      await activateDuressLockout(userId, req, res);
-      return res.json({ ok: true });
     }
 
     const [rows] = await pool.query(
@@ -3132,6 +3157,20 @@ router.delete(
       [String(userId)]
     );
     const profile = rows?.[0] || {};
+    // The emergency PIN gets exactly the reply a real deletion gets.
+    const responseBody = {
+      ok: true,
+      requiresAppleAction: Boolean(profile.has_apple),
+      appleManageUrl: profile.has_apple ? "https://apps.apple.com/account/subscriptions" : null,
+    };
+
+    if (pinType === "panic") {
+      const triggerJobId = await activateDuressLockout(userId, req, res);
+      res.json(responseBody);
+      await deliverDuressTrigger(userId, triggerJobId);
+      return;
+    }
+
     const stripeSubscriptionId = String(profile.stripe_subscription_id || "");
 
     await queueAccountLifecycleJob(pool, {
@@ -3144,11 +3183,7 @@ router.delete(
     const cleanup = await attemptAccountLifecycleJob(pool, stripe, userId);
     if (!cleanup.ok) logError("account-delete:cleanup-pending", cleanup.error);
 
-    return res.json({
-      ok: true,
-      requiresAppleAction: Boolean(profile.has_apple),
-      appleManageUrl: profile.has_apple ? "https://apps.apple.com/account/subscriptions" : null,
-    });
+    return res.json(responseBody);
   })
 );
 
@@ -3197,8 +3232,12 @@ async function stripeWebhookHandler(req, res) {
       // whichever plan the account last opened a checkout for, which can be a
       // bigger plan from another tab that was never paid for.
       const plan = planFromSubscription(sub);
+      // Only grant access once Stripe says the subscription is active or
+      // trialing. A checkout can complete with the first payment still pending
+      // (bank debits); customer.subscription.updated grants access when it clears.
+      const paid = stripeAccess(sub?.status).entitlementStatus === "active";
 
-      if (userId && subscriptionId && plan) {
+      if (userId && subscriptionId && plan && paid) {
         await pool.query(
           `UPDATE billing_profiles SET stripe_subscription_id = ?, status = 'active',
              storage_limit_gb = ?, checkin_frequency = ?, billing_interval = ?,
@@ -3208,16 +3247,23 @@ async function stripeWebhookHandler(req, res) {
         );
         await pool.query(
           `INSERT INTO billing_entitlements
-             (user_id, provider, external_subscription_id, status, storage_limit_gb,
-              checkin_frequency, billing_interval)
-           VALUES (?, 'stripe', ?, 'active', ?, ?, ?)
+             (user_id, provider, external_subscription_id, status, current_period_end,
+              storage_limit_gb, checkin_frequency, billing_interval)
+           VALUES (?, 'stripe', ?, 'active', ?, ?, ?, ?)
            ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), status = 'active',
+             current_period_end = VALUES(current_period_end),
              storage_limit_gb = VALUES(storage_limit_gb),
              checkin_frequency = VALUES(checkin_frequency),
              billing_interval = VALUES(billing_interval)`,
-          [String(userId), subscriptionId, plan.storageGb, plan.checkinFrequency, plan.billingInterval]
+          [String(userId), subscriptionId, subscriptionPeriodEnd(sub), plan.storageGb, plan.checkinFrequency, plan.billingInterval]
         );
         await refreshAggregateBillingStatus(pool, userId);
+      } else if (userId && subscriptionId && plan) {
+        // Payment not complete yet: remember the subscription, grant nothing.
+        await pool.query("UPDATE billing_profiles SET stripe_subscription_id = ? WHERE user_id = ?", [
+          subscriptionId,
+          String(userId),
+        ]);
       } else if (userId && subscriptionId) {
         // Every checkout this backend creates records the plan in the
         // subscription metadata. Without it, don't guess a plan: leave the
@@ -3231,57 +3277,24 @@ async function stripeWebhookHandler(req, res) {
     }
 
     if (event.type === "customer.subscription.updated" || event.type === "customer.subscription.deleted") {
+      // Apply the subscription's live state (status, period end and plan), not
+      // the copy inside this event, which may be stale or out of order.
       const sub = event.data.object;
-      let userId = sub?.metadata?.user_id ? String(sub.metadata.user_id) : "";
-      if (!userId && sub?.id) {
-        const [ownerRows] = await pool.query(
-          "SELECT user_id FROM billing_profiles WHERE stripe_subscription_id = ? LIMIT 1",
-          [String(sub.id)]
-        );
-        userId = ownerRows?.[0]?.user_id ? String(ownerRows[0].user_id) : "";
-      }
-      const status = String(sub.status || "");
+      await syncStripeSubscription(sub?.id, sub);
+    }
 
-      let mapped = "past_due";
-      if (status === "active" || status === "trialing") mapped = "active";
-      if (status === "past_due" || status === "unpaid") mapped = "past_due";
-      if (status === "canceled") mapped = "paused";
-
-      const periodEnd = sub?.current_period_end ? new Date(Number(sub.current_period_end) * 1000) : null;
-      // This event can arrive before checkout.session.completed. Take the plan
-      // from the subscription itself so the entitlement never falls back to
-      // whatever plan billing_profiles last held.
-      const plan = planFromSubscription(sub);
-
-      if (userId) {
-        await pool.query("UPDATE billing_profiles SET status = ?, current_period_end = ? WHERE user_id = ?", [
-          mapped,
-          periodEnd,
-          String(userId),
-        ]);
-        await pool.query(
-          `INSERT INTO billing_entitlements
-             (user_id, provider, external_subscription_id, status, current_period_end,
-              storage_limit_gb, checkin_frequency, billing_interval)
-           VALUES (?, 'stripe', ?, ?, ?, ?, ?, ?)
-           ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), status = VALUES(status),
-             current_period_end = VALUES(current_period_end),
-             storage_limit_gb = COALESCE(VALUES(storage_limit_gb), storage_limit_gb),
-             checkin_frequency = COALESCE(VALUES(checkin_frequency), checkin_frequency),
-             billing_interval = COALESCE(VALUES(billing_interval), billing_interval)`,
-          [
-            String(userId), String(sub.id), mapped === "active" ? "active" : "inactive", periodEnd,
-            plan ? plan.storageGb : null, plan ? plan.checkinFrequency : null, plan ? plan.billingInterval : null,
-          ]
-        );
-        await refreshAggregateBillingStatus(pool, userId);
-      }
+    if (event.type === "invoice.payment_failed") {
+      // The subscription moves to past_due or unpaid; record that right away.
+      const subId = invoiceSubscriptionId(event.data.object);
+      if (subId) await syncStripeSubscription(subId);
     }
 
     if (event.type === "invoice.paid") {
       const inv = event.data.object;
-      const subId = inv?.subscription ? String(inv.subscription) : "";
+      const subId = invoiceSubscriptionId(inv);
       if (subId) {
+        // A renewal moves the period end forward.
+        await syncStripeSubscription(subId);
         const [rows] = await pool.query(
           "SELECT user_id FROM billing_profiles WHERE stripe_subscription_id = ? LIMIT 1",
           [subId]

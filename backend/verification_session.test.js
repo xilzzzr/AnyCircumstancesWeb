@@ -17,7 +17,7 @@ for (const verified of [false, true]) {
       const conn = { async beginTransaction() {}, async rollback() {}, async commit() {}, release() {} };
       vm.runInNewContext(route, {
         router: { post(path, fn) { handler = fn; } }, asyncHandler: fn => fn,
-        normalizeEmail: value => value, validateEmail: () => true, isSixDigitCode: () => true,
+        normalizeEmail: value => value, validateEmail: () => true, isSixDigitCode: () => true, isDuressLocked: () => false,
         getUserByEmail: async () => ({ id: 1, email: 'test@example.test', status: 'active', email_verified_at: verified }),
         pool: { getConnection: async () => conn },
         consumeEmailVerificationForUser: async () => { checked = true; return { ok: validCode, reason: 'invalid_code' }; },
