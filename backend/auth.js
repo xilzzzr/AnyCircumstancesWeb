@@ -19,12 +19,22 @@ const {
 } = require("./apple_subscriptions");
 const { attemptAccountLifecycleJob, queueAccountLifecycleJob } = require("./account_actions");
 const {
+  cancelPendingDispatchesForContact,
   deliverPendingEmergencyDispatches,
   insertEmergencyTriggerJob,
   processEmergencyTriggerJobs,
   queueAndDeliverEmergency,
 } = require("./emergency_delivery");
 const { createFixedWindowGate, positiveInt } = require("./security");
+const { sameEmail } = require("./email_identity");
+const { createEmergencyDispatchQuota } = require("./emergency_quota");
+const { planFromSubscription } = require("./stripe_checkout_plan");
+const {
+  createStripeSubscriptionSync,
+  invoiceSubscriptionId,
+  stripeAccess,
+  subscriptionPeriodEnd,
+} = require("./stripe_subscription_state");
 const { consumeEmailVerificationByTokenOnly } = require("./email_verification");
 const { createEmailVerificationHandler } = require("./email_verification_route");
 const router = express.Router();
@@ -98,17 +108,12 @@ if (process.env.NODE_ENV === "production") {
 }
 
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2026-08-26.dahlia" }) : null;
+const syncStripeSubscription = createStripeSubscriptionSync({ pool, stripe, refreshAggregateBillingStatus });
 // Equalizes the expensive password-check path when an email is not registered.
 const DUMMY_PASSWORD_HASH = "$2b$12$Bzp.v2dUrXUXjidOrU6Nre9/CR1KzXktUVuqYfy1m.WXOKuf7CV2K";
-const emergencyGlobalGate = createFixedWindowGate({
-  name: "emergency_dispatch_global",
-  windowMs: 60 * 60 * 1000,
-  limit: positiveInt(process.env.EMERGENCY_GLOBAL_LIMIT_PER_HOUR, 50),
-});
-const emergencyUserGate = createFixedWindowGate({
-  name: "emergency_dispatch_user",
-  windowMs: 60 * 60 * 1000,
-  limit: positiveInt(process.env.EMERGENCY_USER_LIMIT_PER_HOUR, 2),
+const takeEmergencyDispatchQuota = createEmergencyDispatchQuota({
+  userLimitPerHour: positiveInt(process.env.EMERGENCY_USER_LIMIT_PER_HOUR, 2),
+  globalLimitPerHour: positiveInt(process.env.EMERGENCY_GLOBAL_LIMIT_PER_HOUR, 50),
 });
 const pinResetStartGate = createFixedWindowGate({
   name: "pin_reset_start",
@@ -120,17 +125,6 @@ const pinResetVerifyGate = createFixedWindowGate({
   windowMs: 10 * 60 * 1000,
   limit: positiveInt(process.env.PIN_RESET_VERIFY_LIMIT_PER_10_MIN, 10),
 });
-
-function consumeEmergencyDispatchQuota(userId, res) {
-  const globalResult = emergencyGlobalGate("global");
-  const userResult = globalResult.allowed ? emergencyUserGate(`user:${String(userId)}`) : null;
-  const blocked = !globalResult.allowed ? globalResult : !userResult.allowed ? userResult : null;
-  if (!blocked) return true;
-  res.setHeader("Retry-After", String(blocked.retryAfter));
-  res.setHeader("Cache-Control", "no-store");
-  res.status(429).json({ ok: false, error: "emergency_rate_limited" });
-  return false;
-}
 
 function logError(context, err) {
   const meta = {
@@ -350,12 +344,22 @@ async function sendPinResetVerificationEmail(toEmail, code) {
   return { ok: true };
 }
 
-async function getUserByEmail(email) {
+// Any row the database collation matches, including a look-alike address.
+// Only use this to decide whether an address is already taken.
+async function findUserRowByEmail(email) {
   const [rows] = await pool.query(
     "SELECT id, email, password_hash, email_verified_at, status, session_version, duress_locked_until FROM users WHERE email = ? LIMIT 1",
     [email]
   );
   return rows[0] || null;
+}
+
+// The account whose stored address is exactly the one entered. A look-alike
+// address the collation happens to match (for example one accented letter in
+// the domain) must never sign in, reset, or receive mail for that account.
+async function getUserByEmail(email) {
+  const row = await findUserRowByEmail(email);
+  return row && sameEmail(row.email, email) ? row : null;
 }
 
 async function getUserById(userId) {
@@ -408,7 +412,8 @@ async function requireUserId(req, res) {
     Number(payload.sv || 0) !== Number(user.session_version || 1)
   ) {
     clearAuthCookies(res);
-    res.status(401).json({ ok: false, error: isDuressLocked(user) ? "account_temporarily_locked" : "invalid_session" });
+    // A duress-locked account must look exactly like a deleted one.
+    res.status(401).json({ ok: false, error: "invalid_session" });
     return null;
   }
 
@@ -620,7 +625,8 @@ router.post(
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
-    const existing = await getUserByEmail(email);
+    // Treat a look-alike match as taken too: the unique index would reject it.
+    const existing = await findUserRowByEmail(email);
     if (existing) {
       return res.status(201).json({ ok: true, needs_email_verification: true });
     }
@@ -672,12 +678,12 @@ router.post(
   })
 );
 
-router.get(
-  ["/verify-email", "/verify-email/browser"],
-  asyncHandler(createEmailVerificationHandler({
-    pool, consumeToken: consumeEmailVerificationByTokenOnly, publicWebBaseUrl, logError
-  }))
-);
+const emailVerificationHandler = createEmailVerificationHandler({
+  pool, consumeToken: consumeEmailVerificationByTokenOnly, publicWebBaseUrl, logError
+});
+// In a browser, GET shows a Confirm button and the POST from it verifies.
+router.get(["/verify-email", "/verify-email/browser"], asyncHandler(emailVerificationHandler));
+router.post("/verify-email/browser", asyncHandler(emailVerificationHandler));
 
 router.post(
   "/verify-email-code",
@@ -689,7 +695,7 @@ router.post(
     if (!isSixDigitCode(code)) return res.status(400).json({ ok: false, error: "invalid_code" });
 
     const user = await getUserByEmail(email);
-    if (!user) return res.status(400).json({ ok: false, error: "invalid_code" });
+    if (!user || isDuressLocked(user)) return res.status(400).json({ ok: false, error: "invalid_code" });
     if (user.status !== "active") return res.status(403).json({ ok: false, error: "account_disabled" });
 
     const conn = await pool.getConnection();
@@ -736,9 +742,9 @@ router.post(
 
     const user = await getUserByEmail(email);
     const passwordOk = await bcrypt.compare(password, user?.password_hash || DUMMY_PASSWORD_HASH);
-    if (!user || !passwordOk) return res.status(401).json({ ok: false, error: "invalid_credentials" });
+    // A duress-locked account answers exactly like a deleted one would.
+    if (!user || !passwordOk || isDuressLocked(user)) return res.status(401).json({ ok: false, error: "invalid_credentials" });
     if (user.status !== "active") return res.status(403).json({ ok: false, error: "account_disabled" });
-    if (isDuressLocked(user)) return res.status(423).json({ ok: false, error: "account_temporarily_locked" });
     if (!user.email_verified_at) return res.status(403).json({ ok: false, error: "email_not_verified" });
 
     const conn = await pool.getConnection();
@@ -776,7 +782,11 @@ router.post(
 
       const rotated = await rotateRefreshToken(conn, raw);
       if (!rotated.ok) {
-        await conn.rollback();
+        // A reused (already rotated) token means it may have been stolen:
+        // keep the revocation of every session rotateRefreshToken just made.
+        // Rolling back here would undo it.
+        if (rotated.reason === "refresh_reuse_detected") await conn.commit();
+        else await conn.rollback();
         clearAuthCookies(res);
         return res.status(401).json({ ok: false, error: rotated.reason });
       }
@@ -785,7 +795,7 @@ router.post(
       if (!user || user.status !== "active" || !user.email_verified_at || isDuressLocked(user)) {
         await conn.rollback();
         clearAuthCookies(res);
-        return res.status(401).json({ ok: false, error: isDuressLocked(user) ? "account_temporarily_locked" : "invalid_user" });
+        return res.status(401).json({ ok: false, error: "invalid_user" });
       }
 
       const access = signAccessTokenForUser(user);
@@ -848,7 +858,7 @@ router.post(
     if (!validateEmail(email) || email.length > 254) return res.status(400).json({ ok: false, error: "invalid_email" });
 
     const user = await getUserByEmail(email);
-    if (!user) return res.json({ ok: true });
+    if (!user || isDuressLocked(user)) return res.json({ ok: true });
     if (user.email_verified_at) return res.json({ ok: true });
     if (user.status !== "active") return res.json({ ok: true });
 
@@ -876,7 +886,7 @@ router.post(
 
     let emailSent = false;
     try {
-      const out = await sendVerificationEmail(email, verifyCode, verifyUrl);
+      const out = await sendVerificationEmail(String(user.email), verifyCode, verifyUrl);
       emailSent = !!out?.ok;
     } catch (e) {
       logError("sendVerificationEmail(resend)", e);
@@ -1143,7 +1153,8 @@ router.post(
 
     const user = await getUserByEmail(email);
 
-    if (!user || user.status !== "active" || !user.email_verified_at) {
+    // No reset email for a duress-locked account: it must look deleted.
+    if (!user || user.status !== "active" || !user.email_verified_at || isDuressLocked(user)) {
       return res.json({ ok: true });
     }
 
@@ -1170,7 +1181,8 @@ router.post(
 
     let emailSent = false;
     try {
-      const out = await sendPasswordResetEmail(email, resetUrl);
+      // Always the address on the account, never the one typed into the form.
+      const out = await sendPasswordResetEmail(String(user.email), resetUrl);
       emailSent = !!out?.ok;
     } catch (e) {
       logError("sendPasswordResetEmail(request)", e);
@@ -1414,7 +1426,10 @@ router.post(
     if (!ok && pinHash) ok = await bcrypt.compare(pin, pinHash);
 
     if (!ok) return res.status(401).json({ ok: false, error: "invalid_pin" });
-    if (isPanic && !consumeEmergencyDispatchQuota(userId, res)) return;
+    // A panic PIN must look exactly like a normal check-in, so it is never
+    // refused here. Over the per-user limit an emergency is already under way;
+    // over the platform-wide limit the trigger is recorded for the dispatcher.
+    const panicQuota = isPanic ? takeEmergencyDispatchQuota(userId).status : "none";
 
     const row = await getVerificationSettingsRow(userId);
     const paidFrequency = await getPaidCheckinFrequency(userId);
@@ -1447,7 +1462,7 @@ router.post(
         [String(userId), frequency, gracePeriodHours, reminders, now, nextDue]
       );
 
-      if (isPanic) {
+      if (isPanic && panicQuota !== "user_limited") {
         panicTriggerJobId = await insertEmergencyTriggerJob(conn, {
           userId,
           reason: "panic_checkin",
@@ -1467,19 +1482,20 @@ router.post(
       conn.release();
     }
 
-    if (isPanic && panicTriggerJobId) {
+    const saved = await getVerificationSettingsRow(userId);
+    res.json({ ok: true, settings: saved ? settingsDto(saved) : null });
+
+    // Deliver after replying, so a panic check-in takes as long as a normal
+    // one. The trigger job was committed with the check-in; if this fails, or
+    // the platform-wide limit deferred it, the dispatcher delivers it.
+    if (isPanic && panicTriggerJobId && panicQuota === "ok") {
       try {
         await processEmergencyTriggerJobs(pool, { jobId: panicTriggerJobId, limit: 1 });
         await deliverPendingEmergencyDispatches(pool, { userId, limit: 50 });
       } catch (error) {
-        // The trigger job was committed with the check-in and will be retried by
-        // the dispatcher. Keep the browser response indistinguishable.
         logError("verification-check-in:panic-dispatch", error);
       }
     }
-
-    const saved = await getVerificationSettingsRow(userId);
-    return res.json({ ok: true, settings: saved ? settingsDto(saved) : null });
   })
 );
 
@@ -2021,6 +2037,18 @@ router.post(
       ...offer.subscription,
     };
 
+    // Close checkouts this customer still has open (for example in another
+    // tab), so only the plan chosen last can be paid for and a second
+    // subscription can't be started by accident.
+    try {
+      const open = await stripe.checkout.sessions.list({ customer: customerId, status: "open", limit: 20 });
+      for (const openSession of open?.data || []) {
+        await stripe.checkout.sessions.expire(openSession.id);
+      }
+    } catch (error) {
+      logError("checkout:expire-open-sessions", error);
+    }
+
     let session;
     try {
       session = await stripe.checkout.sessions.create({
@@ -2211,9 +2239,30 @@ router.post(
 
     const ok = await bcrypt.compare(pin, panicHash);
     if (!ok) return res.status(401).json({ ok: false, error: "invalid_pin" });
-    if (!consumeEmergencyDispatchQuota(userId, res)) return;
+
+    const quota = takeEmergencyDispatchQuota(userId);
+    if (quota.status === "user_limited") {
+      res.setHeader("Retry-After", String(quota.retryAfter));
+      res.setHeader("Cache-Control", "no-store");
+      return res.status(429).json({ ok: false, error: "emergency_rate_limited" });
+    }
 
     try {
+      if (quota.status === "global_limited") {
+        // Too many emergencies platform-wide to deliver inline. Record the
+        // trigger so the dispatcher delivers it within about a minute, rather
+        // than refusing this person's emergency.
+        await insertEmergencyTriggerJob(pool, {
+          userId,
+          reason: "manual",
+          requestMeta: {
+            ip: req.ip,
+            userAgent: req.headers["user-agent"],
+          },
+        });
+        return res.json({ ok: true, queuedContacts: 0, deliveredContacts: 0, failedContacts: 0, deferred: true });
+      }
+
       const out = await queueAndDeliverEmergency(pool, {
         userId,
         reason: "manual",
@@ -2272,12 +2321,19 @@ function renderEmergencyContactVerifyHtml(opts) {
   const reason = String(opts?.reason || "");
   const ownerEmail = String(opts?.ownerEmail || "");
   const contactName = String(opts?.contactName || "");
+  // Set when the link has only been opened: show a button instead of
+  // confirming, so email security scanners that open links can't confirm.
+  const confirmAction = String(opts?.confirmAction || "");
 
   let finalTitle = "Confirmed";
   let finalText = "You’re verified as an emergency contact.";
   let finalSub = ownerEmail ? `For ${ownerEmail}` : "";
 
-  if (!ok) {
+  if (confirmAction) {
+    finalTitle = "Confirm you’re an emergency contact";
+    finalText = `${ownerEmail || "Someone"} added you as an emergency contact on AnyCircumstances. ` +
+      "If they ever stop checking in, you’ll receive the documents they chose to share with you.";
+  } else if (!ok) {
     finalTitle = "Could not confirm";
     finalSub = "";
     if (reason === "expired") finalText = "This confirmation link expired. Ask the account owner to resend the invite.";
@@ -2297,6 +2353,7 @@ function renderEmergencyContactVerifyHtml(opts) {
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>anycircumstances</title>
   <style>
+    *,*::before,*::after{box-sizing:border-box}
     body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;background:#0b0b0f;color:#fff}
     .wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
     .card{width:100%;max-width:520px;background:#12121a;border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:22px}
@@ -2308,6 +2365,7 @@ function renderEmergencyContactVerifyHtml(opts) {
     .check{width:22px;height:22px;border-radius:999px;background:rgba(34,197,94,.18);display:flex;align-items:center;justify-content:center}
     .check svg{width:14px;height:14px}
     .btn{display:inline-block;margin-top:16px;padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.08);color:#fff;text-decoration:none}
+    .confirm{display:inline-block;margin-top:16px;padding:12px 16px;border:0;border-radius:8px;background:#fff;color:#0b0b0f;font:inherit;font-weight:700;cursor:pointer}
     .muted{color:rgba(255,255,255,.6);font-size:13px;margin-top:12px}
   </style>
 </head>
@@ -2317,7 +2375,13 @@ function renderEmergencyContactVerifyHtml(opts) {
       <div class="brand"><span class="dot"></span><span>anycircumstances</span></div>
       <p class="title">${safeFinalTitle}</p>
       <p class="sub">${safeContact ? `For ${safeContact}` : safeFinalSub}</p>
-      <div>
+      ${confirmAction ? `<div>
+        <p class="muted">${safeFinalText}</p>
+        <form method="post" action="${escapeHtml(confirmAction)}">
+          <button class="confirm" type="submit">Confirm</button>
+        </form>
+        <p class="muted">If you don’t know this person, close this page. Nothing happens unless you confirm.</p>
+      </div>` : `<div>
         <div class="row">
           ${
             ok
@@ -2331,7 +2395,7 @@ function renderEmergencyContactVerifyHtml(opts) {
         </div>
         <p class="muted">${safeFinalText}</p>
         <a class="btn" href="${escapeHtml(publicWebBaseUrl)}">Go to site</a>
-      </div>
+      </div>`}
     </div>
   </div>
 </body>
@@ -2358,6 +2422,19 @@ async function consumeEmergencyContactVerificationByToken(conn, code) {
   await conn.query("UPDATE emergency_contacts SET verified_at = NOW() WHERE id = ? AND verified_at IS NULL", [contactId]);
 
   return { ok: true, contactId };
+}
+
+// Checks a confirmation link without using it up.
+async function peekEmergencyContactVerificationToken(code) {
+  const [rows] = await pool.query(
+    "SELECT contact_id, expires_at, used_at FROM emergency_contact_verification_tokens WHERE token_hash = ? LIMIT 1",
+    [sha256Hex(code)]
+  );
+  const row = rows?.[0];
+  if (!row) return { ok: false, reason: "invalid_code", contactId: null };
+  if (row.used_at) return { ok: false, reason: "already_used", contactId: row.contact_id };
+  if (new Date(row.expires_at).getTime() < nowUtc().getTime()) return { ok: false, reason: "expired", contactId: row.contact_id };
+  return { ok: true, contactId: row.contact_id };
 }
 
 async function sendEmergencyContactInviteEmail(toEmail, contactName, ownerEmail, verifyUrl) {
@@ -2607,6 +2684,9 @@ router.patch(
           "DELETE FROM file_key_envelopes WHERE recipient_type = 'contact' AND recipient_id = ?",
           [contactId]
         );
+        // Deliveries queued for the old address must not go out once the new
+        // address is confirmed, possibly long after the owner checked in.
+        await cancelPendingDispatchesForContact(conn, contactId, "contact_email_changed");
       } else {
         await conn.query(
           `UPDATE emergency_contacts SET name = ?, email = COALESCE(?, email), relationship = ?
@@ -2661,6 +2741,7 @@ router.delete(
       );
       await conn.query("DELETE FROM emergency_contact_file_assignments WHERE contact_id = ?", [contactId]);
       await conn.query("DELETE FROM emergency_contact_verification_tokens WHERE contact_id = ?", [contactId]);
+      await cancelPendingDispatchesForContact(conn, contactId, "contact_deleted");
       await conn.query("DELETE FROM emergency_contacts WHERE id = ? AND user_id = ? LIMIT 1", [contactId, String(userId)]);
 
       await conn.commit();
@@ -2798,7 +2879,50 @@ router.post(
   })
 );
 
+function sendContactVerifyHtml(res, status, opts) {
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  return res.status(status).set("Content-Type", "text/html; charset=utf-8").send(renderEmergencyContactVerifyHtml(opts));
+}
+
+// Opening the emailed link only shows a Confirm button. Email security
+// scanners open links automatically, so a GET must never confirm a contact.
 router.get(
+  "/emergency-contacts/verify",
+  asyncHandler(async (req, res) => {
+    const token = String(req.query?.token || "");
+    const wantsHtml = String(req.headers?.accept || "").includes("text/html");
+
+    if (!/^[A-Za-z0-9_-]{20,200}$/.test(token)) {
+      if (wantsHtml) return sendContactVerifyHtml(res, 400, { ok: false, reason: "invalid_code" });
+      return res.status(400).json({ ok: false, error: "invalid_code" });
+    }
+
+    const out = await peekEmergencyContactVerificationToken(token);
+    if (!wantsHtml) {
+      return out.ok
+        ? res.json({ ok: true, confirmation_required: true })
+        : res.status(400).json({ ok: false, error: out.reason });
+    }
+    const ctx = out.contactId ? await getEmergencyContactContext(out.contactId) : null;
+    if (!out.ok) {
+      return sendContactVerifyHtml(res, 400, {
+        ok: false,
+        reason: out.reason,
+        ownerEmail: ctx?.owner_email || "",
+        contactName: ctx?.contact_name || "",
+      });
+    }
+    return sendContactVerifyHtml(res, 200, {
+      ok: true,
+      ownerEmail: ctx?.owner_email || "",
+      contactName: ctx?.contact_name || "",
+      confirmAction: `/auth/emergency-contacts/verify?token=${encodeURIComponent(token)}`,
+    });
+  })
+);
+
+router.post(
   "/emergency-contacts/verify",
   asyncHandler(async (req, res) => {
     const token = String(req.query?.token || "");
@@ -2806,10 +2930,7 @@ router.get(
     const wantsHtml = accept.includes("text/html");
 
     if (!/^[A-Za-z0-9_-]{20,200}$/.test(token)) {
-      if (wantsHtml) {
-        const html = renderEmergencyContactVerifyHtml({ ok: false, reason: "invalid_code" });
-        return res.status(400).set("Content-Type", "text/html; charset=utf-8").send(html);
-      }
+      if (wantsHtml) return sendContactVerifyHtml(res, 400, { ok: false, reason: "invalid_code" });
       return res.status(400).json({ ok: false, error: "invalid_code" });
     }
 
@@ -2838,25 +2959,23 @@ router.get(
     if (!out.ok) {
       if (wantsHtml) {
         const ctx = await getEmergencyContactContext(out.contactId);
-        const html = renderEmergencyContactVerifyHtml({
+        return sendContactVerifyHtml(res, 400, {
           ok: false,
           reason: out.reason,
           ownerEmail: ctx?.owner_email || "",
           contactName: ctx?.contact_name || "",
         });
-        return res.status(400).set("Content-Type", "text/html; charset=utf-8").send(html);
       }
       return res.status(400).json({ ok: false, error: out.reason });
     }
 
     if (wantsHtml) {
       const ctx = await getEmergencyContactContext(out.contactId);
-      const html = renderEmergencyContactVerifyHtml({
+      return sendContactVerifyHtml(res, 200, {
         ok: true,
         ownerEmail: ctx?.owner_email || "",
         contactName: ctx?.contact_name || "",
       });
-      return res.status(200).set("Content-Type", "text/html; charset=utf-8").send(html);
     }
 
     return res.json({ ok: true });
@@ -2978,6 +3097,8 @@ async function invalidateAllSessions(userId, {
   }
 }
 
+// Locks the account and commits the emergency trigger. Returns the trigger
+// job id; deliver it with deliverDuressTrigger after replying.
 async function activateDuressLockout(userId, req, res) {
   const triggerJobId = await invalidateAllSessions(userId, {
     duressHours: 24,
@@ -2988,15 +3109,18 @@ async function activateDuressLockout(userId, req, res) {
     },
   });
   clearAuthCookies(res);
+  return triggerJobId;
+}
 
+// Runs after the reply has been sent, so the duress path doesn't take visibly
+// longer than the real action. The trigger was committed with the lockout; if
+// this fails, the dispatcher delivers it.
+async function deliverDuressTrigger(userId, triggerJobId) {
+  if (!triggerJobId) return;
   try {
-    if (triggerJobId) {
-      await processEmergencyTriggerJobs(pool, { jobId: triggerJobId, limit: 1 });
-      await deliverPendingEmergencyDispatches(pool, { userId, limit: 50 });
-    }
+    await processEmergencyTriggerJobs(pool, { jobId: triggerJobId, limit: 1 });
+    await deliverPendingEmergencyDispatches(pool, { userId, limit: 50 });
   } catch (error) {
-    // The durable trigger was committed with the lockout and will retry later.
-    // Do not reveal duress behavior to the browser.
     logError("duress-dispatch", error);
   }
 }
@@ -3018,6 +3142,11 @@ router.post(
     if (!userId) return;
     if (String(req.body?.confirmation || "") !== "DELETE MY FILES") {
       return res.status(400).json({ ok: false, error: "confirmation_required" });
+    }
+    // Password first, then the PIN: a stolen session plus a guessed PIN must
+    // not be enough to erase files. The emergency PIN still works with it.
+    if (!(await verifyCurrentPassword(userId, req.body?.password))) {
+      return res.status(401).json({ ok: false, error: "reauthentication_failed" });
     }
 
     const pinType = await classifySafetyPin(userId, req.body?.pin);
@@ -3046,8 +3175,10 @@ router.post(
     };
 
     if (pinType === "panic") {
-      await activateDuressLockout(userId, req, res);
-      return res.json(responseBody);
+      const triggerJobId = await activateDuressLockout(userId, req, res);
+      res.json(responseBody);
+      await deliverDuressTrigger(userId, triggerJobId);
+      return;
     }
 
     const stripeSubscriptionId = String(profile.stripe_subscription_id || "");
@@ -3072,15 +3203,15 @@ router.delete(
     if (String(req.body?.confirmation || "") !== "DELETE MY ACCOUNT") {
       return res.status(400).json({ ok: false, error: "confirmation_required" });
     }
+    // Password first, then the PIN: a stolen session plus a guessed PIN must
+    // not be enough to delete the account. The emergency PIN still works with it.
+    if (!(await verifyCurrentPassword(userId, req.body?.password))) {
+      return res.status(401).json({ ok: false, error: "reauthentication_failed" });
+    }
 
     const pinType = await classifySafetyPin(userId, req.body?.pin);
     if (pinType === "invalid") {
       return res.status(401).json({ ok: false, error: "invalid_pin" });
-    }
-
-    if (pinType === "panic") {
-      await activateDuressLockout(userId, req, res);
-      return res.json({ ok: true });
     }
 
     const [rows] = await pool.query(
@@ -3097,6 +3228,20 @@ router.delete(
       [String(userId)]
     );
     const profile = rows?.[0] || {};
+    // The emergency PIN gets exactly the reply a real deletion gets.
+    const responseBody = {
+      ok: true,
+      requiresAppleAction: Boolean(profile.has_apple),
+      appleManageUrl: profile.has_apple ? "https://apps.apple.com/account/subscriptions" : null,
+    };
+
+    if (pinType === "panic") {
+      const triggerJobId = await activateDuressLockout(userId, req, res);
+      res.json(responseBody);
+      await deliverDuressTrigger(userId, triggerJobId);
+      return;
+    }
+
     const stripeSubscriptionId = String(profile.stripe_subscription_id || "");
 
     await queueAccountLifecycleJob(pool, {
@@ -3109,11 +3254,7 @@ router.delete(
     const cleanup = await attemptAccountLifecycleJob(pool, stripe, userId);
     if (!cleanup.ok) logError("account-delete:cleanup-pending", cleanup.error);
 
-    return res.json({
-      ok: true,
-      requiresAppleAction: Boolean(profile.has_apple),
-      appleManageUrl: profile.has_apple ? "https://apps.apple.com/account/subscriptions" : null,
-    });
+    return res.json(responseBody);
   })
 );
 
@@ -3150,75 +3291,81 @@ async function stripeWebhookHandler(req, res) {
     if (event.type === "checkout.session.completed") {
       const session = event.data.object;
       const subscriptionId = session?.subscription ? String(session.subscription) : "";
-      let userId = session?.client_reference_id ? String(session.client_reference_id) : "";
-
-      if (!userId && subscriptionId) {
-        const sub = await stripe.subscriptions.retrieve(subscriptionId);
-        userId = sub?.metadata?.user_id ? String(sub.metadata.user_id) : "";
+      const sub = subscriptionId ? await stripe.subscriptions.retrieve(subscriptionId) : null;
+      const metadataUserId = sub?.metadata?.user_id ? String(sub.metadata.user_id) : "";
+      let userId = session?.client_reference_id ? String(session.client_reference_id) : metadataUserId;
+      if (userId && metadataUserId && metadataUserId !== userId) {
+        logError("stripe:checkout-user-mismatch", new Error(`subscription ${subscriptionId}`));
+        userId = "";
       }
 
-      if (userId && subscriptionId) {
-        await pool.query("UPDATE billing_profiles SET stripe_subscription_id = ?, status = 'active' WHERE user_id = ?", [
-          subscriptionId,
-          String(userId),
-        ]);
+      // Grant the plan this subscription was bought for. billing_profiles holds
+      // whichever plan the account last opened a checkout for, which can be a
+      // bigger plan from another tab that was never paid for.
+      const plan = planFromSubscription(sub);
+      // Only grant access once Stripe says the subscription is active or
+      // trialing. A checkout can complete with the first payment still pending
+      // (bank debits); customer.subscription.updated grants access when it clears.
+      const paid = stripeAccess(sub?.status).entitlementStatus === "active";
+
+      if (userId && subscriptionId && plan && paid) {
+        await pool.query(
+          `UPDATE billing_profiles SET stripe_subscription_id = ?, status = 'active',
+             storage_limit_gb = ?, checkin_frequency = ?, billing_interval = ?,
+             amount_cents = COALESCE(?, amount_cents)
+           WHERE user_id = ?`,
+          [subscriptionId, plan.storageGb, plan.checkinFrequency, plan.billingInterval, plan.amountCents, String(userId)]
+        );
         await pool.query(
           `INSERT INTO billing_entitlements
-             (user_id, provider, external_subscription_id, status, storage_limit_gb,
-              checkin_frequency, billing_interval)
-           SELECT user_id, 'stripe', ?, 'active', storage_limit_gb, checkin_frequency, billing_interval
-           FROM billing_profiles WHERE user_id = ?
+             (user_id, provider, external_subscription_id, status, current_period_end,
+              storage_limit_gb, checkin_frequency, billing_interval)
+           VALUES (?, 'stripe', ?, 'active', ?, ?, ?, ?)
            ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), status = 'active',
+             current_period_end = VALUES(current_period_end),
              storage_limit_gb = VALUES(storage_limit_gb),
              checkin_frequency = VALUES(checkin_frequency),
              billing_interval = VALUES(billing_interval)`,
-          [subscriptionId, String(userId)]
+          [String(userId), subscriptionId, subscriptionPeriodEnd(sub), plan.storageGb, plan.checkinFrequency, plan.billingInterval]
         );
         await refreshAggregateBillingStatus(pool, userId);
+      } else if (userId && subscriptionId && plan) {
+        // Payment not complete yet: remember the subscription, grant nothing.
+        await pool.query("UPDATE billing_profiles SET stripe_subscription_id = ? WHERE user_id = ?", [
+          subscriptionId,
+          String(userId),
+        ]);
+      } else if (userId && subscriptionId) {
+        // Every checkout this backend creates records the plan in the
+        // subscription metadata. Without it, don't guess a plan: leave the
+        // account as it is and flag it, so it can be checked in Stripe.
+        logError("stripe:checkout-plan-missing", new Error(`subscription ${subscriptionId}`));
+        await pool.query("UPDATE billing_profiles SET stripe_subscription_id = ? WHERE user_id = ?", [
+          subscriptionId,
+          String(userId),
+        ]);
       }
     }
 
     if (event.type === "customer.subscription.updated" || event.type === "customer.subscription.deleted") {
+      // Apply the subscription's live state (status, period end and plan), not
+      // the copy inside this event, which may be stale or out of order.
       const sub = event.data.object;
-      let userId = sub?.metadata?.user_id ? String(sub.metadata.user_id) : "";
-      if (!userId && sub?.id) {
-        const [ownerRows] = await pool.query(
-          "SELECT user_id FROM billing_profiles WHERE stripe_subscription_id = ? LIMIT 1",
-          [String(sub.id)]
-        );
-        userId = ownerRows?.[0]?.user_id ? String(ownerRows[0].user_id) : "";
-      }
-      const status = String(sub.status || "");
+      await syncStripeSubscription(sub?.id, sub);
+    }
 
-      let mapped = "past_due";
-      if (status === "active" || status === "trialing") mapped = "active";
-      if (status === "past_due" || status === "unpaid") mapped = "past_due";
-      if (status === "canceled") mapped = "paused";
-
-      const periodEnd = sub?.current_period_end ? new Date(Number(sub.current_period_end) * 1000) : null;
-
-      if (userId) {
-        await pool.query("UPDATE billing_profiles SET status = ?, current_period_end = ? WHERE user_id = ?", [
-          mapped,
-          periodEnd,
-          String(userId),
-        ]);
-        await pool.query(
-          `INSERT INTO billing_entitlements
-             (user_id, provider, external_subscription_id, status, current_period_end)
-           VALUES (?, 'stripe', ?, ?, ?)
-           ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), status = VALUES(status),
-             current_period_end = VALUES(current_period_end)`,
-          [String(userId), String(sub.id), mapped === "active" ? "active" : "inactive", periodEnd]
-        );
-        await refreshAggregateBillingStatus(pool, userId);
-      }
+    if (event.type === "invoice.payment_failed") {
+      // The subscription moves to past_due or unpaid; record that right away.
+      const subId = invoiceSubscriptionId(event.data.object);
+      if (subId) await syncStripeSubscription(subId);
     }
 
     if (event.type === "invoice.paid") {
       const inv = event.data.object;
-      const subId = inv?.subscription ? String(inv.subscription) : "";
+      const subId = invoiceSubscriptionId(inv);
       if (subId) {
+        // A renewal moves the period end forward.
+        await syncStripeSubscription(subId);
         const [rows] = await pool.query(
           "SELECT user_id FROM billing_profiles WHERE stripe_subscription_id = ? LIMIT 1",
           [subId]

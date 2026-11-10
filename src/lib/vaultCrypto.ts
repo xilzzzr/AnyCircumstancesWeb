@@ -17,11 +17,17 @@ export function randomBytes(n: number) {
   return b;
 }
 
-async function pbkdf2Key(passphrase: string, salt: Uint8Array, usages: KeyUsage[]) {
+// New vault keys use 600,000 PBKDF2-SHA256 iterations (current OWASP guidance).
+// Keys created earlier keep 200,000: a bundle is never re-wrapped, because the
+// server refuses to replace a stored vault key.
+export const VAULT_KDF_ITERATIONS = 600000;
+const SUPPORTED_ITERATIONS = new Set([200000, VAULT_KDF_ITERATIONS]);
+
+async function pbkdf2Key(passphrase: string, salt: Uint8Array, usages: KeyUsage[], iterations: number) {
   const enc = new TextEncoder();
   const baseKey = await crypto.subtle.importKey("raw", enc.encode(passphrase), "PBKDF2", false, ["deriveKey"]);
   return crypto.subtle.deriveKey(
-    { name: "PBKDF2", salt, iterations: 200000, hash: "SHA-256" },
+    { name: "PBKDF2", salt, iterations, hash: "SHA-256" },
     baseKey,
     { name: "AES-GCM", length: 256 },
     false,
@@ -32,7 +38,7 @@ async function pbkdf2Key(passphrase: string, salt: Uint8Array, usages: KeyUsage[
 export type VaultKeyBundle = {
   version: 1;
   kdf: "PBKDF2-SHA256";
-  iterations: 200000;
+  iterations: 200000 | 600000;
   private_key_format: "pkcs8";
   public_key: string;
   encrypted_private_key: string;
@@ -45,21 +51,21 @@ export async function createVaultKeyBundle(passphrase: string): Promise<VaultKey
     publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["encrypt", "decrypt"]);
   const salt = randomBytes(16);
   const iv = randomBytes(12);
-  const wrapKey = await pbkdf2Key(passphrase, salt, ["encrypt"]);
+  const wrapKey = await pbkdf2Key(passphrase, salt, ["encrypt"], VAULT_KDF_ITERATIONS);
   const privateBytes = await crypto.subtle.exportKey("pkcs8", kp.privateKey);
   const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, wrapKey, privateBytes);
-  return { version: 1, kdf: "PBKDF2-SHA256", iterations: 200000, private_key_format: "pkcs8",
+  return { version: 1, kdf: "PBKDF2-SHA256", iterations: VAULT_KDF_ITERATIONS, private_key_format: "pkcs8",
     public_key: b64FromBytes(new Uint8Array(await crypto.subtle.exportKey("spki", kp.publicKey))),
     encrypted_private_key: b64FromBytes(new Uint8Array(encrypted)), salt: b64FromBytes(salt), iv: b64FromBytes(iv) };
 }
 
 export async function unlockVaultKeyBundle(bundle: VaultKeyBundle, passphrase: string) {
-  if (bundle.version !== 1 || bundle.kdf !== "PBKDF2-SHA256" || bundle.iterations !== 200000 || bundle.private_key_format !== "pkcs8") {
+  if (bundle.version !== 1 || bundle.kdf !== "PBKDF2-SHA256" || !SUPPORTED_ITERATIONS.has(bundle.iterations) || bundle.private_key_format !== "pkcs8") {
     throw new Error("unsupported_vault_key");
   }
   try {
     const pubKey = await crypto.subtle.importKey("spki", bytesFromB64(bundle.public_key), { name: "RSA-OAEP", hash: "SHA-256" }, true, ["encrypt"]);
-    const wrapKey = await pbkdf2Key(passphrase, bytesFromB64(bundle.salt), ["decrypt"]);
+    const wrapKey = await pbkdf2Key(passphrase, bytesFromB64(bundle.salt), ["decrypt"], bundle.iterations);
     const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: bytesFromB64(bundle.iv) }, wrapKey, bytesFromB64(bundle.encrypted_private_key));
     const privKey = await crypto.subtle.importKey("pkcs8", plain, { name: "RSA-OAEP", hash: "SHA-256" }, false, ["decrypt"]);
     // Detect a mismatched public/private pair before it can encrypt new files.

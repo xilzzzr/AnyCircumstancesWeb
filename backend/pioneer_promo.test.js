@@ -70,6 +70,18 @@ test("promotion lookup validates code, remaining redemption count and expiration
   assert.equal(await findPromotion(stripe, "x".repeat(50)), null);
 });
 
+test("ordinary codes keep their discount, but a 100%-off code needs to be marked as allowed", async () => {
+  const ordinary = (coupon, metadata = {}) => ({
+    promotionCodes: { list: async () => ({ data: [makePromo({ code: "SPRING", metadata, coupon })] }) },
+    coupons: { retrieve: async (id) => ({ id, percent_off: 100, duration: "forever" }) },
+  });
+  assert.equal((await findPromotion(ordinary({ id: "c10", percent_off: 10, duration: "once" }), "spring")).code, "SPRING");
+  assert.equal(await findPromotion(ordinary({ id: "c100", percent_off: 100, duration: "forever" }), "spring"), null);
+  assert.equal(await findPromotion(ordinary("c100_by_id"), "spring"), null, "an unexpanded coupon is looked up before deciding");
+  assert.equal((await findPromotion(ordinary({ id: "c100", percent_off: 100 }, { uac_allow_free: "true" }), "spring")).code, "SPRING");
+  assert.equal(await findPromotion(ordinary(null), "spring"), null, "a code whose coupon can't be checked is refused");
+});
+
 test("checkout terms distinguish Pioneer trial from ordinary promo discounts", () => {
   const pioneer = checkoutTerms(makePromo());
   assert.deepEqual(pioneer.checkout.discounts, [{ promotion_code: "promo_test" }]);

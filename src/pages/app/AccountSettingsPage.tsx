@@ -18,6 +18,7 @@ export function AccountSettingsPage() {
   const [profileSaving, setProfileSaving] = useState(false);
   const [action, setAction] = useState<Action>(null);
   const [confirmation, setConfirmation] = useState("");
+  const [password, setPassword] = useState("");
   const [pin, setPin] = useState("");
   const [working, setWorking] = useState(false);
   const { logout } = useAuth();
@@ -47,7 +48,7 @@ export function AccountSettingsPage() {
   }
 
   async function submit() {
-    if (!action || confirmation !== phrase || !/^\d{4,6}$/.test(pin)) return;
+    if (!action || confirmation !== phrase || !password || !/^\d{4,6}$/.test(pin)) return;
     setWorking(true);
     try {
       const response = await fetch(
@@ -56,7 +57,7 @@ export function AccountSettingsPage() {
           method: action === "delete" ? "DELETE" : "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ confirmation, pin }),
+          body: JSON.stringify({ confirmation, password, pin }),
         }
       );
       const body = await response.json().catch(() => null);
@@ -77,9 +78,14 @@ export function AccountSettingsPage() {
         },
       });
     } catch (error) {
+      const code = String((error as Error)?.message || error);
       toast({
         title: "Action could not be completed",
-        description: String((error as Error)?.message || error),
+        description: code === "reauthentication_failed"
+          ? "Your current password is incorrect."
+          : code === "invalid_pin"
+            ? "Your safety PIN is incorrect."
+            : code,
         variant: "destructive",
       });
     } finally {
@@ -90,6 +96,7 @@ export function AccountSettingsPage() {
   const openAction = (nextAction: Exclude<Action, null>) => {
     setAction(nextAction);
     setConfirmation("");
+    setPassword("");
     setPin("");
   };
 
@@ -148,8 +155,8 @@ export function AccountSettingsPage() {
             </DialogTitle>
             <DialogDescription id="destructive-action-help" className="space-y-3 pt-2">
               <span className="block">
-                This is immediate and irreversible when confirmed with your safety PIN. Every encrypted
-                vault file and its recovery information will be permanently deleted.
+                This is immediate and irreversible when confirmed with your password and safety PIN.
+                Every encrypted vault file and its recovery information will be permanently deleted.
               </span>
               {action === "delete" && (
                 <span className="block">
@@ -158,10 +165,21 @@ export function AccountSettingsPage() {
                 </span>
               )}
               <span className="block">
-                Enter your safety PIN, then type <strong className="text-foreground">{phrase}</strong> to confirm.
+                Enter your current password and safety PIN, then type{" "}
+                <strong className="text-foreground">{phrase}</strong> to confirm.
               </span>
             </DialogDescription>
           </DialogHeader>
+
+          <Label htmlFor="destructive-password">Current account password</Label>
+          <Input
+            id="destructive-password"
+            type="password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            autoComplete="current-password"
+            disabled={working}
+          />
 
           <Label htmlFor="destructive-pin">Safety PIN</Label>
           <Input
@@ -189,7 +207,7 @@ export function AccountSettingsPage() {
             </Button>
             <Button
               variant="destructive"
-              disabled={working || confirmation !== phrase || !/^\d{4,6}$/.test(pin)}
+              disabled={working || confirmation !== phrase || !password || !/^\d{4,6}$/.test(pin)}
               onClick={submit}
             >
               {working && <Loader2 aria-hidden="true" className="animate-spin" />}

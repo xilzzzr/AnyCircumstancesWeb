@@ -62,6 +62,32 @@ test("anonymous, non-admin, and ordinary customer sessions cannot query admin da
   account = { id: "42", sv: 3 }; assert.equal((await fetch(`${base}/customers`)).status, 401);
   assert.equal(queried.length, 0);
 });
+test("an admin with an authenticator secret needs a current, unused code", async () => {
+  const { base32Encode, codeAt, base32Decode } = require("./totp");
+  const secret = base32Encode(Buffer.from("admin-totp-test-secret-20b"));
+  process.env.ADMIN_TOTP_SECRETS = `7:OTHERSECRETOTHERSECRET,42:${secret}`;
+  try {
+    const post = (body) => fetch(`${base}/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const current = codeAt(base32Decode(secret), Math.floor(Date.now() / 30000));
+
+    let response = await post({ password: "valid-password" });
+    assert.equal(response.status, 401);
+    assert.equal((await response.json()).error, "totp_required");
+
+    response = await post({ password: "valid-password", code: current === "000000" ? "111111" : "000000" });
+    assert.equal(response.status, 401);
+    assert.equal((await response.json()).error, "invalid_totp");
+
+    response = await post({ password: "valid-password", code: current });
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get("set-cookie"), /uac_admin=/);
+
+    response = await post({ password: "valid-password", code: current });
+    assert.equal(response.status, 401, "the same code can't be used twice");
+  } finally {
+    delete process.env.ADMIN_TOTP_SECRETS;
+  }
+});
 test("empty allowlist denies access, including forged client roles", async () => {
   process.env.ADMIN_USER_IDS = "";
   assert.equal((await fetch(`${base}/session`, { headers: { "x-admin": "true" } })).status, 403);

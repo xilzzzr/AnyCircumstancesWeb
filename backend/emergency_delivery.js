@@ -1,6 +1,7 @@
 const crypto = require("crypto");
 const nodemailer = require("nodemailer");
 const { emailSender, renderEmergencyEmail, emergencyEmailSubject } = require("./emails");
+const { MAX_ATTEMPTS, retryDueSql, retryGapMinutes } = require("./emergency_retry");
 
 function sha256Hex(input) {
   return crypto.createHash("sha256").update(String(input)).digest("hex");
@@ -31,6 +32,23 @@ function getTransporter() {
   const secure = String(process.env.SMTP_SECURE || "").toLowerCase() === "true" || port === 465;
   cachedTransporter = nodemailer.createTransport({ host, port, secure, auth: { user, pass } });
   return cachedTransporter;
+}
+
+// One log line per failed attempt, plus a distinct GAVE_UP line once retries
+// are exhausted, so monitoring can alert on releases that never went out.
+// Logs ids and the error only, never addresses or links.
+function logRetry(label, context, attempt, error) {
+  const exhausted = attempt >= MAX_ATTEMPTS;
+  const message = String(error?.code || error?.message || error || "failed")
+    .replace(/[^\s@<>"']+@[^\s@<>"']+/g, "[address]")
+    .slice(0, 120);
+  console.error(exhausted ? label.replace("_FAILED]", "_GAVE_UP]") : label, {
+    ...context,
+    attempt,
+    maxAttempts: MAX_ATTEMPTS,
+    nextRetryMinutes: exhausted ? null : retryGapMinutes(attempt),
+    error: message,
+  });
 }
 
 function sameInstant(a, b) {
@@ -158,9 +176,14 @@ async function queueEmergencyDispatch(pool, {
 async function createShareLinks(pool, contactId, userId, fileIds) {
   if (!fileIds.length) return { links: [], tokenHashes: [] };
   const placeholders = fileIds.map(() => "?").join(",");
+  // Only files the owner still has AND still assigns to this contact. The
+  // queued list is a snapshot; files removed since then must not be sent.
   const [rows] = await pool.query(
-    `SELECT id FROM files WHERE user_id = ? AND id IN (${placeholders})`,
-    [String(userId), ...fileIds]
+    `SELECT f.id
+     FROM files f
+     JOIN emergency_contact_file_assignments a ON a.file_id = f.id AND a.contact_id = ?
+     WHERE f.user_id = ? AND f.id IN (${placeholders})`,
+    [String(contactId), String(userId), ...fileIds]
   );
   const validIds = new Set((rows || []).map((row) => String(row.id)));
   const links = [];
@@ -191,6 +214,54 @@ async function revokeUnsentShareLinks(pool, contactId, tokenHashes) {
   );
 }
 
+async function markDispatchDelivered(pool, dispatchId) {
+  await pool.query(
+    `UPDATE verification_emergency_contact_dispatches
+     SET status='delivered', delivered_at=UTC_TIMESTAMP(3), last_error=NULL
+     WHERE id = ? AND status='processing'`,
+    [dispatchId]
+  );
+}
+
+// The table has no "cancelled" status; a cancelled delivery is stored as
+// failed with its retries used up, so it is never picked up again.
+const CANCELLED_PREFIX = "cancelled:";
+
+async function cancelDispatch(pool, dispatchId, reason) {
+  await pool.query(
+    `UPDATE verification_emergency_contact_dispatches
+     SET status='failed', attempts=?, last_error=?
+     WHERE id = ? AND status='processing'`,
+    [MAX_ATTEMPTS, `${CANCELLED_PREFIX}${reason}`.slice(0, 255), dispatchId]
+  );
+}
+
+// Cancels deliveries to a contact that haven't gone out yet, for example when
+// the owner changes that contact's email address. Without this, a queued
+// delivery would wait and go out whenever the new address was confirmed.
+async function cancelPendingDispatchesForContact(db, contactId, reason) {
+  await db.query(
+    `UPDATE verification_emergency_contact_dispatches
+     SET status='failed', attempts=?, last_error=?
+     WHERE contact_id = ? AND status IN ('pending','failed','processing')`,
+    [MAX_ATTEMPTS, `${CANCELLED_PREFIX}${reason}`.slice(0, 255), String(contactId)]
+  );
+}
+
+// A scheduled release exists because the owner missed a check-in. If they
+// have checked in since that deadline, anything not yet sent is cancelled.
+// Panic and duress releases are never cancelled by a later check-in: a
+// coerced owner can be made to check in normally afterwards.
+async function scheduledReleaseCancelled(pool, dispatch) {
+  if (String(dispatch.reason || "") !== "scheduled") return false;
+  const [rows] = await pool.query(
+    "SELECT last_checkin_at FROM verification_settings WHERE user_id = ? LIMIT 1",
+    [String(dispatch.user_id)]
+  );
+  const lastCheckin = rows?.[0]?.last_checkin_at;
+  return Boolean(lastCheckin && new Date(lastCheckin).getTime() > new Date(dispatch.due_at).getTime());
+}
+
 async function maybeMarkDispatchComplete(pool, userId, dueAt) {
   const [rows] = await pool.query(
     `SELECT
@@ -210,10 +281,7 @@ async function maybeMarkDispatchComplete(pool, userId, dueAt) {
 
 async function processEmergencyTriggerJobs(pool, { jobId = null, userId = null, limit = 50 } = {}) {
   const params = [];
-  const where = [
-    "(status IN ('pending','failed') OR (status='processing' AND updated_at < DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 10 MINUTE)))",
-    "attempts < 10",
-  ];
+  const where = [retryDueSql("")];
   if (jobId !== null) {
     where.push("id = ?");
     params.push(Number(jobId));
@@ -225,7 +293,7 @@ async function processEmergencyTriggerJobs(pool, { jobId = null, userId = null, 
   params.push(Math.max(1, Math.min(200, Number(limit) || 50)));
 
   const [jobs] = await pool.query(
-    `SELECT id, user_id, reason, request_ip, request_user_agent, created_at
+    `SELECT id, user_id, reason, request_ip, request_user_agent, created_at, attempts
      FROM emergency_trigger_jobs
      WHERE ${where.join(" AND ")}
      ORDER BY created_at, id
@@ -241,12 +309,7 @@ async function processEmergencyTriggerJobs(pool, { jobId = null, userId = null, 
     const [claim] = await pool.query(
       `UPDATE emergency_trigger_jobs
        SET status='processing', attempts=attempts+1, last_error=NULL
-       WHERE id = ?
-         AND attempts < 10
-         AND (
-           status IN ('pending','failed')
-           OR (status='processing' AND updated_at < DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 10 MINUTE))
-         )`,
+       WHERE id = ? AND ${retryDueSql("")}`,
       [job.id]
     );
     if (!claim?.affectedRows) continue;
@@ -276,6 +339,7 @@ async function processEmergencyTriggerJobs(pool, { jobId = null, userId = null, 
          WHERE id = ? AND status='processing'`,
         [String(error?.message || error || "trigger_failed").slice(0, 255), job.id]
       );
+      logRetry("[EMERGENCY_TRIGGER_FAILED]", { jobId: job.id, userId: job.user_id }, Number(job.attempts || 0) + 1, error);
       failed += 1;
     }
   }
@@ -285,10 +349,7 @@ async function processEmergencyTriggerJobs(pool, { jobId = null, userId = null, 
 
 async function deliverPendingEmergencyDispatches(pool, { userId = null, dueAt = null, limit = 50 } = {}) {
   const params = [];
-  const where = [
-    "(d.status IN ('pending','failed') OR (d.status = 'processing' AND d.updated_at < DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 10 MINUTE)))",
-    "d.attempts < 5",
-  ];
+  const where = [retryDueSql("d.")];
   if (userId !== null) {
     where.push("d.user_id = ?");
     params.push(String(userId));
@@ -300,7 +361,7 @@ async function deliverPendingEmergencyDispatches(pool, { userId = null, dueAt = 
   params.push(Math.max(1, Math.min(200, Number(limit) || 50)));
 
   const [dispatches] = await pool.query(
-    `SELECT d.id, d.user_id, d.contact_id, d.due_at, d.reason, d.file_ids_json,
+    `SELECT d.id, d.user_id, d.contact_id, d.due_at, d.reason, d.file_ids_json, d.attempts,
             c.email, c.name, c.public_key, u.email AS owner_email, u.display_name AS owner_name
      FROM verification_emergency_contact_dispatches d
      JOIN users u ON u.id = d.user_id
@@ -327,15 +388,12 @@ async function deliverPendingEmergencyDispatches(pool, { userId = null, dueAt = 
     const [claim] = await pool.query(
       `UPDATE verification_emergency_contact_dispatches
        SET status='processing', attempts=attempts+1, last_error=NULL
-       WHERE id = ?
-         AND attempts < 5
-         AND (
-           status IN ('pending','failed')
-           OR (status='processing' AND updated_at < DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 10 MINUTE))
-         )`,
+       WHERE id = ? AND ${retryDueSql("")}`,
       [dispatch.id]
     );
     if (!claim?.affectedRows) continue;
+    const attempt = Number(dispatch.attempts || 0) + 1;
+    const logContext = { dispatchId: dispatch.id, userId: dispatch.user_id, contactId: dispatch.contact_id };
 
     let fileIds;
     try {
@@ -349,14 +407,29 @@ async function deliverPendingEmergencyDispatches(pool, { userId = null, dueAt = 
         "UPDATE verification_emergency_contact_dispatches SET status='failed', last_error='invalid_file_list' WHERE id = ? AND status='processing'",
         [dispatch.id]
       );
+      logRetry("[EMERGENCY_DELIVERY_FAILED]", logContext, attempt, new Error("invalid_file_list"));
       failed += 1;
       continue;
     }
 
+    // Re-check right before sending: the owner may have checked in since this
+    // scheduled release was queued, or a retry may come hours later.
+    if (await scheduledReleaseCancelled(pool, dispatch)) {
+      await cancelDispatch(pool, dispatch.id, "checked_in");
+      console.warn("[EMERGENCY_DELIVERY_CANCELLED]", { ...logContext, reason: "checked_in" });
+      continue;
+    }
+
     let created = { links: [], tokenHashes: [] };
+    let sent = false;
     try {
       created = await createShareLinks(pool, dispatch.contact_id, dispatch.user_id, fileIds);
-      if (!created.links.length) throw new Error("no_available_files");
+      if (!created.links.length) {
+        // Every file was deleted or unassigned since the release was queued.
+        await cancelDispatch(pool, dispatch.id, "no_assigned_files");
+        console.warn("[EMERGENCY_DELIVERY_CANCELLED]", { ...logContext, reason: "no_assigned_files" });
+        continue;
+      }
 
       const rendered = renderEmergencyEmail({
         name: String(dispatch.name || ""),
@@ -373,16 +446,24 @@ async function deliverPendingEmergencyDispatches(pool, { userId = null, dueAt = 
         text: rendered.text,
         html: rendered.html,
       });
+      sent = true;
 
-      await pool.query(
-        `UPDATE verification_emergency_contact_dispatches
-         SET status='delivered', delivered_at=UTC_TIMESTAMP(3), last_error=NULL
-         WHERE id = ? AND status='processing'`,
-        [dispatch.id]
-      );
+      await markDispatchDelivered(pool, dispatch.id);
       delivered += 1;
       await maybeMarkDispatchComplete(pool, dispatch.user_id, dispatch.due_at);
     } catch (error) {
+      if (sent) {
+        // The email went out, so its links must keep working: never revoke
+        // them here. Try once more to record the delivery so it isn't sent
+        // a second time.
+        await markDispatchDelivered(pool, dispatch.id).catch(() => null);
+        console.error("[EMERGENCY_DELIVERY_RECORD_FAILED]", {
+          ...logContext,
+          error: String(error?.code || error?.message || error || "failed").slice(0, 120),
+        });
+        delivered += 1;
+        continue;
+      }
       await revokeUnsentShareLinks(pool, dispatch.contact_id, created.tokenHashes).catch(() => null);
       await pool.query(
         `UPDATE verification_emergency_contact_dispatches
@@ -390,6 +471,7 @@ async function deliverPendingEmergencyDispatches(pool, { userId = null, dueAt = 
          WHERE id = ? AND status='processing'`,
         [String(error?.message || error || "send_failed").slice(0, 255), dispatch.id]
       );
+      logRetry("[EMERGENCY_DELIVERY_FAILED]", logContext, attempt, error);
       failed += 1;
     }
   }
@@ -424,6 +506,7 @@ async function queueAndDeliverEmergency(pool, options) {
 }
 
 module.exports = {
+  cancelPendingDispatchesForContact,
   deliverPendingEmergencyDispatches,
   insertEmergencyTriggerJob,
   processEmergencyTriggerJobs,
