@@ -115,7 +115,9 @@ const applicationCircuitBreaker = createFixedWindowLimiter({
   key: () => "global",
 });
 
-app.use(applicationCircuitBreaker, globalLimiter);
+// Per-IP first: requests one client sends over its own limit must not count
+// toward the process-wide ceiling, or a single client could lock everyone out.
+app.use(globalLimiter, applicationCircuitBreaker);
 
 
 app.use((req, res, next) => {
@@ -135,6 +137,12 @@ const publicEmailDestinationLimiter = createFixedWindowLimiter({
   windowMs: 60 * 60 * 1000,
   limit: positiveInt(process.env.PUBLIC_EMAIL_DESTINATION_LIMIT_PER_HOUR, 5),
   key: (req) => stableHash(String(req.body?.email || "").trim().toLowerCase()),
+});
+const publicEmailIpLimiter = createFixedWindowLimiter({
+  name: "public_email_ip",
+  windowMs: 60 * 60 * 1000,
+  limit: positiveInt(process.env.PUBLIC_EMAIL_IP_LIMIT_PER_HOUR, 20),
+  key: (req) => req.ip,
 });
 const publicEmailGlobalLimiter = createFixedWindowLimiter({
   name: "public_email_global",
@@ -168,10 +176,13 @@ const publicShareGlobalLimiter = createFixedWindowLimiter({
 });
 
 app.use(rejectCrossSiteMutation(allowedOrigins));
+// Narrowest limits first, so requests one client or one address sends over
+// its own limit never use up the shared hourly email allowance.
 app.use(
   ["/auth/register", "/auth/resend-verification", "/auth/password-reset/request"],
-  publicEmailGlobalLimiter,
-  publicEmailDestinationLimiter
+  publicEmailIpLimiter,
+  publicEmailDestinationLimiter,
+  publicEmailGlobalLimiter
 );
 app.use("/auth/login", loginAccountLimiter);
 app.use(["/auth/verify-email", "/auth/verify-email-code", "/auth/emergency-contacts/verify"], verificationAccountLimiter);
