@@ -25,6 +25,9 @@ const {
   queueAndDeliverEmergency,
 } = require("./emergency_delivery");
 const { createFixedWindowGate, positiveInt } = require("./security");
+const { sameEmail } = require("./email_identity");
+const { createEmergencyDispatchQuota } = require("./emergency_quota");
+const { planFromSubscription } = require("./stripe_checkout_plan");
 const { consumeEmailVerificationByTokenOnly } = require("./email_verification");
 const { createEmailVerificationHandler } = require("./email_verification_route");
 const router = express.Router();
@@ -100,15 +103,9 @@ if (process.env.NODE_ENV === "production") {
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2026-08-26.dahlia" }) : null;
 // Equalizes the expensive password-check path when an email is not registered.
 const DUMMY_PASSWORD_HASH = "$2b$12$Bzp.v2dUrXUXjidOrU6Nre9/CR1KzXktUVuqYfy1m.WXOKuf7CV2K";
-const emergencyGlobalGate = createFixedWindowGate({
-  name: "emergency_dispatch_global",
-  windowMs: 60 * 60 * 1000,
-  limit: positiveInt(process.env.EMERGENCY_GLOBAL_LIMIT_PER_HOUR, 50),
-});
-const emergencyUserGate = createFixedWindowGate({
-  name: "emergency_dispatch_user",
-  windowMs: 60 * 60 * 1000,
-  limit: positiveInt(process.env.EMERGENCY_USER_LIMIT_PER_HOUR, 2),
+const takeEmergencyDispatchQuota = createEmergencyDispatchQuota({
+  userLimitPerHour: positiveInt(process.env.EMERGENCY_USER_LIMIT_PER_HOUR, 2),
+  globalLimitPerHour: positiveInt(process.env.EMERGENCY_GLOBAL_LIMIT_PER_HOUR, 50),
 });
 const pinResetStartGate = createFixedWindowGate({
   name: "pin_reset_start",
@@ -120,17 +117,6 @@ const pinResetVerifyGate = createFixedWindowGate({
   windowMs: 10 * 60 * 1000,
   limit: positiveInt(process.env.PIN_RESET_VERIFY_LIMIT_PER_10_MIN, 10),
 });
-
-function consumeEmergencyDispatchQuota(userId, res) {
-  const globalResult = emergencyGlobalGate("global");
-  const userResult = globalResult.allowed ? emergencyUserGate(`user:${String(userId)}`) : null;
-  const blocked = !globalResult.allowed ? globalResult : !userResult.allowed ? userResult : null;
-  if (!blocked) return true;
-  res.setHeader("Retry-After", String(blocked.retryAfter));
-  res.setHeader("Cache-Control", "no-store");
-  res.status(429).json({ ok: false, error: "emergency_rate_limited" });
-  return false;
-}
 
 function logError(context, err) {
   const meta = {
@@ -350,12 +336,22 @@ async function sendPinResetVerificationEmail(toEmail, code) {
   return { ok: true };
 }
 
-async function getUserByEmail(email) {
+// Any row the database collation matches, including a look-alike address.
+// Only use this to decide whether an address is already taken.
+async function findUserRowByEmail(email) {
   const [rows] = await pool.query(
     "SELECT id, email, password_hash, email_verified_at, status, session_version, duress_locked_until FROM users WHERE email = ? LIMIT 1",
     [email]
   );
   return rows[0] || null;
+}
+
+// The account whose stored address is exactly the one entered. A look-alike
+// address the collation happens to match (for example one accented letter in
+// the domain) must never sign in, reset, or receive mail for that account.
+async function getUserByEmail(email) {
+  const row = await findUserRowByEmail(email);
+  return row && sameEmail(row.email, email) ? row : null;
 }
 
 async function getUserById(userId) {
@@ -620,7 +616,8 @@ router.post(
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
-    const existing = await getUserByEmail(email);
+    // Treat a look-alike match as taken too: the unique index would reject it.
+    const existing = await findUserRowByEmail(email);
     if (existing) {
       return res.status(201).json({ ok: true, needs_email_verification: true });
     }
@@ -876,7 +873,7 @@ router.post(
 
     let emailSent = false;
     try {
-      const out = await sendVerificationEmail(email, verifyCode, verifyUrl);
+      const out = await sendVerificationEmail(String(user.email), verifyCode, verifyUrl);
       emailSent = !!out?.ok;
     } catch (e) {
       logError("sendVerificationEmail(resend)", e);
@@ -1170,7 +1167,8 @@ router.post(
 
     let emailSent = false;
     try {
-      const out = await sendPasswordResetEmail(email, resetUrl);
+      // Always the address on the account, never the one typed into the form.
+      const out = await sendPasswordResetEmail(String(user.email), resetUrl);
       emailSent = !!out?.ok;
     } catch (e) {
       logError("sendPasswordResetEmail(request)", e);
@@ -1414,7 +1412,10 @@ router.post(
     if (!ok && pinHash) ok = await bcrypt.compare(pin, pinHash);
 
     if (!ok) return res.status(401).json({ ok: false, error: "invalid_pin" });
-    if (isPanic && !consumeEmergencyDispatchQuota(userId, res)) return;
+    // A panic PIN must look exactly like a normal check-in, so it is never
+    // refused here. Over the per-user limit an emergency is already under way;
+    // over the platform-wide limit the trigger is recorded for the dispatcher.
+    const panicQuota = isPanic ? takeEmergencyDispatchQuota(userId).status : "none";
 
     const row = await getVerificationSettingsRow(userId);
     const paidFrequency = await getPaidCheckinFrequency(userId);
@@ -1447,7 +1448,7 @@ router.post(
         [String(userId), frequency, gracePeriodHours, reminders, now, nextDue]
       );
 
-      if (isPanic) {
+      if (isPanic && panicQuota !== "user_limited") {
         panicTriggerJobId = await insertEmergencyTriggerJob(conn, {
           userId,
           reason: "panic_checkin",
@@ -1467,19 +1468,20 @@ router.post(
       conn.release();
     }
 
-    if (isPanic && panicTriggerJobId) {
+    const saved = await getVerificationSettingsRow(userId);
+    res.json({ ok: true, settings: saved ? settingsDto(saved) : null });
+
+    // Deliver after replying, so a panic check-in takes as long as a normal
+    // one. The trigger job was committed with the check-in; if this fails, or
+    // the platform-wide limit deferred it, the dispatcher delivers it.
+    if (isPanic && panicTriggerJobId && panicQuota === "ok") {
       try {
         await processEmergencyTriggerJobs(pool, { jobId: panicTriggerJobId, limit: 1 });
         await deliverPendingEmergencyDispatches(pool, { userId, limit: 50 });
       } catch (error) {
-        // The trigger job was committed with the check-in and will be retried by
-        // the dispatcher. Keep the browser response indistinguishable.
         logError("verification-check-in:panic-dispatch", error);
       }
     }
-
-    const saved = await getVerificationSettingsRow(userId);
-    return res.json({ ok: true, settings: saved ? settingsDto(saved) : null });
   })
 );
 
@@ -2021,6 +2023,18 @@ router.post(
       ...offer.subscription,
     };
 
+    // Close checkouts this customer still has open (for example in another
+    // tab), so only the plan chosen last can be paid for and a second
+    // subscription can't be started by accident.
+    try {
+      const open = await stripe.checkout.sessions.list({ customer: customerId, status: "open", limit: 20 });
+      for (const openSession of open?.data || []) {
+        await stripe.checkout.sessions.expire(openSession.id);
+      }
+    } catch (error) {
+      logError("checkout:expire-open-sessions", error);
+    }
+
     let session;
     try {
       session = await stripe.checkout.sessions.create({
@@ -2211,9 +2225,30 @@ router.post(
 
     const ok = await bcrypt.compare(pin, panicHash);
     if (!ok) return res.status(401).json({ ok: false, error: "invalid_pin" });
-    if (!consumeEmergencyDispatchQuota(userId, res)) return;
+
+    const quota = takeEmergencyDispatchQuota(userId);
+    if (quota.status === "user_limited") {
+      res.setHeader("Retry-After", String(quota.retryAfter));
+      res.setHeader("Cache-Control", "no-store");
+      return res.status(429).json({ ok: false, error: "emergency_rate_limited" });
+    }
 
     try {
+      if (quota.status === "global_limited") {
+        // Too many emergencies platform-wide to deliver inline. Record the
+        // trigger so the dispatcher delivers it within about a minute, rather
+        // than refusing this person's emergency.
+        await insertEmergencyTriggerJob(pool, {
+          userId,
+          reason: "manual",
+          requestMeta: {
+            ip: req.ip,
+            userAgent: req.headers["user-agent"],
+          },
+        });
+        return res.json({ ok: true, queuedContacts: 0, deliveredContacts: 0, failedContacts: 0, deferred: true });
+      }
+
       const out = await queueAndDeliverEmergency(pool, {
         userId,
         reason: "manual",
@@ -3150,31 +3185,48 @@ async function stripeWebhookHandler(req, res) {
     if (event.type === "checkout.session.completed") {
       const session = event.data.object;
       const subscriptionId = session?.subscription ? String(session.subscription) : "";
-      let userId = session?.client_reference_id ? String(session.client_reference_id) : "";
-
-      if (!userId && subscriptionId) {
-        const sub = await stripe.subscriptions.retrieve(subscriptionId);
-        userId = sub?.metadata?.user_id ? String(sub.metadata.user_id) : "";
+      const sub = subscriptionId ? await stripe.subscriptions.retrieve(subscriptionId) : null;
+      const metadataUserId = sub?.metadata?.user_id ? String(sub.metadata.user_id) : "";
+      let userId = session?.client_reference_id ? String(session.client_reference_id) : metadataUserId;
+      if (userId && metadataUserId && metadataUserId !== userId) {
+        logError("stripe:checkout-user-mismatch", new Error(`subscription ${subscriptionId}`));
+        userId = "";
       }
 
-      if (userId && subscriptionId) {
-        await pool.query("UPDATE billing_profiles SET stripe_subscription_id = ?, status = 'active' WHERE user_id = ?", [
-          subscriptionId,
-          String(userId),
-        ]);
+      // Grant the plan this subscription was bought for. billing_profiles holds
+      // whichever plan the account last opened a checkout for, which can be a
+      // bigger plan from another tab that was never paid for.
+      const plan = planFromSubscription(sub);
+
+      if (userId && subscriptionId && plan) {
+        await pool.query(
+          `UPDATE billing_profiles SET stripe_subscription_id = ?, status = 'active',
+             storage_limit_gb = ?, checkin_frequency = ?, billing_interval = ?,
+             amount_cents = COALESCE(?, amount_cents)
+           WHERE user_id = ?`,
+          [subscriptionId, plan.storageGb, plan.checkinFrequency, plan.billingInterval, plan.amountCents, String(userId)]
+        );
         await pool.query(
           `INSERT INTO billing_entitlements
              (user_id, provider, external_subscription_id, status, storage_limit_gb,
               checkin_frequency, billing_interval)
-           SELECT user_id, 'stripe', ?, 'active', storage_limit_gb, checkin_frequency, billing_interval
-           FROM billing_profiles WHERE user_id = ?
+           VALUES (?, 'stripe', ?, 'active', ?, ?, ?)
            ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), status = 'active',
              storage_limit_gb = VALUES(storage_limit_gb),
              checkin_frequency = VALUES(checkin_frequency),
              billing_interval = VALUES(billing_interval)`,
-          [subscriptionId, String(userId)]
+          [String(userId), subscriptionId, plan.storageGb, plan.checkinFrequency, plan.billingInterval]
         );
         await refreshAggregateBillingStatus(pool, userId);
+      } else if (userId && subscriptionId) {
+        // Every checkout this backend creates records the plan in the
+        // subscription metadata. Without it, don't guess a plan: leave the
+        // account as it is and flag it, so it can be checked in Stripe.
+        logError("stripe:checkout-plan-missing", new Error(`subscription ${subscriptionId}`));
+        await pool.query("UPDATE billing_profiles SET stripe_subscription_id = ? WHERE user_id = ?", [
+          subscriptionId,
+          String(userId),
+        ]);
       }
     }
 
@@ -3196,6 +3248,10 @@ async function stripeWebhookHandler(req, res) {
       if (status === "canceled") mapped = "paused";
 
       const periodEnd = sub?.current_period_end ? new Date(Number(sub.current_period_end) * 1000) : null;
+      // This event can arrive before checkout.session.completed. Take the plan
+      // from the subscription itself so the entitlement never falls back to
+      // whatever plan billing_profiles last held.
+      const plan = planFromSubscription(sub);
 
       if (userId) {
         await pool.query("UPDATE billing_profiles SET status = ?, current_period_end = ? WHERE user_id = ?", [
@@ -3205,11 +3261,18 @@ async function stripeWebhookHandler(req, res) {
         ]);
         await pool.query(
           `INSERT INTO billing_entitlements
-             (user_id, provider, external_subscription_id, status, current_period_end)
-           VALUES (?, 'stripe', ?, ?, ?)
+             (user_id, provider, external_subscription_id, status, current_period_end,
+              storage_limit_gb, checkin_frequency, billing_interval)
+           VALUES (?, 'stripe', ?, ?, ?, ?, ?, ?)
            ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), status = VALUES(status),
-             current_period_end = VALUES(current_period_end)`,
-          [String(userId), String(sub.id), mapped === "active" ? "active" : "inactive", periodEnd]
+             current_period_end = VALUES(current_period_end),
+             storage_limit_gb = COALESCE(VALUES(storage_limit_gb), storage_limit_gb),
+             checkin_frequency = COALESCE(VALUES(checkin_frequency), checkin_frequency),
+             billing_interval = COALESCE(VALUES(billing_interval), billing_interval)`,
+          [
+            String(userId), String(sub.id), mapped === "active" ? "active" : "inactive", periodEnd,
+            plan ? plan.storageGb : null, plan ? plan.checkinFrequency : null, plan ? plan.billingInterval : null,
+          ]
         );
         await refreshAggregateBillingStatus(pool, userId);
       }

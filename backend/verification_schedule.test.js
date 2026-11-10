@@ -3,7 +3,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const scheduleFunctions = require('./checkin_schedule');
-const source = fs.readFileSync(require.resolve('./auth.js'), 'utf8');
+// Normalize line endings so the route slicing below also works on Windows checkouts.
+const source = fs.readFileSync(require.resolve('./auth.js'), 'utf8').replace(/\r\n/g, '\n');
 const schedule = { mode:'days', interval:3, timeZone:'America/Chicago', startDate:'2026-10-22', times:['09:00'] };
 const now = new Date('2026-10-22T15:00:00Z');
 function setup({ paid = 'daily', existing = null } = {}) {
