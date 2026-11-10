@@ -31,6 +31,8 @@ const gb = (bytes: number) => (bytes / 1024 ** 3).toLocaleString("en-US", { maxi
 const errorMessage = (error: unknown) => error instanceof ApiError && error.status === 403 ? "This account does not have admin access."
   : error instanceof ApiError && error.status === 429 ? "Too many attempts. Please wait before trying again."
   : error instanceof ApiError && error.code === "invalid_credentials" ? "The email or password is incorrect."
+  : error instanceof ApiError && error.code === "totp_required" ? "Enter the 6-digit code from your authenticator app."
+  : error instanceof ApiError && error.code === "invalid_totp" ? "That authenticator code is incorrect or was already used. Wait for the next code and try again."
   : "Could not load this information. Please try again.";
 
 function Stat({ label, value, detail }: { label: string; value: string; detail?: string }) {
@@ -44,6 +46,7 @@ export default function AdminPage() {
   const [busy, setBusy] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [data, setData] = useState<Customers | null>(null);
   const [report, setReport] = useState<ReportState | null>(null);
@@ -111,9 +114,9 @@ export default function AdminPage() {
       const response = await fetch("/auth/login", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password }) });
       const body = await response.json();
       if (!response.ok) throw new ApiError(response.status, body.error);
-      await api("/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password }) });
+      await api("/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password, code }) });
       setPassword(""); setAuthorized(true); navigate("/admin", { replace: true });
-    } catch (e) { setError(errorMessage(e)); } finally { setPassword(""); setBusy(false); }
+    } catch (e) { setError(errorMessage(e)); } finally { setPassword(""); setCode(""); setBusy(false); }
   }
 
   async function logout() {
@@ -132,6 +135,7 @@ export default function AdminPage() {
       <form onSubmit={login} className="space-y-5">
         <div className="space-y-2"><label htmlFor="admin-email" className="text-sm">Email</label><Input id="admin-email" type="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} required /></div>
         <div className="space-y-2"><label htmlFor="admin-password" className="text-sm">Password</label><Input id="admin-password" type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} required /></div>
+        <div className="space-y-2"><label htmlFor="admin-code" className="text-sm">Authenticator code</label><Input id="admin-code" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} aria-describedby="admin-code-help" value={code} onChange={e => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))} /><p id="admin-code-help" className="text-xs text-muted-foreground">The 6-digit code from your authenticator app, if two-step sign-in is set up.</p></div>
         {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
         <Button className="w-full" disabled={busy}>{busy ? "Signing in…" : "Sign in to admin"}</Button>
       </form>

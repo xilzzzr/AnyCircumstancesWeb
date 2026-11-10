@@ -40,6 +40,19 @@ function checkoutTerms(promotion) {
   };
 }
 
+// Ordinary Stripe promotion codes give their discount (never a trial). A code
+// that makes the plan free is accepted only if it is marked in Stripe with the
+// metadata uac_allow_free = "true", so a forgotten 100%-off test code in the
+// live account can't be guessed and redeemed on the site.
+async function checkOrdinaryPromotion(stripe, promo) {
+  const coupon = couponFromCode(promo);
+  const resolved = typeof coupon === "string" ? await stripe.coupons.retrieve(coupon) : coupon;
+  if (!resolved || typeof resolved !== "object") return null;
+  const free = Number(resolved.percent_off || 0) >= 100;
+  if (free && promo.metadata?.uac_allow_free !== "true") return null;
+  return promo;
+}
+
 async function findPromotion(stripe, input) {
   const code = String(input || "").trim().toUpperCase();
   if (!/^[A-Z0-9]{4,40}$/.test(code)) return null;
@@ -54,7 +67,7 @@ async function findPromotion(stripe, input) {
   ) || null;
   if (!promo) return null;
 
-  if (promo.metadata?.uac_offer !== OFFER) return promo;
+  if (promo.metadata?.uac_offer !== OFFER) return checkOrdinaryPromotion(stripe, promo);
 
   // The SDK can return an ID rather than an expanded coupon.
   // Reject a marked code unless the server can verify every offer term.

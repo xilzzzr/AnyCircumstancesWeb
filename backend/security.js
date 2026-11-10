@@ -10,15 +10,19 @@ function stableHash(value) {
   return crypto.createHash("sha256").update(String(value || "")).digest("hex").slice(0, 32);
 }
 
+// Signed-in requests are limited per user. Requests without a valid token are
+// limited per IP, not in one shared "anonymous" bucket that anyone could fill
+// to make everyone whose session expired see "too many requests".
 function authenticatedUserKey(req) {
+  const anonymous = req?.ip ? `ip:${String(req.ip)}` : "anonymous";
   const token = req.cookies?.access_token ? String(req.cookies.access_token) : "";
   const secret = String(process.env.JWT_ACCESS_SECRET || "");
-  if (!token || !secret) return "anonymous";
+  if (!token || !secret) return anonymous;
   try {
     const payload = jwt.verify(token, secret, { algorithms: ["HS256"] });
-    return payload?.sub ? `user:${String(payload.sub)}` : "anonymous";
+    return payload?.sub ? `user:${String(payload.sub)}` : anonymous;
   } catch {
-    return "anonymous";
+    return anonymous;
   }
 }
 
@@ -71,10 +75,13 @@ function createFixedWindowLimiter({ key, ...options }) {
   };
 }
 
-function rejectCrossSiteMutation(allowedOrigins) {
+function rejectCrossSiteMutation(allowedOrigins, { exemptPaths = [] } = {}) {
   const allowed = new Set(allowedOrigins);
+  const exempt = new Set(exemptPaths);
   return function csrfOriginGuard(req, res, next) {
     if (["GET", "HEAD", "OPTIONS"].includes(req.method)) return next();
+    // Only for routes authorized solely by a token in the URL, never by cookies.
+    if (exempt.has(req.path)) return next();
 
     const fetchSite = String(req.headers["sec-fetch-site"] || "").toLowerCase();
     if (fetchSite === "cross-site") {

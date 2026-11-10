@@ -7,8 +7,18 @@ const test = require("node:test");
 const {
   ENVIRONMENT_PATHS,
   REQUIRED_BACKEND_ENV_VARS,
+  backendEnvironmentWarnings,
   validateBackendEnvironment,
 } = require("./environment");
+
+test("production warns, without refusing to start, when the old escrow key is still in the API environment", () => {
+  const warnings = backendEnvironmentWarnings({ NODE_ENV: "production", LEGACY_ESCROW_PRIVATE_KEY_PEM: "-----BEGIN PRIVATE KEY-----" });
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /LEGACY_ESCROW_PRIVATE_KEY_PEM/);
+  assert.doesNotMatch(warnings[0], /BEGIN PRIVATE KEY/);
+  assert.deepEqual(backendEnvironmentWarnings({ NODE_ENV: "production" }), []);
+  assert.deepEqual(backendEnvironmentWarnings({ NODE_ENV: "development", LEGACY_ESCROW_PRIVATE_KEY_PEM: "x" }), []);
+});
 
 test("environment paths are absolute and independent of the working directory", () => {
   assert.deepEqual(ENVIRONMENT_PATHS, [

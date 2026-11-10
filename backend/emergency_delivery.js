@@ -176,9 +176,14 @@ async function queueEmergencyDispatch(pool, {
 async function createShareLinks(pool, contactId, userId, fileIds) {
   if (!fileIds.length) return { links: [], tokenHashes: [] };
   const placeholders = fileIds.map(() => "?").join(",");
+  // Only files the owner still has AND still assigns to this contact. The
+  // queued list is a snapshot; files removed since then must not be sent.
   const [rows] = await pool.query(
-    `SELECT id FROM files WHERE user_id = ? AND id IN (${placeholders})`,
-    [String(userId), ...fileIds]
+    `SELECT f.id
+     FROM files f
+     JOIN emergency_contact_file_assignments a ON a.file_id = f.id AND a.contact_id = ?
+     WHERE f.user_id = ? AND f.id IN (${placeholders})`,
+    [String(contactId), String(userId), ...fileIds]
   );
   const validIds = new Set((rows || []).map((row) => String(row.id)));
   const links = [];
@@ -207,6 +212,54 @@ async function revokeUnsentShareLinks(pool, contactId, tokenHashes) {
      WHERE contact_id = ? AND used_at IS NULL AND token_hash IN (${placeholders})`,
     [String(contactId), ...tokenHashes]
   );
+}
+
+async function markDispatchDelivered(pool, dispatchId) {
+  await pool.query(
+    `UPDATE verification_emergency_contact_dispatches
+     SET status='delivered', delivered_at=UTC_TIMESTAMP(3), last_error=NULL
+     WHERE id = ? AND status='processing'`,
+    [dispatchId]
+  );
+}
+
+// The table has no "cancelled" status; a cancelled delivery is stored as
+// failed with its retries used up, so it is never picked up again.
+const CANCELLED_PREFIX = "cancelled:";
+
+async function cancelDispatch(pool, dispatchId, reason) {
+  await pool.query(
+    `UPDATE verification_emergency_contact_dispatches
+     SET status='failed', attempts=?, last_error=?
+     WHERE id = ? AND status='processing'`,
+    [MAX_ATTEMPTS, `${CANCELLED_PREFIX}${reason}`.slice(0, 255), dispatchId]
+  );
+}
+
+// Cancels deliveries to a contact that haven't gone out yet, for example when
+// the owner changes that contact's email address. Without this, a queued
+// delivery would wait and go out whenever the new address was confirmed.
+async function cancelPendingDispatchesForContact(db, contactId, reason) {
+  await db.query(
+    `UPDATE verification_emergency_contact_dispatches
+     SET status='failed', attempts=?, last_error=?
+     WHERE contact_id = ? AND status IN ('pending','failed','processing')`,
+    [MAX_ATTEMPTS, `${CANCELLED_PREFIX}${reason}`.slice(0, 255), String(contactId)]
+  );
+}
+
+// A scheduled release exists because the owner missed a check-in. If they
+// have checked in since that deadline, anything not yet sent is cancelled.
+// Panic and duress releases are never cancelled by a later check-in: a
+// coerced owner can be made to check in normally afterwards.
+async function scheduledReleaseCancelled(pool, dispatch) {
+  if (String(dispatch.reason || "") !== "scheduled") return false;
+  const [rows] = await pool.query(
+    "SELECT last_checkin_at FROM verification_settings WHERE user_id = ? LIMIT 1",
+    [String(dispatch.user_id)]
+  );
+  const lastCheckin = rows?.[0]?.last_checkin_at;
+  return Boolean(lastCheckin && new Date(lastCheckin).getTime() > new Date(dispatch.due_at).getTime());
 }
 
 async function maybeMarkDispatchComplete(pool, userId, dueAt) {
@@ -359,10 +412,24 @@ async function deliverPendingEmergencyDispatches(pool, { userId = null, dueAt = 
       continue;
     }
 
+    // Re-check right before sending: the owner may have checked in since this
+    // scheduled release was queued, or a retry may come hours later.
+    if (await scheduledReleaseCancelled(pool, dispatch)) {
+      await cancelDispatch(pool, dispatch.id, "checked_in");
+      console.warn("[EMERGENCY_DELIVERY_CANCELLED]", { ...logContext, reason: "checked_in" });
+      continue;
+    }
+
     let created = { links: [], tokenHashes: [] };
+    let sent = false;
     try {
       created = await createShareLinks(pool, dispatch.contact_id, dispatch.user_id, fileIds);
-      if (!created.links.length) throw new Error("no_available_files");
+      if (!created.links.length) {
+        // Every file was deleted or unassigned since the release was queued.
+        await cancelDispatch(pool, dispatch.id, "no_assigned_files");
+        console.warn("[EMERGENCY_DELIVERY_CANCELLED]", { ...logContext, reason: "no_assigned_files" });
+        continue;
+      }
 
       const rendered = renderEmergencyEmail({
         name: String(dispatch.name || ""),
@@ -379,16 +446,24 @@ async function deliverPendingEmergencyDispatches(pool, { userId = null, dueAt = 
         text: rendered.text,
         html: rendered.html,
       });
+      sent = true;
 
-      await pool.query(
-        `UPDATE verification_emergency_contact_dispatches
-         SET status='delivered', delivered_at=UTC_TIMESTAMP(3), last_error=NULL
-         WHERE id = ? AND status='processing'`,
-        [dispatch.id]
-      );
+      await markDispatchDelivered(pool, dispatch.id);
       delivered += 1;
       await maybeMarkDispatchComplete(pool, dispatch.user_id, dispatch.due_at);
     } catch (error) {
+      if (sent) {
+        // The email went out, so its links must keep working: never revoke
+        // them here. Try once more to record the delivery so it isn't sent
+        // a second time.
+        await markDispatchDelivered(pool, dispatch.id).catch(() => null);
+        console.error("[EMERGENCY_DELIVERY_RECORD_FAILED]", {
+          ...logContext,
+          error: String(error?.code || error?.message || error || "failed").slice(0, 120),
+        });
+        delivered += 1;
+        continue;
+      }
       await revokeUnsentShareLinks(pool, dispatch.contact_id, created.tokenHashes).catch(() => null);
       await pool.query(
         `UPDATE verification_emergency_contact_dispatches
@@ -431,6 +506,7 @@ async function queueAndDeliverEmergency(pool, options) {
 }
 
 module.exports = {
+  cancelPendingDispatchesForContact,
   deliverPendingEmergencyDispatches,
   insertEmergencyTriggerJob,
   processEmergencyTriggerJobs,

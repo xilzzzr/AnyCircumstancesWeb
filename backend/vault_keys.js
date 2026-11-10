@@ -1,7 +1,10 @@
 const crypto = require('crypto');
 
+// New vault keys use 600,000 PBKDF2 iterations; keys created earlier use 200,000.
+const SUPPORTED_ITERATIONS = new Set([200000, 600000]);
+
 function validateBundle(input) {
-  if (!input || input.version !== 1 || input.kdf !== 'PBKDF2-SHA256' || input.iterations !== 200000 || input.private_key_format !== 'pkcs8') {
+  if (!input || input.version !== 1 || input.kdf !== 'PBKDF2-SHA256' || !SUPPORTED_ITERATIONS.has(input.iterations) || input.private_key_format !== 'pkcs8') {
     throw new Error('invalid_vault_key');
   }
   const bytes = (name, min, max) => {
@@ -18,7 +21,7 @@ function validateBundle(input) {
   bytes('salt', 16, 16);
   bytes('iv', 12, 12);
   return {
-    version: 1, kdf: 'PBKDF2-SHA256', iterations: 200000, private_key_format: 'pkcs8',
+    version: 1, kdf: 'PBKDF2-SHA256', iterations: input.iterations, private_key_format: 'pkcs8',
     public_key: publicKey.toString('base64'), encrypted_private_key: input.encrypted_private_key,
     salt: input.salt, iv: input.iv,
   };

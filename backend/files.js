@@ -304,6 +304,19 @@ router.post(
     const [frows] = await pool.query("SELECT id FROM files WHERE id = ? AND user_id = ? LIMIT 1", [fileId, req.userId]);
     if (!frows || !frows.length) return res.status(404).json({ ok: false, error: "file_not_found" });
 
+    // RSA-OAEP ciphertexts are randomized, so a genuine escrow never matches
+    // another file's. A match means someone copied another user's escrowed key
+    // (for example from a database dump) to have it unwrapped through their
+    // own file and share link.
+    const [reused] = await pool.query(
+      "SELECT file_id FROM file_key_escrows WHERE enc_key_b64 = ? AND file_id <> ? LIMIT 1",
+      [encKeyB64, fileId]
+    );
+    if (reused?.length) {
+      console.warn("[ESCROW_CIPHERTEXT_REUSED]", { userId: req.userId, fileId });
+      return res.status(409).json({ ok: false, error: "escrow_rejected" });
+    }
+
     await pool.query(
       "INSERT INTO file_key_escrows (file_id, alg, enc_key_b64, escrow_key_id) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE alg=VALUES(alg), enc_key_b64=VALUES(enc_key_b64), escrow_key_id=VALUES(escrow_key_id)",
       [fileId, alg, encKeyB64, keyRef]
@@ -932,6 +945,15 @@ router.post(
       return res.status(500).json({ ok: false, error: "invalid_envelope_meta" });
     }
 
+    // Audit trail for every use of the emergency-release key: which file, for
+    // which contact, through which share link and delivery. Ids only.
+    const keyUse = {
+      fileId: String(share.file_id),
+      contactId: String(share.contact_id),
+      shareTokenId: String(shareSession.tid || ""),
+      deliveryGroupId: share.delivery_group_id ? String(share.delivery_group_id) : null,
+      escrowKeyId: storedEscrowKeyId,
+    };
     let envelope;
     try {
       envelope = await buildContactEnvelopeFromEscrow({
@@ -941,8 +963,10 @@ router.post(
         contactPublicKeyPem: normalizedPublicKey,
       });
     } catch {
+      console.error("[ESCROW_KEY_USE_FAILED]", keyUse);
       return res.status(500).json({ ok: false, error: "envelope_create_failed" });
     }
+    console.log("[ESCROW_KEY_USED]", keyUse);
 
     return res.json({
       ok: true,

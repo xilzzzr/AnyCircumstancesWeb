@@ -158,12 +158,26 @@ test("emergency link is redeemed once into a short-lived HttpOnly share session"
   assert.equal(refreshWithSession.status, 200);
   assert.equal((await refreshWithSession.json()).ok, true);
 
-  const envelopeResponse = await fetch(base + "/share-get-contact-envelope", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Cookie: cookie },
-    body: JSON.stringify({ public_key: publicB64 }),
-  });
+  const auditLines = [];
+  const originalLog = console.log;
+  console.log = (...args) => { auditLines.push(args); };
+  let envelopeResponse;
+  try {
+    envelopeResponse = await fetch(base + "/share-get-contact-envelope", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ public_key: publicB64 }),
+    });
+  } finally {
+    console.log = originalLog;
+  }
   assert.equal(envelopeResponse.status, 200);
+  // Every unwrap of the emergency-release key leaves an audit line with ids only.
+  const audit = auditLines.find((args) => args[0] === "[ESCROW_KEY_USED]");
+  assert.ok(audit, "escrow key use was logged");
+  assert.equal(audit[1].fileId, "users/1/file");
+  assert.equal(audit[1].contactId, "7");
+  assert.equal(audit[1].shareTokenId, "42");
   assert.equal(envelopeResponse.headers.get("cache-control"), "no-store");
   const envelope = await envelopeResponse.json();
   assert.equal(envelope.ok, true);
