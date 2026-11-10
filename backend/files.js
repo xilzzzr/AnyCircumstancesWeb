@@ -106,12 +106,6 @@ function getShareSession(req) {
   }
 }
 
-function shareExpiresAt() {
-  const requested = Number(process.env.SHARE_LINK_TTL_DAYS || 30);
-  const days = Number.isInteger(requested) ? Math.max(1, Math.min(requested, 90)) : 30;
-  return new Date(Date.now() + days * 24 * 60 * 60 * 1000);
-}
-
 function getPool() {
   const a = require("./auth");
   return a.authPool;
@@ -164,7 +158,8 @@ async function requireUser(req, res, next) {
     locked ||
     Number(payload.sv || 0) !== Number(user.session_version || 1)
   ) {
-    return res.status(401).json({ ok: false, error: locked ? "account_temporarily_locked" : "invalid_session" });
+    // A duress-locked account must look exactly like a deleted one.
+    return res.status(401).json({ ok: false, error: "invalid_session" });
   }
 
   req.userId = userId;
@@ -705,55 +700,10 @@ require("./vault_documents").registerDocumentRoutes(router, {
   deleteDocument: ({ bucket, storageKey }) => getS3().send(new DeleteObjectCommand({ Bucket: bucket, Key: storageKey })),
 });
 
-router.post(
-  "/create-contact-share-link",
-  requireUser,
-  requirePaid,
-  requireVaultAuthorization,
-  asyncHandler(async (req, res) => {
-    const contactId = Number(req.body?.contact_id || 0);
-    const fileId = String(req.body?.file_id || "");
-
-    if (!contactId) return res.status(400).json({ ok: false, error: "missing_contact_id" });
-    if (!fileId) return res.status(400).json({ ok: false, error: "missing_file_id" });
-
-    const prefix = "users/" + req.userId + "/";
-    if (!fileId.startsWith(prefix)) return res.status(403).json({ ok: false, error: "forbidden" });
-
-    const pool = getPool();
-
-    const [crows] = await pool.query("SELECT id, user_id, email, verified_at FROM emergency_contacts WHERE id = ? LIMIT 1", [
-      contactId,
-    ]);
-    if (!crows || !crows.length) return res.status(404).json({ ok: false, error: "contact_not_found" });
-    if (String(crows[0].user_id) !== String(req.userId)) return res.status(403).json({ ok: false, error: "forbidden" });
-    if (!crows[0].verified_at) return res.status(409).json({ ok: false, error: "contact_not_verified" });
-
-    const [arows] = await pool.query(
-      "SELECT 1 FROM emergency_contact_file_assignments WHERE contact_id = ? AND file_id = ? LIMIT 1",
-      [contactId, fileId]
-    );
-    if (!arows || !arows.length) return res.status(400).json({ ok: false, error: "file_not_assigned_to_contact" });
-
-    const token = crypto.randomBytes(32).toString("hex");
-    const tokenHash = sha256Hex(token);
-    await pool.query("INSERT INTO contact_file_share_tokens (contact_id, file_id, token_hash, expires_at) VALUES (?, ?, ?, ?)", [
-      contactId,
-      fileId,
-      tokenHash,
-      shareExpiresAt()
-    ]);
-
-    const publicBase = String(process.env.PUBLIC_APP_BASE_URL || "https://anycircumstances.com").replace(/\/+$/, "");
-    const link = publicBase + "/share#token=" + encodeURIComponent(token);
-
-    return res.json({
-      ok: true,
-      link,
-      contact: { id: crows[0].id, email: crows[0].email, verified_at: crows[0].verified_at },
-    });
-  })
-);
+// Share links are created only by emergency delivery (emergency_delivery.js),
+// which emails them to the contact. There is deliberately no route that hands
+// a share link back to the account holder: with it, a session and PIN were
+// enough to have the server unwrap file keys outside any emergency.
 
 router.post(
   "/share-lookup",

@@ -1,6 +1,7 @@
 const crypto = require("crypto");
 const nodemailer = require("nodemailer");
 const { emailSender, renderEmergencyEmail, emergencyEmailSubject } = require("./emails");
+const { MAX_ATTEMPTS, retryDueSql, retryGapMinutes } = require("./emergency_retry");
 
 function sha256Hex(input) {
   return crypto.createHash("sha256").update(String(input)).digest("hex");
@@ -31,6 +32,23 @@ function getTransporter() {
   const secure = String(process.env.SMTP_SECURE || "").toLowerCase() === "true" || port === 465;
   cachedTransporter = nodemailer.createTransport({ host, port, secure, auth: { user, pass } });
   return cachedTransporter;
+}
+
+// One log line per failed attempt, plus a distinct GAVE_UP line once retries
+// are exhausted, so monitoring can alert on releases that never went out.
+// Logs ids and the error only, never addresses or links.
+function logRetry(label, context, attempt, error) {
+  const exhausted = attempt >= MAX_ATTEMPTS;
+  const message = String(error?.code || error?.message || error || "failed")
+    .replace(/[^\s@<>"']+@[^\s@<>"']+/g, "[address]")
+    .slice(0, 120);
+  console.error(exhausted ? label.replace("_FAILED]", "_GAVE_UP]") : label, {
+    ...context,
+    attempt,
+    maxAttempts: MAX_ATTEMPTS,
+    nextRetryMinutes: exhausted ? null : retryGapMinutes(attempt),
+    error: message,
+  });
 }
 
 function sameInstant(a, b) {
@@ -210,10 +228,7 @@ async function maybeMarkDispatchComplete(pool, userId, dueAt) {
 
 async function processEmergencyTriggerJobs(pool, { jobId = null, userId = null, limit = 50 } = {}) {
   const params = [];
-  const where = [
-    "(status IN ('pending','failed') OR (status='processing' AND updated_at < DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 10 MINUTE)))",
-    "attempts < 10",
-  ];
+  const where = [retryDueSql("")];
   if (jobId !== null) {
     where.push("id = ?");
     params.push(Number(jobId));
@@ -225,7 +240,7 @@ async function processEmergencyTriggerJobs(pool, { jobId = null, userId = null, 
   params.push(Math.max(1, Math.min(200, Number(limit) || 50)));
 
   const [jobs] = await pool.query(
-    `SELECT id, user_id, reason, request_ip, request_user_agent, created_at
+    `SELECT id, user_id, reason, request_ip, request_user_agent, created_at, attempts
      FROM emergency_trigger_jobs
      WHERE ${where.join(" AND ")}
      ORDER BY created_at, id
@@ -241,12 +256,7 @@ async function processEmergencyTriggerJobs(pool, { jobId = null, userId = null, 
     const [claim] = await pool.query(
       `UPDATE emergency_trigger_jobs
        SET status='processing', attempts=attempts+1, last_error=NULL
-       WHERE id = ?
-         AND attempts < 10
-         AND (
-           status IN ('pending','failed')
-           OR (status='processing' AND updated_at < DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 10 MINUTE))
-         )`,
+       WHERE id = ? AND ${retryDueSql("")}`,
       [job.id]
     );
     if (!claim?.affectedRows) continue;
@@ -276,6 +286,7 @@ async function processEmergencyTriggerJobs(pool, { jobId = null, userId = null, 
          WHERE id = ? AND status='processing'`,
         [String(error?.message || error || "trigger_failed").slice(0, 255), job.id]
       );
+      logRetry("[EMERGENCY_TRIGGER_FAILED]", { jobId: job.id, userId: job.user_id }, Number(job.attempts || 0) + 1, error);
       failed += 1;
     }
   }
@@ -285,10 +296,7 @@ async function processEmergencyTriggerJobs(pool, { jobId = null, userId = null, 
 
 async function deliverPendingEmergencyDispatches(pool, { userId = null, dueAt = null, limit = 50 } = {}) {
   const params = [];
-  const where = [
-    "(d.status IN ('pending','failed') OR (d.status = 'processing' AND d.updated_at < DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 10 MINUTE)))",
-    "d.attempts < 5",
-  ];
+  const where = [retryDueSql("d.")];
   if (userId !== null) {
     where.push("d.user_id = ?");
     params.push(String(userId));
@@ -300,7 +308,7 @@ async function deliverPendingEmergencyDispatches(pool, { userId = null, dueAt = 
   params.push(Math.max(1, Math.min(200, Number(limit) || 50)));
 
   const [dispatches] = await pool.query(
-    `SELECT d.id, d.user_id, d.contact_id, d.due_at, d.reason, d.file_ids_json,
+    `SELECT d.id, d.user_id, d.contact_id, d.due_at, d.reason, d.file_ids_json, d.attempts,
             c.email, c.name, c.public_key, u.email AS owner_email, u.display_name AS owner_name
      FROM verification_emergency_contact_dispatches d
      JOIN users u ON u.id = d.user_id
@@ -327,15 +335,12 @@ async function deliverPendingEmergencyDispatches(pool, { userId = null, dueAt = 
     const [claim] = await pool.query(
       `UPDATE verification_emergency_contact_dispatches
        SET status='processing', attempts=attempts+1, last_error=NULL
-       WHERE id = ?
-         AND attempts < 5
-         AND (
-           status IN ('pending','failed')
-           OR (status='processing' AND updated_at < DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 10 MINUTE))
-         )`,
+       WHERE id = ? AND ${retryDueSql("")}`,
       [dispatch.id]
     );
     if (!claim?.affectedRows) continue;
+    const attempt = Number(dispatch.attempts || 0) + 1;
+    const logContext = { dispatchId: dispatch.id, userId: dispatch.user_id, contactId: dispatch.contact_id };
 
     let fileIds;
     try {
@@ -349,6 +354,7 @@ async function deliverPendingEmergencyDispatches(pool, { userId = null, dueAt = 
         "UPDATE verification_emergency_contact_dispatches SET status='failed', last_error='invalid_file_list' WHERE id = ? AND status='processing'",
         [dispatch.id]
       );
+      logRetry("[EMERGENCY_DELIVERY_FAILED]", logContext, attempt, new Error("invalid_file_list"));
       failed += 1;
       continue;
     }
@@ -390,6 +396,7 @@ async function deliverPendingEmergencyDispatches(pool, { userId = null, dueAt = 
          WHERE id = ? AND status='processing'`,
         [String(error?.message || error || "send_failed").slice(0, 255), dispatch.id]
       );
+      logRetry("[EMERGENCY_DELIVERY_FAILED]", logContext, attempt, error);
       failed += 1;
     }
   }
