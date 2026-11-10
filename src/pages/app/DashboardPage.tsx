@@ -106,7 +106,7 @@ function errorInfo(e: unknown) {
 function formatRelativeTime(targetIso: string) {
   const now = Date.now();
   const target = new Date(targetIso).getTime();
-  if (Number.isNaN(target)) return "—";
+  if (Number.isNaN(target)) return "Unknown time";
 
   const diffMs = target - now;
   const abs = Math.abs(diffMs);
@@ -134,7 +134,7 @@ function formatFrequencyLabel(freq: Frequency) {
 }
 
 function formatBytes(bytes: number) {
-  if (!Number.isFinite(bytes) || bytes < 0) return "—";
+  if (!Number.isFinite(bytes) || bytes < 0) return "Unknown size";
   if (bytes < 1024) return `${Math.round(bytes)} B`;
   if (bytes < 1024 * 1024) return `${Math.round((bytes / 1024) * 10) / 10} KB`;
   if (bytes < 1024 * 1024 * 1024) return `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MB`;
@@ -328,7 +328,7 @@ export function DashboardPage() {
   }, [status]);
 
   const scheduleText = useMemo(() => {
-    if (!settings) return "—";
+    if (!settings) return "Not set";
     return formatFrequencyLabel(settings.frequency);
   }, [settings]);
 
@@ -372,10 +372,10 @@ export function DashboardPage() {
   return (
     <div className="dashboard-editorial px-5 py-8 lg:px-10 lg:py-12">
       <div className="dashboard-intro">
-        <div className="micro-label"><span className="status-dot" /> PERSONAL SECURITY SYSTEM · ONLINE</div>
-        <h1>Everything important,<br /><span>held in readiness.</span></h1>
-        <p>Welcome back, {displayName}. Your vault, verification schedule, and emergency network are standing by.</p>
-        <Link to="/onboarding" className="mt-4 inline-flex min-h-11 items-center text-sm text-primary hover:underline">Continue your setup →</Link>
+        <div className="micro-label"><span className="status-dot" /> DASHBOARD</div>
+        <h1>Dashboard</h1>
+        <p>Signed in as {displayName}. Your next check-in, storage and emergency contacts are below.</p>
+        <Link to="/onboarding" className="mt-4 inline-flex min-h-11 items-center gap-1 text-sm text-primary hover:underline">Continue your setup <ArrowRight aria-hidden="true" className="h-4 w-4" /></Link>
       </div>
 
       {billingError && (
@@ -403,7 +403,7 @@ export function DashboardPage() {
           <CardContent className="py-4 text-sm">
             <h2 className="font-medium text-foreground">No active plan</h2>
             <p className="text-muted-foreground mt-1">
-              Choose a plan to start storing files. Without an active plan you can’t upload, store or download files, or add emergency contacts. There’s no free plan or trial.
+              Choose a plan to start storing files. Without an active plan you can’t upload, store or download files, or add emergency contacts. There’s no free plan.
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
               <Button asChild size="sm" className="min-h-11">
@@ -452,12 +452,12 @@ export function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="editorial-value">
-              {loading ? "Loading…" : hasVaultUsed ? formatBytes(vaultUsedBytes as number) : "—"}
+              {loading ? "Loading…" : hasVaultUsed ? formatBytes(vaultUsedBytes as number) : "Not available"}
             </div>
 
             <Progress value={hasVaultLimit ? storagePercent : 0} className="h-1.5 mt-2" />
             <p className="text-xs text-muted-foreground mt-1">
-              {hasVaultLimit ? (hasVaultUsed ? `of ${formatBytes(vaultLimitBytes as number)}` : "—") : "—"}
+              {hasVaultLimit ? `Limit: ${formatBytes(vaultLimitBytes as number)}` : "No storage limit available"}
             </p>
 
             <Link to="/app/billing" className="block mt-4">
@@ -527,7 +527,7 @@ export function DashboardPage() {
                     Check-in completed{c.method ? ` • ${c.method === "manual" ? "PIN" : "Email link"}` : ""}
                   </div>
                   <div className="text-xs text-muted-foreground whitespace-nowrap">
-                    {c.checkedInAt ? formatRelativeTime(c.checkedInAt) : "—"}
+                    {c.checkedInAt ? formatRelativeTime(c.checkedInAt) : "Unknown time"}
                   </div>
                 </div>
               ))}

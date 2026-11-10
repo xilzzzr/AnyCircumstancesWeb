@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { CheckCircle2, XCircle, Clock, Loader2 } from "lucide-react";
+import { CheckCircle2, Loader2 } from "lucide-react";
 
 type CheckinRow = {
   id: string;
@@ -112,12 +112,7 @@ export function ActivityPage() {
     run();
   }, [navigate, toast]);
 
-  const stats = useMemo(() => {
-    const completed = history.length;
-    const missed = 0;
-    const total = completed + missed;
-    return { completed, missed, total };
-  }, [history]);
+  const shownCount = history.length;
 
   return (
     <div className="p-6 lg:p-8 space-y-6">
@@ -126,43 +121,21 @@ export function ActivityPage() {
         <p className="text-muted-foreground">Your recent check-in history</p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Card>
-          <CardContent className="flex items-center gap-3 py-4">
-            <div className="h-10 w-10 rounded-lg bg-success/10 flex items-center justify-center">
-              <CheckCircle2 className="h-5 w-5 text-success" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-foreground">{loading ? "—" : stats.completed}</p>
-              <p className="text-sm text-muted-foreground">Completed</p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="flex items-center gap-3 py-4">
-            <div className="h-10 w-10 rounded-lg bg-destructive/10 flex items-center justify-center">
-              <XCircle className="h-5 w-5 text-destructive" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-foreground">{loading ? "—" : stats.missed}</p>
-              <p className="text-sm text-muted-foreground">Missed</p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="flex items-center gap-3 py-4">
-            <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
-              <Clock className="h-5 w-5 text-primary" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-foreground">{loading ? "—" : stats.total}</p>
-              <p className="text-sm text-muted-foreground">Total check-ins</p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      <Card>
+        <CardContent className="flex items-start gap-3 py-4">
+          <div className="h-10 w-10 shrink-0 rounded-lg bg-success/10 flex items-center justify-center">
+            <CheckCircle2 aria-hidden="true" className="h-5 w-5 text-success" />
+          </div>
+          <div>
+            <p className="font-medium text-foreground">
+              {loading ? "Loading check-ins…" : `${shownCount} completed check-in${shownCount === 1 ? "" : "s"} shown`}
+            </p>
+            <p className="text-sm text-muted-foreground">
+              This list shows up to your last 100 completed check-ins. Missed check-ins aren’t recorded here.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

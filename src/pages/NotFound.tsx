@@ -26,7 +26,7 @@ const NotFound = () => {
           <ul className="flex flex-wrap gap-3">
             {helpful.map((link) => (
               <li key={link.href}>
-                <a href={link.href} className="inline-flex min-h-11 items-center rounded-full border px-4 text-sm text-foreground hover:bg-accent">
+                <a href={link.href} className="inline-flex min-h-11 items-center rounded-md border px-4 text-sm text-foreground hover:bg-accent">
                   {link.label}
                 </a>
               </li>

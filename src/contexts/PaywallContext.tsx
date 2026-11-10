@@ -25,7 +25,7 @@ export function PaywallProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<PaywallState>({
     open: false,
     title: "Active plan required",
-    description: `This needs an active plan. There’s no free plan or trial — plans start at ${STARTING_PRICE}/month.`,
+    description: `This needs an active plan. There’s no free plan. Plans start at ${STARTING_PRICE}/month.`,
     returnTo: undefined,
   });
 

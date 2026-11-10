@@ -87,7 +87,7 @@ describe('plan chosen before signup', () => {
   test('onboarding without a pending plan behaves as before', async () => {
     mockServer({ signedIn: true });
     app('/onboarding');
-    await screen.findByRole('heading', { name: 'Make your vault ready.' });
+    await screen.findByRole('heading', { name: 'Finish setting up your account' });
     expect(screen.queryByRole('region', { name: 'The plan you chose' })).toBeNull();
     expect(screen.getByRole('link', { name: /Choose your protection plan/ }).getAttribute('href')).toBe('/app/plan');
   });

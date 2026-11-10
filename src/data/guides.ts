@@ -137,7 +137,7 @@ export const guides: Guide[] = [
     ],
     "category": "Digital Vaults & Emergency Information",
     "ctaVariant": "emergency",
-    "intro": "A digital emergency binder is an organized set of documents and instructions that helps trusted people respond when you cannot. Unlike a paper binder, it can be updated remotely and protected with encryption—but only if storage, access, and recovery are planned carefully."
+    "intro": "A digital emergency binder is an organized set of documents and instructions that helps trusted people respond when you cannot. Unlike a paper binder, it can be updated remotely and protected with encryption, but only if storage, access, and recovery are planned carefully."
   },
   {
     "slug": "important-documents-family-should-know",

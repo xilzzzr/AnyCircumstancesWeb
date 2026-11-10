@@ -104,7 +104,7 @@ export function RecipientsPage() {
                 <li><span className="text-foreground underline underline-offset-4">Open shared file 2</span><br /><span className="break-all text-xs">https://anycircumstances.com/share#token=…</span></li>
               </ol>
             </div>
-            <p><span className="inline-flex min-h-11 items-center rounded-full bg-primary px-5 text-sm font-medium text-primary-foreground">Open shared information</span></p>
+            <p><span className="inline-flex min-h-11 items-center rounded-md bg-primary px-5 text-sm font-medium text-primary-foreground">Open shared information</span></p>
             <div className="rounded-xl border p-4 text-sm">
               <p className="font-medium text-foreground">Secure file access</p>
               <p>Open each link on the device where you want to save the file, then select Open shared file. Each link works once and expires if it is not used. You do not need an account.</p>
@@ -167,7 +167,7 @@ export function RecipientsPage() {
             <Link to="/security#recipients" className="text-primary underline underline-offset-4">how recipients open files</Link>.
           </p>
         </div>
-        <Link to="/how-it-works" className="inline-flex min-h-11 items-center justify-center rounded-full border px-5 text-sm text-foreground hover:bg-accent">
+        <Link to="/how-it-works" className="inline-flex min-h-11 items-center justify-center rounded-md border px-5 text-sm text-foreground hover:bg-accent">
           How check-ins work
         </Link>
       </aside>

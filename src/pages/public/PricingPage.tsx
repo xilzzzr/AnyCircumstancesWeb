@@ -5,7 +5,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { ArrowRight, Calendar, Check, HardDrive, Loader2, Receipt } from "lucide-react";
-import { motion } from "@/components/public/staticMotion";
 import { cn } from "@/lib/utils";
 import { createCheckoutSession } from "@/lib/billingClient";
 import { readPendingPromoCode, savePendingPromoCode, clearPendingPromoCode } from "@/lib/pioneerPromoStorage";
@@ -243,21 +242,16 @@ export function PricingPage() {
             <Link to="/dead-mans-switch" className="underline underline-offset-4 hover:opacity-90">dead man’s switch</Link>
           </div>
           <div className="max-w-3xl mx-auto text-center">
-            <motion.h1
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
+            <h1
               className="text-4xl md:text-5xl font-bold text-vault-foreground mb-6"
             >
               Secure Digital Vault Pricing
-            </motion.h1>
-            <motion.p
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1 }}
+            </h1>
+            <p
               className="text-lg text-vault-foreground/70 mb-6"
             >
               Choose the storage and check-in frequency that fit your plan. Monthly check-ins are included, with weekly and daily options available for people who want a shorter verification interval.
-            </motion.p>
+            </p>
           </div>
         </div>
       </section>
@@ -267,9 +261,7 @@ export function PricingPage() {
           <div className="max-w-4xl mx-auto">
             <div className="grid lg:grid-cols-5 gap-8">
               <div className="lg:col-span-3 space-y-8">
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
+                <div
                   className="p-6 rounded-2xl bg-card border border-border"
                 >
                   <div className="flex items-center gap-2 mb-2">
@@ -291,12 +283,9 @@ export function PricingPage() {
                       <span>200 GB</span>
                     </div>
                   </div>
-                </motion.div>
+                </div>
 
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.05 }}
+                <div
                   className="p-6 rounded-2xl bg-card border border-border"
                 >
                   <div className="flex items-center gap-2 mb-2">
@@ -311,12 +300,9 @@ export function PricingPage() {
                     onChange={setFrequency}
                     isValue={isFrequency}
                   />
-                </motion.div>
+                </div>
 
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.1 }}
+                <div
                   className="p-6 rounded-2xl bg-card border border-border"
                 >
                   <div className="flex items-center gap-2 mb-2">
@@ -331,7 +317,7 @@ export function PricingPage() {
                     onChange={setBilling}
                     isValue={isBilling}
                   />
-                </motion.div>
+                </div>
 
                 <PlannedFeaturesNote />
               </div>
@@ -423,7 +409,7 @@ export function PricingPage() {
 
                   <div className="mt-6 space-y-3 text-sm text-muted-foreground">
                     <p>
-                      Cancel from Account settings at any time. Cancelling ends your plan immediately and permanently deletes your stored files. Payments are non-refundable except where required by law — see{" "}
+                      Cancel from Account settings at any time. Cancelling ends your plan immediately and permanently deletes your stored files. Payments are non-refundable except where required by law. See{" "}
                       <Link to="/terms" className="text-primary underline underline-offset-4">Terms</Link>.
                     </p>
                     <p>There’s no standard free plan or trial. Eligible Pioneer codes offer a 30-day trial, after which the subscription renews unless you cancel.</p>
@@ -471,15 +457,15 @@ export function PricingPage() {
               <div className="p-6 rounded-2xl bg-card border border-border">
                 <h3 className="text-base font-semibold text-foreground mb-3">Cancelling and payments</h3>
                 <p className="text-sm leading-relaxed text-muted-foreground">
-                  Cancel from Account settings at any time. Cancelling ends your plan immediately and permanently deletes your stored files. If a renewal payment fails, access to your vault is paused right away. Payments are non-refundable except where required by law — see{" "}
+                  Cancel from Account settings at any time. Cancelling ends your plan immediately and permanently deletes your stored files. If a renewal payment fails, access to your vault is paused right away. Payments are non-refundable except where required by law. See{" "}
                   <Link to="/terms" className="text-primary underline underline-offset-4">Terms</Link>.
                 </p>
               </div>
 
               <div className="p-6 rounded-2xl bg-card border border-border md:col-span-2">
-                <h3 className="text-base font-semibold text-foreground mb-3">No free plan or trial</h3>
+                <h3 className="text-base font-semibold text-foreground mb-3">No free plan</h3>
                 <p className="text-sm leading-relaxed text-muted-foreground">
-                  There’s no free plan or trial — you choose a plan before storing files. Without an active plan you can’t upload, store or download files, or add emergency contacts. See{" "}
+                  There’s no free plan. The only free period is the 30-day trial that comes with a single-use Pioneer invitation code. Otherwise you choose a plan before storing files. Without an active plan you can’t upload, store or download files, or add emergency contacts. See{" "}
                   <Link to="/security" className="text-primary underline underline-offset-4">Security</Link> for how encryption and emergency release work.
                 </p>
               </div>

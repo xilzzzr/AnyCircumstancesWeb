@@ -127,14 +127,14 @@ export function QuickGuideDialog({ open, onOpenChange, triggerRef }: QuickGuideD
         <div className="shrink-0 px-4 pb-3 pt-2 sm:px-7">
           <p role="status" aria-live="polite" aria-atomic="true" className="mb-1 text-center text-xs text-muted-foreground">{pageCount}</p>
           <div className="flex items-center justify-between gap-1">
-            <Button variant="outline" size="icon" className="h-11 w-11 shrink-0 rounded-full" disabled={current === 0} aria-label={content.previous} onClick={() => api?.scrollPrev()}><ArrowLeft aria-hidden="true" /></Button>
+            <Button variant="outline" size="icon" className="h-11 w-11 shrink-0 rounded-md" disabled={current === 0} aria-label={content.previous} onClick={() => api?.scrollPrev()}><ArrowLeft aria-hidden="true" /></Button>
             <div className="flex min-w-0 max-w-[220px] flex-1 items-center">
               {pages.map((_, index) => <button key={index} type="button" className="flex h-11 min-w-0 max-w-11 flex-1 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 aria-label={content.goToPage.replace('{page}', String(index + 1))} aria-current={index === current ? 'step' : undefined} onClick={() => api?.scrollTo(index)}>
                 <span aria-hidden="true" className={cn('h-2 rounded-full transition-[width,background-color] motion-reduce:transition-none', index === current ? 'w-5 bg-primary' : 'w-2 bg-muted-foreground/40')} />
               </button>)}
             </div>
-            <Button variant="outline" size="icon" className="h-11 w-11 shrink-0 rounded-full" disabled={current === pages.length - 1} aria-label={content.next} onClick={() => api?.scrollNext()}><ArrowRight aria-hidden="true" /></Button>
+            <Button variant="outline" size="icon" className="h-11 w-11 shrink-0 rounded-md" disabled={current === pages.length - 1} aria-label={content.next} onClick={() => api?.scrollNext()}><ArrowRight aria-hidden="true" /></Button>
           </div>
         </div>
       </Carousel>

@@ -36,7 +36,7 @@ export function PublicLayout() {
               <NavLink
                 key={link.href}
                 to={link.href}
-                className={({ isActive }) => `inline-flex min-h-11 items-center rounded-full px-3 text-sm font-medium transition-colors hover:bg-accent hover:text-foreground lg:px-4 ${isActive ? 'text-foreground' : 'text-muted-foreground'}`}
+                className={({ isActive }) => `inline-flex min-h-11 items-center rounded-md px-3 text-sm font-medium transition-colors hover:bg-accent hover:text-foreground lg:px-4 ${isActive ? 'text-foreground' : 'text-muted-foreground'}`}
               >
                 {link.label}
               </NavLink>
@@ -68,7 +68,7 @@ export function PublicLayout() {
 
         {/* Mobile Menu */}
         {mobileMenuOpen && (
-          <div id="mobile-navigation" className="md:hidden border-t border-border bg-card animate-fade-in">
+          <div id="mobile-navigation" className="md:hidden border-t border-border bg-card">
             <nav aria-label="Main" className="container mx-auto px-4 py-4 flex flex-col gap-2">
               {navLinks.map((link) => (
                 <Link
