@@ -80,7 +80,7 @@ function sitemap(routes) {
 }
 
 async function main() {
-  const { render, renderNotFound, getPrerenderManifest } = await import(`${pathToFileURL(serverEntry).href}?v=${Date.now()}`);
+  const { render, renderNotFound, getPrerenderManifest, getClientOnlyRoutes } = await import(`${pathToFileURL(serverEntry).href}?v=${Date.now()}`);
   const routes = getPrerenderManifest();
   if (!Array.isArray(routes) || routes.length === 0) throw new Error("Prerender manifest is empty");
   if (new Set(routes.map(({ path }) => path)).size !== routes.length) throw new Error("Prerender manifest contains duplicate paths");
@@ -100,6 +100,19 @@ async function main() {
     .replace(/\s*<script type="application\/ld\+json" data-route-schema="true">[\s\S]*?<\/script>/, "");
   await writeFile(resolve(distDir, "spa.html"), spaHtml);
 
+  // Client-rendered pages get their own copy of the shell so a direct visit, a refresh or an
+  // email link (e.g. /reset-password, /email-verified) loads even if the server's SPA route
+  // list is missing that path. The server's normal "<path>/index.html" lookup finds these.
+  const prerenderedPaths = new Set(routes.map(({ path }) => path));
+  const clientRoutes = getClientOnlyRoutes();
+  for (const path of clientRoutes) {
+    if (!path.startsWith("/") || path === "/" || path.includes(":") || path.includes("*")) throw new Error(`Invalid client route: ${path}`);
+    if (prerenderedPaths.has(path)) throw new Error(`${path} is both prerendered and client-only`);
+    const target = outputPath(path);
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, spaHtml);
+  }
+
   for (const route of routes) {
     const html = injectBody(injectHead(template, route), await render(route.path));
     validateHtml(html, route);
@@ -117,7 +130,7 @@ async function main() {
   await writeFile(resolve(distDir, "sitemap.xml"), sitemapXml);
   await writeFile(resolve(projectRoot, "public/sitemap.xml"), sitemapXml);
   await writeFile(resolve(distDir, "prerender-manifest.json"), `${JSON.stringify(routes.map(({ path }) => path), null, 2)}\n`);
-  console.log(`Prerendered and validated ${routes.length} public routes.`);
+  console.log(`Prerendered and validated ${routes.length} public routes; wrote the app shell for ${clientRoutes.length} client routes.`);
 }
 
 main().catch((error) => {
