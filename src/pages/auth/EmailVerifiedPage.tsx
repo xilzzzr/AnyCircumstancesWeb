@@ -40,8 +40,8 @@ export function EmailVerifiedPage() {
           <h1 id="verification-heading" className="text-3xl font-medium tracking-tight text-foreground leading-tight">{heading}</h1>
           <p className="mt-5 text-base leading-relaxed text-muted-foreground">{body}</p>
           <div className="mt-8 flex flex-col gap-3">
-            <Button asChild className="w-full rounded-full min-h-12"><Link to={primary.href}>{primary.label}</Link></Button>
-            {!verified && <Button asChild variant="outline" className="w-full rounded-full min-h-12"><Link to={status === 'expired' ? '/login' : '/verify-email?resend=1'}>{status === 'expired' ? 'Sign in' : 'Request new verification email'}</Link></Button>}
+            <Button asChild className="w-full min-h-12"><Link to={primary.href}>{primary.label}</Link></Button>
+            {!verified && <Button asChild variant="outline" className="w-full min-h-12"><Link to={status === 'expired' ? '/login' : '/verify-email?resend=1'}>{status === 'expired' ? 'Sign in' : 'Request new verification email'}</Link></Button>}
           </div>
           {status === 'success' && <p className="mt-6 text-sm leading-relaxed text-muted-foreground">After you sign in you’ll create your check-in PIN and a separate emergency PIN, then choose a plan.</p>}
           {status === 'already_verified' && (

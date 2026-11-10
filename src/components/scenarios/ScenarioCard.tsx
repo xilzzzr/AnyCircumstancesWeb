@@ -11,7 +11,7 @@ export function ScenarioCard({ scenario, expanded, onToggle, compact = false }: 
         <p className="mt-3 text-xs text-muted-foreground">{scenario.eyebrow}</p>
         <h3 className="scenario-title"><Link to={`/scenarios#scenario-${scenario.id}`}>{scenario.title}</Link></h3>
         <p className="scenario-situation">{scenario.situation}</p>
-        <button className="scenario-open" onClick={onToggle} aria-expanded={expanded} aria-controls={detailId}>{expanded ? "Close story" : "See how I’d set this up"}<ChevronDown aria-hidden="true" /></button>
+        <button className="scenario-open" onClick={onToggle} aria-expanded={expanded} aria-controls={detailId}>{expanded ? "Close" : "Show example setup"}<ChevronDown aria-hidden="true" /></button>
       </div>
       {expanded && (
         <div className="scenario-detail" id={detailId}>
@@ -23,7 +23,7 @@ export function ScenarioCard({ scenario, expanded, onToggle, compact = false }: 
             ))}
           </div>
           <div className="scenario-actions">
-            <Link to="/signup" className="scenario-primary"><Check /> That’s me — create my plan</Link>
+            <Link to="/pricing" className="scenario-primary"><Check /> See plans</Link>
             {!compact && <Link to="/how-it-works">How delivery works <ArrowRight /></Link>}
           </div>
         </div>

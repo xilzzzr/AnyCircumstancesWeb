@@ -16,7 +16,7 @@ export const faqGroups: FaqGroup[] = [
       {
         question: "Is there a free plan or free trial?",
         answer:
-          "No. You can create an account first, but you need a paid plan before you can store files or add emergency contacts. Plans start at $4.99 a month for 5 GB with monthly check-ins.",
+          "There’s no free plan. A 30-day free trial is available only with a single-use Pioneer invitation code; a card is required, and after the trial the plan renews at 20% off unless you cancel. Without a code, you need a paid plan before you can store files or add emergency contacts. Plans start at $4.99 a month for 5 GB with monthly check-ins.",
         links: [{ label: "Build a plan", to: "/pricing" }],
       },
       {

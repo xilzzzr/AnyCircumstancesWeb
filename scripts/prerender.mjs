@@ -29,12 +29,12 @@ function injectHead(template, route) {
     `<meta property="og:description" content="${escapeHtml(route.description)}">`,
     `<meta property="og:type" content="${route.type ?? "website"}">`,
     `<meta property="og:url" content="${canonical}">`,
-    `<meta property="og:image" content="${siteUrl}/og-image.svg">`,
+    `<meta property="og:image" content="${siteUrl}/og-image.png">`,
     `<meta property="og:site_name" content="AnyCircumstances">`,
     `<meta name="twitter:card" content="summary_large_image">`,
     `<meta name="twitter:title" content="${escapeHtml(route.title)}">`,
     `<meta name="twitter:description" content="${escapeHtml(route.description)}">`,
-    `<meta name="twitter:image" content="${siteUrl}/og-image.svg">`,
+    `<meta name="twitter:image" content="${siteUrl}/og-image.png">`,
     `<script type="application/ld+json" data-route-schema="true">${schema}</script>`,
   ].join("\n    ");
   return html.replace("</head>", `    ${head}\n  </head>`);

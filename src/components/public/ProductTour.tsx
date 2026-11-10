@@ -67,7 +67,7 @@ export function ProductTour() {
                 setActive(next.id);
                 document.getElementById(`tour-tab-${next.id}`)?.focus();
               }}
-              className={`min-h-11 rounded-full border px-4 text-sm transition-colors ${shot.id === active ? "bg-[#f3f4ef] text-[#111]" : "text-foreground hover:bg-accent"}`}
+              className={`min-h-11 rounded-md border px-4 text-sm transition-colors ${shot.id === active ? "bg-[#f3f4ef] text-[#111]" : "text-foreground hover:bg-accent"}`}
             >
               {shot.tab}
             </button>

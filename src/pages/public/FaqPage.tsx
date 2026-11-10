@@ -13,7 +13,7 @@ export default function FaqPage() {
         </p>
         <nav aria-label="FAQ topics" className="mt-8 flex flex-wrap gap-2">
           {faqGroups.map((group) => (
-            <a key={group.id} href={`#${group.id}`} className="inline-flex min-h-11 items-center rounded-full border px-4 text-sm text-foreground hover:bg-accent">
+            <a key={group.id} href={`#${group.id}`} className="inline-flex min-h-11 items-center rounded-md border px-4 text-sm text-foreground hover:bg-accent">
               {group.title}
             </a>
           ))}

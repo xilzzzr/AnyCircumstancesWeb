@@ -7,7 +7,7 @@ export function PlannedFeaturesNote({ className }: { className?: string }) {
   const titleId = useId();
   return (
     <aside aria-labelledby={titleId} className={cn("rounded-xl border border-dashed border-border p-4", className)}>
-      <p id={titleId} className="text-sm font-medium text-muted-foreground">Planned — not available yet</p>
+      <p id={titleId} className="text-sm font-medium text-muted-foreground">Planned, not available yet</p>
       <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
         These are not part of any plan today and can’t be purchased:
       </p>
