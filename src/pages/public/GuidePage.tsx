@@ -9,6 +9,10 @@ import { ComparisonTable, ContentLinks, SectionContent } from "@/components/publ
 
 const date = (value: string) => new Intl.DateTimeFormat("en-US", { dateStyle: "long", timeZone: "UTC" }).format(new Date(`${value}T00:00:00Z`));
 const categories = ["Dead Man's Switch & Check-Ins", "Digital Vaults & Emergency Information", "Crypto & Digital Assets", "Family & Account Planning"];
+// Google's no-JavaScript link for adding a site as a preferred source. It only changes the
+// results of the person who clicks it (Top Stories, AI Overviews, AI Mode), and it loads no
+// Google script on our pages.
+export const preferredSourceUrl = "https://www.google.com/preferences/source?q=anycircumstances.com";
 const sectionId = (heading: string, index: number) => `${heading.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}-${index + 1}`;
 
 export function GuidesIndexPage() {
@@ -40,6 +44,7 @@ export function GuidePage() {
       {guide.showToc !== false && <nav aria-label="On this page" className="mb-12 rounded-2xl border bg-muted/30 p-6"><h2 className="text-xl font-semibold">On this page</h2><ol className="mt-5 space-y-3">{guide.sections.map((section, index) => <li key={section.heading}><a className="text-muted-foreground underline underline-offset-4 hover:text-primary" href={`#${sectionId(section.heading, index)}`}>{section.heading}</a></li>)}</ol></nav>}
       <div className="space-y-12">{guide.sections.map((section, index) => <Fragment key={section.heading}><section id={sectionId(section.heading, index)} className="guide-section scroll-mt-24 border-t pt-10"><h2 className="text-2xl font-semibold md:text-3xl">{section.heading}</h2><SectionContent section={section} /></section>{index === guide.ctaAfterSection && <ContextualCta variant={guide.ctaVariant} />}</Fragment>)}
         <aside className="rounded-2xl border bg-card p-6 md:p-8"><p className="micro-label">RELATED READING</p><h2 className="mt-3 text-2xl font-semibold">Continue planning</h2><ContentLinks links={guide.related} /></aside>
+        <p className="text-sm leading-6 text-muted-foreground">Read our guides often? <a className="underline underline-offset-4 hover:text-primary" href={preferredSourceUrl} target="_blank" rel="noopener noreferrer">Add AnyCircumstances as a preferred source on Google</a> to see them more often in your own Google results.</p>
         <ContextualCta variant={guide.ctaVariant} />
       </div>
     </div>
