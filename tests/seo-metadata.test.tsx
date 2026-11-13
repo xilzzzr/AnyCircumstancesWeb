@@ -65,6 +65,26 @@ describe("search metadata", () => {
     }
   });
 
+  test("every link in a guide goes to a page that exists", () => {
+    const paths = new Set(prerenderRoutes.map((r) => r.path));
+    for (const guide of guides) {
+      const links = [...guide.related, ...guide.sections.flatMap((s) => s.links ?? [])];
+      for (const link of links) expect(paths.has(link.path), `${guide.slug} -> ${link.path}`).toBe(true);
+    }
+  });
+
+  test("the Google, Apple and password manager guides are listed and written without dashes", () => {
+    for (const slug of ["google-inactive-account-manager-apple-legacy-contact", "password-manager-emergency-access"]) {
+      const guide = guides.find((g) => g.slug === slug);
+      expect(guide, slug).toBeDefined();
+      expect(prerenderRoutes.some((r) => r.path === `/guides/${slug}`), slug).toBe(true);
+      expect(JSON.stringify(guide), slug).not.toMatch(/[–—]/);
+    }
+    // Google offers waits from 3 to 18 months in steps of 3 (checked November 2026).
+    const google = JSON.stringify(guides.find((g) => g.slug === "google-inactive-account-manager-apple-legacy-contact"));
+    expect(google).toContain("3, 6, 9, 12, 15 or 18 months");
+  });
+
   test("the sitemap lists every page and gives guides their real last-updated date", () => {
     const xml: string = buildSitemap(prerenderRoutes, SITE);
     expect(xml.match(/<url>/g)?.length).toBe(prerenderRoutes.length);

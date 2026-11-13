@@ -222,6 +222,16 @@ export const guides: Guide[] = [
         "heading": "Use provider recovery and legacy tools",
         "paragraphs": [
           "Some services offer legacy contacts, inactive-account settings, recovery contacts, or estate procedures. Configure those features directly and document what your family should expect. Access rights are not created merely by knowing a password."
+        ],
+        "links": [
+          {
+            "label": "Google Inactive Account Manager and Apple Legacy Contact",
+            "path": "/guides/google-inactive-account-manager-apple-legacy-contact"
+          },
+          {
+            "label": "password manager emergency access",
+            "path": "/guides/password-manager-emergency-access"
+          }
         ]
       },
       {
@@ -1231,7 +1241,7 @@ export const guides: Guide[] = [
         "cards": [
           {
             "heading": "Google Inactive Account Manager",
-            "text": "If your Google account goes unused for a period you choose (3, 6, 12 or 18 months), Google can notify up to 10 people and share the Google data you picked with them. It's free. It only covers what's in your Google account, and the shortest wait is three months."
+            "text": "If your Google account goes unused for a period you choose (3 to 18 months, in steps of 3), Google can notify up to 10 people and share the Google data you picked with them. It's free. It only covers what's in your Google account, and the shortest wait is three months."
           },
           {
             "heading": "Apple Legacy Contact",
@@ -1244,6 +1254,16 @@ export const guides: Guide[] = [
           {
             "heading": "A folder at home",
             "text": "A labeled folder or a fireproof box costs very little. Someone has to know it exists and be able to reach it, and you can't update it or send it anywhere while you're away."
+          }
+        ],
+        "links": [
+          {
+            "label": "Google and Apple's free tools in detail",
+            "path": "/guides/google-inactive-account-manager-apple-legacy-contact"
+          },
+          {
+            "label": "password manager emergency access compared",
+            "path": "/guides/password-manager-emergency-access"
           }
         ]
       },
@@ -1396,6 +1416,368 @@ export const guides: Guide[] = [
     "category": "Digital Vaults & Emergency Information",
     "cardTitle": "How Much Does a Digital Vault Cost?",
     "cardDescription": "Free options from Google and Apple, what paid services charge, and when paying is worth it."
+  },
+  {
+    "slug": "google-inactive-account-manager-apple-legacy-contact",
+    "title": "Google Inactive Account Manager and Apple Legacy Contact: What They Cover",
+    "seoTitle": "Google Inactive Account Manager and Apple Legacy Contact",
+    "description": "What Google's Inactive Account Manager and Apple's Legacy Contact pass on to family, what they leave out, how to set them up, and when you need more.",
+    "intro": "Both are free, and if most of your life is in a Google or Apple account, you should turn on the one you use. Google's Inactive Account Manager shares your Google data with up to 10 people after your account has gone unused for 3 to 18 months. Apple's Legacy Contact lets the people you name get your iCloud data after you die, once Apple has checked a death certificate. Neither one covers anything kept outside that company's account.",
+    "published": "2026-11-12",
+    "modified": "2026-11-12",
+    "comparison": {
+      "columns": [
+        "Question",
+        "Google Inactive Account Manager",
+        "Apple Legacy Contact"
+      ],
+      "rows": [
+        [
+          "What starts it",
+          "Your account goes unused for the time you chose",
+          "Your contact applies to Apple after you die"
+        ],
+        [
+          "Shortest wait",
+          "3 months without activity",
+          "No fixed wait, but Apple reviews each request"
+        ],
+        [
+          "Who can receive",
+          "Up to 10 people",
+          "More than one person, and they don't need an Apple device or account"
+        ],
+        [
+          "What they get",
+          "A download of the Google data you picked for each of them",
+          "Most of your iCloud data, including photos, messages, notes and files"
+        ],
+        [
+          "Helps if you're alive but can't respond",
+          "Only after months without activity",
+          "No"
+        ],
+        [
+          "Covers files kept elsewhere",
+          "No",
+          "No"
+        ],
+        [
+          "Cost",
+          "Free",
+          "Free"
+        ]
+      ]
+    },
+    "sections": [
+      {
+        "heading": "How Google Inactive Account Manager works",
+        "paragraphs": [
+          "Google now calls this your digital legacy plan. You set it up at myaccount.google.com/inactive.",
+          "First you choose how long Google should wait: 3, 6, 9, 12, 15 or 18 months without any activity on your account. Before the time runs out, Google tries to reach you by text and email, so keep your phone number and recovery email current.",
+          "Then you add up to 10 people. When the time is up, each one gets an email with a link to download the data you picked for them. You can give different people different things, for example your Drive files to one person and your Gmail to another. They have a limited time to download it.",
+          "You can also:"
+        ],
+        "items": [
+          "Turn on an automatic reply in Gmail, written by you, for anyone who emails you after that",
+          "Have Google delete your account afterwards",
+          "Pause the plan without deleting it"
+        ]
+      },
+      {
+        "heading": "What Google's tool leaves out",
+        "items": [
+          "Anything not in your Google account, such as files on your computer, paper documents or another email provider",
+          "A real plan. Contacts get a download and the short message you wrote, not step-by-step instructions",
+          "Speed. Even the shortest setting is three months, which is a long time if bills are due or someone needs your insurance details",
+          "Some data. Google says some information can't be shared, so read the list of products when you choose what to share"
+        ],
+        "finalParagraph": "Separately, Google may delete a personal Google account that hasn't been used for two years, after sending warnings. Work and school accounts don't fall under that rule, and there are exceptions, such as accounts with an active subscription."
+      },
+      {
+        "heading": "How Apple Legacy Contact works",
+        "paragraphs": [
+          "On an iPhone, open Settings, tap your name, then Sign-In & Security, then Legacy Contact. You need iOS 15.2, iPadOS 15.2 or macOS Monterey 12.1 or later, and two-factor authentication turned on.",
+          "You can add more than one person. They need to be over 13 (the age differs by country), and they don't need an Apple device or an Apple Account. Apple creates an access key for each of them. Make sure they know where it is, because a lost key can't be replaced.",
+          "After you die, your contact sends Apple the access key and your death certificate. Apple checks the request before approving it. From the approval, they have three years to download your data, and then the account is permanently deleted. Activation Lock is removed from your devices, so they can be erased and used again.",
+          "They can get your iCloud photos, messages, notes, mail, contacts, calendars, reminders, call history, iCloud Drive files, Health data, voice memos, Safari bookmarks and iCloud backups."
+        ]
+      },
+      {
+        "heading": "What Apple's tool leaves out",
+        "items": [
+          "Passwords and passkeys saved in iCloud Keychain",
+          "Movies, music and books you bought, plus subscriptions and in-app purchases",
+          "Your payment details",
+          "Anything stored outside your Apple account",
+          "Any situation other than death. If you're in hospital or missing, your contact can't use it"
+        ]
+      },
+      {
+        "heading": "If you didn't set either up",
+        "paragraphs": [
+          "Your family can ask Google to close your account, and in some cases to send money left in it or a copy of your data. A data request needs a court order issued in the United States, and Google says it can't give out passwords or other login details. Each request is reviewed, and if the account is closed first, Google can't hand over its contents later.",
+          "Apple asks for a court order that names the person as your rightful inheritor, in the US, Israel and some other countries. Some data is end-to-end encrypted, and Apple can't decrypt it even then.",
+          "Both are much slower than a plan you set up yourself, and neither is guaranteed."
+        ]
+      },
+      {
+        "heading": "When you need more than Google or Apple",
+        "paragraphs": [
+          "These tools do one job: they hand over one company's account after a long silence or a death. They don't help with:"
+        ],
+        "items": [
+          "Documents spread across your computer, paper files, banks and other services",
+          "Sending each person only the documents they need, from all of those places",
+          "Being alive but unreachable, for example after an accident",
+          "Getting information to someone within days instead of months"
+        ],
+        "finalParagraph": "That gap is what AnyCircumstances covers. You upload files, which are encrypted in your browser, choose which person gets which file, and check in on a schedule you pick, from daily to every 30 days. If you miss a check-in and a grace period of 6 to 72 hours runs out, each person gets an email with links to their files, and they don't need an account. There's no death certificate step. That makes it faster, but it also means files go out if you simply stop checking in, so choose a schedule you can keep.",
+        "links": [
+          {
+            "label": "how check-ins and release work",
+            "path": "/how-it-works"
+          }
+        ]
+      },
+      {
+        "heading": "A setup that covers most people",
+        "ordered": true,
+        "cards": [
+          {
+            "heading": "Turn on the free tools",
+            "text": "Set up Google's plan, Apple's Legacy Contact, or both, for the accounts you actually use."
+          },
+          {
+            "heading": "Tell the people you chose",
+            "text": "Let them know you did it, and where Apple's access key is kept."
+          },
+          {
+            "heading": "Gather everything else",
+            "text": "Put documents that live elsewhere in one place, with a short note saying what to do first."
+          },
+          {
+            "heading": "Decide who gets what",
+            "text": "Work out which person needs which documents, and how they'll get them if you can't respond."
+          },
+          {
+            "heading": "Check it once a year",
+            "text": "And whenever you change phone, email address or bank."
+          }
+        ]
+      }
+    ],
+    "related": [
+      {
+        "label": "Password Manager Emergency Access vs a Dead Man's Switch",
+        "path": "/guides/password-manager-emergency-access"
+      },
+      {
+        "label": "How to Leave Passwords and Account Access to Family",
+        "path": "/guides/how-to-leave-passwords-to-family"
+      },
+      {
+        "label": "How Much Does a Digital Vault Cost?",
+        "path": "/guides/digital-vault-cost"
+      },
+      {
+        "label": "Documents family should know",
+        "path": "/guides/important-documents-family-should-know"
+      }
+    ],
+    "ctaVariant": "general",
+    "category": "Family & Account Planning",
+    "cardTitle": "Google and Apple's Free Legacy Tools",
+    "cardDescription": "What Inactive Account Manager and Legacy Contact pass on to family, what they leave out, and how to set them up."
+  },
+  {
+    "slug": "password-manager-emergency-access",
+    "title": "Password Manager Emergency Access vs a Dead Man's Switch",
+    "seoTitle": "Password Manager Emergency Access vs a Dead Man's Switch",
+    "description": "How emergency access works in Bitwarden, LastPass, Keeper and Proton, what 1Password and Dashlane offer instead, and what your family still won't have.",
+    "intro": "If you use a password manager, check whether it has emergency access before you set up anything else. In Bitwarden, LastPass, Keeper and Proton, a person you trust can ask for access to your passwords and gets it if you don't say no within a waiting period you set. 1Password and Dashlane don't offer this today. Either way, a password manager only hands over logins. It doesn't send anyone your documents or tell them what to do first, and it only works if they know to ask.",
+    "published": "2026-11-12",
+    "modified": "2026-11-12",
+    "sections": [
+      {
+        "heading": "How emergency access works",
+        "ordered": true,
+        "cards": [
+          {
+            "heading": "You invite someone",
+            "text": "In most password managers, they need their own account with the same company."
+          },
+          {
+            "heading": "They accept",
+            "text": "Until they ask for access, they can't see anything in your vault."
+          },
+          {
+            "heading": "They ask for access",
+            "text": "If something happens to you, they send a request from their own account."
+          },
+          {
+            "heading": "You can say no",
+            "text": "You get an email. If you don't reject the request before the waiting period ends, they're let in."
+          },
+          {
+            "heading": "They get in",
+            "text": "Depending on the service, they can read your passwords or take over the account."
+          }
+        ],
+        "finalParagraph": "The waiting period protects you. If someone asks while you're fine, you reject it. Choose a period longer than the time you'd normally go without reading email, so a week offline doesn't let someone in early."
+      },
+      {
+        "heading": "What the main password managers offer",
+        "paragraphs": [
+          "Checked against each company's own help pages in November 2026. These features change, so look at the settings in your own account."
+        ],
+        "cards": [
+          {
+            "heading": "Bitwarden",
+            "text": "Emergency access on Premium and on paid Families, Teams and Enterprise plans. Your contact needs a Bitwarden account, and a free one is enough. The shortest wait is one day. You choose whether they can only view your vault, including attachments, or take over the account."
+          },
+          {
+            "heading": "LastPass",
+            "text": "Emergency access on Premium and Families. Your contact needs a LastPass account. You set the wait, and it can be immediate. They can view your vault items and download attachments, but can't change anything."
+          },
+          {
+            "heading": "Keeper",
+            "text": "Emergency access for up to five people. Contacts need a Keeper account. The wait can be anything from immediate to three months."
+          },
+          {
+            "heading": "Proton Pass",
+            "text": "Emergency access on paid Proton plans, for up to five people. It covers your whole Proton account: email, passwords and files. You and your contact both need a Proton Mail address. Waits range from 1 to 30 days."
+          },
+          {
+            "heading": "1Password",
+            "text": "No emergency access. 1Password suggests giving a copy of your Emergency Kit, which holds your Secret Key, to someone you trust, such as your spouse. They'd also need your account password. In a Families account, an organizer can start account recovery, but 1Password emails the person being recovered to finish it."
+          },
+          {
+            "heading": "Dashlane",
+            "text": "No emergency access any more. The old emergency contact feature was part of a desktop app Dashlane no longer offers. It now points to a password-protected export file instead."
+          },
+          {
+            "heading": "Apple Passwords",
+            "text": "No emergency access. Apple's Legacy Contact leaves out passwords and passkeys. While you're alive, you can share passwords with family members."
+          },
+          {
+            "heading": "Google Password Manager",
+            "text": "No emergency access. Google says it can't give passwords or other login details to family after a death."
+          }
+        ]
+      },
+      {
+        "heading": "What emergency access doesn't cover",
+        "items": [
+          "Documents. Your will, insurance policies and property papers usually aren't in a password manager, and attachments in one are easy to miss",
+          "Instructions. A long list of logins doesn't say which bill to pay first or which accounts to keep open",
+          "People who use a different app. Most services need the contact to have an account with the same company",
+          "Two-factor codes. If your codes come to your phone, a password alone may not get anyone in",
+          "Choosing who gets what. In each service above, a contact gets your whole vault, not selected parts",
+          "Someone who doesn't know to ask. Nothing happens until your contact makes a request"
+        ]
+      },
+      {
+        "heading": "Emergency access vs a dead man's switch",
+        "paragraphs": [
+          "A dead man's switch works the other way round. Instead of your contact asking, the system waits for you to check in, and sends chosen files if you stop. Here's how a password manager compares with AnyCircumstances."
+        ],
+        "comparison": {
+          "columns": [
+            "Question",
+            "Password manager emergency access",
+            "AnyCircumstances"
+          ],
+          "rows": [
+            [
+              "Who starts it",
+              "Your contact, by asking for access",
+              "You, by missing a check-in, or by entering your emergency PIN"
+            ],
+            [
+              "What's handed over",
+              "Your password vault",
+              "Only the files you assigned to each person"
+            ],
+            [
+              "Does the contact need an account?",
+              "Usually, with the same company",
+              "No"
+            ],
+            [
+              "How you stop it",
+              "Reject the request during the wait",
+              "Check in before the grace period ends"
+            ],
+            [
+              "How fast it can happen",
+              "Immediately, or after the wait you set",
+              "After a missed check-in and a grace period of 6 to 72 hours"
+            ],
+            [
+              "What the contact has to do",
+              "Know about it and make a request",
+              "Confirm their email once when you add them, then open the email if files are released"
+            ],
+            [
+              "Cost",
+              "Part of a paid plan in most services",
+              "From $4.99 a month"
+            ]
+          ]
+        }
+      },
+      {
+        "heading": "Using both",
+        "paragraphs": [
+          "For most people the answer is both. Keep passwords in your password manager and turn on emergency access if it has it. Put everything else in a place that releases on its own: documents, a short note saying what to do first, and a line saying which password manager you use and who your emergency contact in it is.",
+          "Think hard before putting your master password, or a 1Password Emergency Kit, into any file. Whoever receives it gets every account at once. If you do it, give it to one person, and pick a check-in schedule and grace period you're sure you can keep, so it can't go out while you're fine."
+        ],
+        "links": [
+          {
+            "label": "what recipients receive",
+            "path": "/recipients"
+          },
+          {
+            "label": "security details",
+            "path": "/security"
+          }
+        ]
+      },
+      {
+        "heading": "Mistakes to avoid",
+        "items": [
+          "A waiting period shorter than your longest stretch without email",
+          "Inviting someone who never accepts the invite. Check that it shows as accepted",
+          "Picking a contact who won't set up an account with the same service",
+          "Keeping two-factor backup codes only on your phone",
+          "Using an email draft or a notes app as a password backup",
+          "Never telling your contact that emergency access exists"
+        ]
+      }
+    ],
+    "related": [
+      {
+        "label": "Google and Apple's Free Legacy Tools",
+        "path": "/guides/google-inactive-account-manager-apple-legacy-contact"
+      },
+      {
+        "label": "How to Leave Passwords and Account Access to Family",
+        "path": "/guides/how-to-leave-passwords-to-family"
+      },
+      {
+        "label": "How a Dead Man's Switch Email Works",
+        "path": "/guides/dead-mans-switch-email"
+      },
+      {
+        "label": "Review security details",
+        "path": "/security"
+      }
+    ],
+    "ctaVariant": "switch",
+    "category": "Family & Account Planning",
+    "cardTitle": "Password Manager Emergency Access",
+    "cardDescription": "What Bitwarden, LastPass, Keeper, Proton and 1Password offer, and what a password manager can't hand over."
   }
 ];
 
