@@ -118,3 +118,15 @@ Check after reloading Caddy:
 curl -sSI https://www.anycircumstances.com/pricing
 # expect: 308 with location: https://anycircumstances.com/pricing
 ```
+
+## Pages that moved
+
+`scripts/redirects.mjs` lists old addresses of pages that were merged or
+renamed. The build writes a small page at each old address that sends visitors
+and search engines to the new one, so this works without a server change. A
+server redirect is still the cleanest signal; the example Caddyfile has one
+`redir` line per entry:
+
+```caddy
+redir /guides/what-happens-to-bitcoin-when-you-die /guides/what-happens-to-crypto-when-you-die permanent
+```

@@ -264,7 +264,7 @@ export const guides: Guide[] = [
     "seoTitle": "What Happens to Bitcoin & Crypto When You Die? | AnyCircumstances",
     "description": "What happens to Bitcoin, Ethereum, wallets, exchange accounts, seed phrases, and other cryptocurrency when the owner dies or becomes unavailable?",
     "published": "2026-08-14",
-    "modified": "2026-09-08",
+    "modified": "2026-11-12",
     "sections": [
       {
         "heading": "Crypto does not automatically transfer",
@@ -276,12 +276,6 @@ export const guides: Guide[] = [
         "heading": "Custodial and self-custody accounts differ",
         "paragraphs": [
           "An exchange may have an estate-claims process and identity requirements. A self-custody wallet generally depends on keys, recovery phrases, devices, passphrases, or multisignature participants. Your plan should identify which model applies to each holding."
-        ],
-        "links": [
-          {
-            "label": "what happens to Bitcoin when you die",
-            "path": "/guides/what-happens-to-bitcoin-when-you-die"
-          }
         ]
       },
       {
@@ -294,12 +288,12 @@ export const guides: Guide[] = [
         "callout": {
           "title": "The practical problem",
           "text": "Your family can know that you owned Bitcoin and still have no idea where the wallet is, which device matters, which exchange was used, or what recovery process you intended."
-        },
-        "links": [
-          {
-            "label": "Read the Bitcoin-specific guide",
-            "path": "/guides/what-happens-to-bitcoin-when-you-die"
-          }
+        }
+      },
+      {
+        "heading": "What happens to a hardware wallet?",
+        "paragraphs": [
+          "Finding the device is only part of it. Whoever handles your estate also needs to know which wallet it is, how it was backed up, whether there's an extra passphrase on top of the recovery phrase, and where the backup is kept. A hardware wallet without its backup and PIN is just a small piece of plastic."
         ]
       },
       {
@@ -351,6 +345,26 @@ export const guides: Guide[] = [
         }
       },
       {
+        "heading": "Should you put your seed phrase in a will?",
+        "paragraphs": [
+          "Usually not. Depending on where you live, a will can be read by several people during the estate process and may become a public record. Anyone who sees a seed phrase can move the funds.",
+          "A safer split: the will says who should inherit the crypto, and separate, protected instructions explain how to reach it. Talk to an estate lawyer about the legal side."
+        ]
+      },
+      {
+        "heading": "What should your family know?",
+        "items": [
+          "That you own crypto at all",
+          "Which exchanges you use and which email address each account is under",
+          "Whether you also hold crypto yourself, in a wallet app or on a hardware wallet",
+          "Which devices matter, and where they are",
+          "Where the recovery instructions are kept",
+          "Which lawyer, accountant or trusted person to contact first",
+          "Whether there's a multisignature or other unusual setup",
+          "What not to do: never type a recovery phrase into a website, and ignore anyone who contacts them offering to recover the funds"
+        ]
+      },
+      {
         "heading": "Build instructions without creating a theft kit",
         "items": [
           "Inventory wallets and custodians without exposing keys",
@@ -372,6 +386,42 @@ export const guides: Guide[] = [
           "A hardware wallet fails and no tested backup exists",
           "One person receives both the secret and immediate authority too early",
           "Tax and legal obligations are ignored"
+        ]
+      },
+      {
+        "heading": "A simple plan you can set up this weekend",
+        "ordered": true,
+        "cards": [
+          {
+            "heading": "Make a list",
+            "text": "Write down every place you hold crypto: each exchange, each wallet app, each hardware wallet. List names and locations only, no keys or phrases."
+          },
+          {
+            "heading": "Note the exchange details",
+            "text": "For each exchange, note the account email. Your family will contact the exchange and follow its process for deceased customers, which usually asks for a death certificate and proof of legal authority."
+          },
+          {
+            "heading": "Decide how self-custody will be recovered",
+            "text": "Choose where the recovery phrase is kept, for example a sealed envelope in a safe, and whether one person or several people are needed to use it."
+          },
+          {
+            "heading": "Write a start-here letter",
+            "text": "Explain what exists, where the recovery material is, who to call first, and what not to do. Keep it short enough to read in a stressful week."
+          },
+          {
+            "heading": "Store the letter somewhere protected",
+            "text": "Keep it encrypted, and make sure it only reaches the right person at the right time, not today."
+          },
+          {
+            "heading": "Review it twice a year",
+            "text": "Update it when you open or close an account, move funds, or replace a device."
+          }
+        ]
+      },
+      {
+        "heading": "How AnyCircumstances fits into a crypto plan",
+        "paragraphs": [
+          "You can store the start-here letter and other instructions as encrypted files and assign them to the person who should receive them. If you stop checking in and your grace period ends, that person gets an email with secure links to those files. AnyCircumstances doesn't hold or move cryptocurrency, and it doesn't transfer ownership."
         ]
       },
       {
@@ -536,10 +586,10 @@ export const guides: Guide[] = [
     "slug": "dead-mans-switch-email",
     "title": "How a Dead Man's Switch Email Works",
     "seoTitle": "How a Dead Man's Switch Email Works, Step by Step",
-    "description": "Learn how a dead man's switch email works, why check-ins and grace periods matter, and how trusted recipients can be contacted if you stop responding.",
+    "description": "How a dead man's switch email works, with three example setups, what to put in the files, what your recipients receive, and mistakes to avoid.",
     "intro": "A dead man's switch email is a system designed to contact someone if you stop responding. A careful system does more than schedule one message for the future. It expects you to check in, reminds you when a check-in is due, gives you extra time if you miss one, and only starts recipient delivery after the full trigger conditions are met.",
     "published": "2026-09-08",
-    "modified": "2026-09-08",
+    "modified": "2026-11-12",
     "sections": [
       {
         "heading": "What is a dead man's switch email?",
@@ -594,6 +644,26 @@ export const guides: Guide[] = [
         ]
       },
       {
+        "heading": "Three example setups",
+        "paragraphs": [
+          "The right settings depend on your life, not on what sounds safest. These are starting points you can adjust."
+        ],
+        "cards": [
+          {
+            "heading": "You travel a lot",
+            "text": "Weekly check-ins and the longest grace period, 72 hours, so a long flight or a few days without signal doesn't start a release. Three reminder emails. Your partner receives your travel documents, insurance policy and the contacts they'd need abroad."
+          },
+          {
+            "heading": "You live alone",
+            "text": "A scheduled daily check-in, for example every morning at 9:00 in your time zone, with a 24-hour grace period. A sibling or friend nearby receives a note asking them to check on you, your medical information, and where the spare key is. This doesn't replace a medical alert service or calling emergency services."
+          },
+          {
+            "heading": "You hold crypto or run a business",
+            "text": "Monthly check-ins, a 72-hour grace period and five reminders, because a release is hard to undo. One person receives a start-here letter about your wallets and accounts; a business partner receives the client list and how to keep the business running."
+          }
+        ]
+      },
+      {
         "heading": "What can a dead man's switch email be used for?",
         "cards": [
           {
@@ -615,6 +685,35 @@ export const guides: Guide[] = [
           {
             "heading": "Private personal information",
             "text": "Prepare information you do not want to share today but would want somebody to receive under specific conditions."
+          }
+        ]
+      },
+      {
+        "heading": "What to put in the files",
+        "paragraphs": [
+          "Think about the first week after something happens to you. What would the person need to find, call or decide? Start with that."
+        ],
+        "items": [
+          "A short start-here note: what to do first and who to call",
+          "Where your important documents are, plus copies of the ones that matter most",
+          "Insurance policies, with the policy number and the phone number to call",
+          "Your lawyer, accountant, employer, landlord and doctor",
+          "How to get into your password manager or main email account, if the provider allows it",
+          "Instructions for children, pets or anyone who depends on you",
+          "What not to do yet, for example not closing an account until a certain bill is paid"
+        ],
+        "finalParagraph": "Give each person only what they need. In AnyCircumstances you assign files to each recipient separately, and you can add a note to a file explaining what it's for."
+      },
+      {
+        "heading": "What your recipients receive",
+        "paragraphs": [
+          "Recipients first confirm their email address when you add them. If a release starts, each one gets an email from AnyCircumstances with secure links to the files assigned to them. They don't need an account to open the files.",
+          "Unopened links expire after 30 days by default, and links can't be sent again. Tell your recipients now that this email might one day arrive, and ask them to check their spam folder if they're expecting it."
+        ],
+        "links": [
+          {
+            "label": "what recipients receive",
+            "path": "/recipients"
           }
         ]
       },
@@ -667,6 +766,18 @@ export const guides: Guide[] = [
         }
       },
       {
+        "heading": "Mistakes to avoid",
+        "items": [
+          "Choosing daily check-ins, then traveling somewhere without signal",
+          "A grace period shorter than the longest time you're normally offline",
+          "Leaving a recipient's old email address in place after they change it",
+          "Not telling recipients to expect the email, so it sits unread in spam",
+          "Giving every recipient every file",
+          "Forgetting to update the files after you change insurer, bank or wallet",
+          "Typing your emergency PIN to see what happens: it sends your files immediately"
+        ]
+      },
+      {
         "heading": "What should you decide before setting one up?",
         "items": [
           "How often you can realistically check in",
@@ -713,10 +824,10 @@ export const guides: Guide[] = [
     "slug": "proof-of-life-protocol",
     "title": "What Is a Proof of Life Protocol?",
     "seoTitle": "What Is a Proof of Life Protocol? How Check-Ins Work",
-    "description": "Learn what a proof-of-life protocol is, how recurring digital check-ins work, and how missed check-ins can trigger a grace period and conditional release.",
+    "description": "What a proof of life protocol is, how digital check-ins work, and example settings for travel, working abroad, running a business and single parents.",
     "intro": "A proof-of-life protocol is a process that requires a person to periodically confirm that they are still able to respond. In a digital system, that confirmation can be a recurring check-in. If the expected check-in does not happen, the system can begin a predefined escalation process.",
     "published": "2026-09-08",
-    "modified": "2026-09-08",
+    "modified": "2026-11-12",
     "sections": [
       {
         "heading": "What does \"proof of life\" mean in a digital system?",
@@ -789,6 +900,52 @@ export const guides: Guide[] = [
           "travel contingency planning",
           "instructions for dependents or pets"
         ]
+      },
+      {
+        "heading": "Choosing your settings",
+        "paragraphs": [
+          "In AnyCircumstances you check in with your PIN, monthly, weekly, or on a daily schedule you set (for example weekdays at 8:00). You also choose one to five reminder emails and a grace period between 6 and 72 hours. A few rules of thumb:"
+        ],
+        "items": [
+          "Set the grace period longer than the longest time you're regularly out of reach, like a long-haul flight or a weekend camping trip",
+          "Pick more reminders if your inbox is busy and emails get buried",
+          "Only choose daily check-ins if you'll really do it every day",
+          "If a release would be hard to undo, use a longer schedule and the full 72 hours"
+        ],
+        "comparison": {
+          "columns": ["Your situation", "Suggested settings"],
+          "rows": [
+            ["At home most of the time, phone always nearby", "Weekly check-ins, 24-hour grace period, 2 reminders"],
+            ["Frequent flights or trips without signal", "Weekly check-ins, 72-hour grace period, 3 reminders"],
+            ["You want people to know quickly if something is wrong", "Daily check-ins at a set time, 12-hour grace period, 2 reminders"],
+            ["Crypto, a business, or anything hard to undo", "Monthly check-ins, 72-hour grace period, 5 reminders"]
+          ]
+        }
+      },
+      {
+        "heading": "Examples from real situations",
+        "cards": [
+          {
+            "heading": "Working abroad for six months",
+            "text": "Weekly check-ins and a 72-hour grace period cover time-zone confusion and patchy internet. A parent at home receives copies of your passport and visa, your employer's contact, and your travel insurance details."
+          },
+          {
+            "heading": "Running a business on your own",
+            "text": "Weekly check-ins with a 48-hour grace period. Your accountant or a trusted colleague receives the client list, how to reach your main suppliers, and how to tell customers what's happening."
+          },
+          {
+            "heading": "Single parent",
+            "text": "Weekly check-ins with a 24-hour grace period. The person named as your children's guardian receives school and medical details, daily routines, and who to call for childcare in the first few days."
+          },
+          {
+            "heading": "Long hospital stay coming up",
+            "text": "Before you go in, check in and raise your grace period to 72 hours. Tell your recipients what to expect, and set it back when you're home."
+          }
+        ],
+        "callout": {
+          "title": "Don't test with your emergency PIN",
+          "text": "Your emergency PIN starts delivery to your recipients immediately. Use your normal PIN for every check-in."
+        }
       },
       {
         "heading": "How often should you check in?",
@@ -1061,107 +1218,184 @@ export const guides: Guide[] = [
     "cardDescription": "Compare everyday cloud drives with secure document vaults, controlled access, and emergency information storage."
   },
   {
-    "slug": "what-happens-to-bitcoin-when-you-die",
-    "title": "What Happens to Bitcoin When You Die?",
-    "seoTitle": "What Happens to Bitcoin When You Die?",
-    "description": "What happens to Bitcoin after death depends on self-custody, exchange custody, hardware wallets, recovery phrases, legal authority, and whether heirs can recover access.",
-    "intro": "Bitcoin does not automatically transfer to another person when you die. The coins remain controlled by the same wallet credentials until somebody with the required technical access moves them. Whether an heir can actually recover the Bitcoin depends on how it was stored and what recovery information was left behind.",
-    "published": "2026-09-08",
-    "modified": "2026-09-08",
+    "slug": "digital-vault-cost",
+    "title": "How Much Does a Digital Vault Cost?",
+    "seoTitle": "How Much Does a Digital Vault Cost? Prices and Free Options",
+    "description": "What a digital vault for important documents costs, what free options from Google and Apple cover, and when a paid vault is worth it.",
+    "intro": "A safe place for documents your family may need can cost nothing, a few dollars a month, or a lawyer's fee. The difference comes down to two things: whether your files are encrypted, and whether anything happens on its own if you can't respond. This guide covers the free options first, then what paid services charge, including our own prices.",
+    "published": "2026-11-12",
+    "modified": "2026-11-12",
     "sections": [
       {
-        "heading": "Bitcoin does not know its owner died",
-        "paragraphs": [
-          "The Bitcoin network does not contain a death registry or inheritance system. A wallet keeps working according to its keys. If the person controlling those keys dies, the network does not automatically identify an heir or move the coins."
-        ],
-        "links": [
+        "heading": "Free options you may already have",
+        "cards": [
           {
-            "label": "cryptocurrency after death",
-            "path": "/guides/what-happens-to-crypto-when-you-die"
+            "heading": "Google Inactive Account Manager",
+            "text": "If your Google account goes unused for a period you choose (3, 6, 12 or 18 months), Google can notify up to 10 people and share the Google data you picked with them. It's free. It only covers what's in your Google account, and the shortest wait is three months."
+          },
+          {
+            "heading": "Apple Legacy Contact",
+            "text": "You can name people who can request your Apple account data after you die. They need the access key you gave them and a death certificate. It's free, but it doesn't help if you're alive and unreachable."
+          },
+          {
+            "heading": "Password manager emergency access",
+            "text": "Some password managers, such as Bitwarden, let a person you trust request access to your vault after a waiting period you set. It's made for passwords more than documents, and it's often part of a paid plan, so check what yours includes."
+          },
+          {
+            "heading": "A folder at home",
+            "text": "A labeled folder or a fireproof box costs very little. Someone has to know it exists and be able to reach it, and you can't update it or send it anywhere while you're away."
           }
         ]
       },
       {
-        "heading": "What happens to self-custodied Bitcoin?",
+        "heading": "Options that cost money",
+        "comparison": {
+          "columns": [
+            "Option",
+            "What you pay",
+            "The catch"
+          ],
+          "rows": [
+            [
+              "Safe deposit box, for original paper documents",
+              "A yearly fee set by the bank",
+              "After a death, family may need legal authority before the bank lets them open it"
+            ],
+            [
+              "Estate lawyer, for wills, trusts and powers of attorney",
+              "Legal fees, which vary a lot",
+              "Nothing is delivered automatically, and changes go through the lawyer"
+            ],
+            [
+              "Cloud storage, for keeping copies of files",
+              "Free up to a limit, then a monthly fee",
+              "Doesn't hand files to anyone if you stop responding"
+            ],
+            [
+              "Digital vault with check-ins, for encrypted files that reach chosen people",
+              "A monthly or yearly fee",
+              "An ongoing cost, and you have to keep checking in"
+            ]
+          ]
+        }
+      },
+      {
+        "heading": "What AnyCircumstances costs",
         "paragraphs": [
-          "With self-custody, access may depend on a seed phrase, private key, hardware wallet, multisignature setup, backup device, or another recovery method. If nobody can reconstruct the required access path, the Bitcoin can remain inaccessible indefinitely."
+          "The price depends on how much storage you need and how often you want to check in. Prices are in US dollars, and storage goes up in 5 GB steps between the amounts below.",
+          "Paying yearly costs 10 times the monthly price, so two months are free. There's no free plan. Eligible Pioneer invitation codes give 30 days free, then 20% off for as long as you stay subscribed."
+        ],
+        "comparison": {
+          "columns": [
+            "What you choose",
+            "Price"
+          ],
+          "rows": [
+            [
+              "5 GB of storage",
+              "$4.99 a month"
+            ],
+            [
+              "10 GB",
+              "$7.99 a month"
+            ],
+            [
+              "25 GB",
+              "$12.99 a month"
+            ],
+            [
+              "50 GB",
+              "$17.99 a month"
+            ],
+            [
+              "100 GB",
+              "$22.99 a month"
+            ],
+            [
+              "200 GB",
+              "$29.99 a month"
+            ],
+            [
+              "Monthly check-ins (every 30 days)",
+              "Included"
+            ],
+            [
+              "Weekly check-ins",
+              "+$1.99 a month"
+            ],
+            [
+              "Daily or scheduled check-ins",
+              "+$2.99 a month"
+            ]
+          ]
+        },
+        "finalParagraph": "For example, 5 GB with weekly check-ins is $6.98 a month, or $69.80 a year.",
+        "links": [
+          {
+            "label": "all plans and prices",
+            "path": "/pricing"
+          }
         ]
       },
       {
-        "heading": "What happens to Bitcoin held on an exchange?",
+        "heading": "How much storage do you need?",
         "paragraphs": [
-          "If Bitcoin is held through an exchange or custodian, the technical access problem is different. The provider may have a process for deceased customers or estates. That process can require identity documents, legal authority, account information, or other records before access is transferred."
+          "Probably less than you think. A scanned page saved as a PDF is usually a few hundred kilobytes, so 5 GB holds thousands of pages. You'd only need more for photos, video messages or very large scans."
         ]
       },
       {
-        "heading": "What happens to a hardware wallet?",
-        "paragraphs": [
-          "Finding the hardware wallet is only part of the problem. The person handling the estate may also need to understand which wallet it is, how it was backed up, whether another PIN or passphrase exists, and where the recovery information was stored."
-        ]
-      },
-      {
-        "heading": "Should you put your Bitcoin seed phrase in a will?",
-        "paragraphs": [
-          "A will may become accessible to people involved in the estate process and, depending on jurisdiction and procedure, may not remain private forever. Putting a raw seed phrase directly into an ordinary document can create serious security risk. Consider separating legal instructions from sensitive technical recovery information and discuss estate-specific decisions with an appropriate professional."
-        ]
-      },
-      {
-        "heading": "What information should your family know?",
+        "heading": "When a free option is enough",
         "items": [
-          "that Bitcoin exists",
-          "whether it is self-custodied or held through an exchange",
-          "which devices or hardware wallets matter",
-          "where authoritative recovery instructions are located",
-          "which professional or trusted person should be contacted",
-          "whether multisignature or another advanced setup is involved",
-          "what not to do before understanding the recovery process"
+          "Most of what matters is already in your Google or Apple account",
+          "One person should get everything, and a wait of several months is fine",
+          "Your lawyer already holds your will and the documents that go with it",
+          "You only need to pass on passwords, and your password manager has emergency access"
         ]
       },
       {
-        "heading": "Bitcoin and Ethereum are similar in one important way",
-        "paragraphs": [
-          "Neither network automatically transfers assets because the owner died. Ethereum can add extra complexity because one wallet may control ETH, tokens, stablecoins, NFTs, or DeFi positions. In both cases, heirs need a plan that connects legal authority with technical recovery."
-        ]
-      },
-      {
-        "heading": "How AnyCircumstances can fit into a Bitcoin recovery plan",
-        "paragraphs": [
-          "AnyCircumstances can be used to prepare encrypted files explaining wallet locations, devices, exchange accounts, recovery procedures, and trusted contacts. The system can conditionally deliver those files if the owner's check-in and grace-period rules expire. It does not transfer ownership of Bitcoin and does not act as a cryptocurrency custodian."
+        "heading": "When paying for a vault makes sense",
+        "items": [
+          "Your information is spread across banks, devices and different services",
+          "Different people should get different documents",
+          "You want a shorter wait than Google's minimum of three months",
+          "Your family doesn't all use the same platform, such as Apple or Google",
+          "You want an emergency option you can trigger yourself while you're alive"
         ],
         "links": [
           {
-            "label": "secure digital vault",
-            "path": "/digital-vault"
+            "label": "digital vault vs cloud storage",
+            "path": "/guides/digital-vault-vs-cloud-storage"
           },
           {
-            "label": "dead man's switch",
-            "path": "/dead-mans-switch"
+            "label": "what a digital vault is",
+            "path": "/guides/what-is-a-digital-vault"
           }
         ]
       }
     ],
     "related": [
       {
-        "path": "/guides/what-happens-to-crypto-when-you-die",
-        "label": "What Happens to Cryptocurrency When You Die?"
+        "label": "See plans and prices",
+        "path": "/pricing"
       },
       {
-        "path": "/dead-mans-switch",
-        "label": "dead man's switch"
+        "label": "What Is a Digital Vault?",
+        "path": "/guides/what-is-a-digital-vault"
       },
       {
-        "path": "/digital-vault",
-        "label": "secure digital vault"
+        "label": "Digital Vault vs Cloud Storage",
+        "path": "/guides/digital-vault-vs-cloud-storage"
       },
       {
-        "path": "/security",
-        "label": "Review security details"
+        "label": "How a Dead Man's Switch Email Works",
+        "path": "/guides/dead-mans-switch-email"
       }
     ],
-    "ctaVariant": "crypto",
-    "category": "Crypto & Digital Assets",
-    "cardTitle": "What Happens to Bitcoin When You Die?",
-    "cardDescription": "How self-custody, exchanges, hardware wallets, recovery information, and estate planning affect Bitcoin access after death."
+    "ctaVariant": "vault",
+    "ctaAfterSection": 2,
+    "category": "Digital Vaults & Emergency Information",
+    "cardTitle": "How Much Does a Digital Vault Cost?",
+    "cardDescription": "Free options from Google and Apple, what paid services charge, and when paying is worth it."
   }
 ];
 

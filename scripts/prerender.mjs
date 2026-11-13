@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { buildSitemap } from "./sitemap.mjs";
+import { redirectPage, redirects } from "./redirects.mjs";
 
 const projectRoot = resolve(import.meta.dirname, "..");
 const distDir = resolve(projectRoot, "dist");
@@ -106,6 +107,16 @@ async function main() {
     const target = outputPath(route.path);
     await mkdir(dirname(target), { recursive: true });
     await writeFile(target, html);
+  }
+
+  // Old addresses of pages that moved: a small page pointing at the new one.
+  const routePaths = new Set(routes.map(({ path }) => path));
+  for (const redirect of redirects) {
+    if (routePaths.has(redirect.from)) throw new Error(`Redirect ${redirect.from} would replace a real page`);
+    if (!routePaths.has(redirect.to)) throw new Error(`Redirect ${redirect.from} points to a missing page: ${redirect.to}`);
+    const target = outputPath(redirect.from);
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, redirectPage(redirect, siteUrl));
   }
 
   const notFoundRoute = { path: "/404", title: "Page Not Found | AnyCircumstances", description: "The requested page could not be found.", type: "website", schema: { "@context": "https://schema.org", "@type": "WebPage", name: "Page Not Found", url: `${siteUrl}/404` } };
