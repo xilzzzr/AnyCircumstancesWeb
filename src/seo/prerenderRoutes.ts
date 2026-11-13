@@ -11,6 +11,7 @@ const guideRoutes: PublicRouteSeo[] = guides.map((guide) => {
     title: guide.seoTitle,
     description: guide.description,
     type: "article",
+    lastmod: guide.modified,
     schema: [
       {
         "@context": "https://schema.org",
@@ -22,6 +23,7 @@ const guideRoutes: PublicRouteSeo[] = guides.map((guide) => {
         author: { "@type": "Organization", name: "AnyCircumstances" },
         publisher: {
           "@type": "Organization",
+          "@id": `${SITE_URL}/#organization`,
           name: "AnyCircumstances",
           logo: { "@type": "ImageObject", url: `${SITE_URL}/favicon-256.png` },
         },

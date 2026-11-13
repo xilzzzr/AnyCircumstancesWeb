@@ -96,3 +96,37 @@ JavaScript content type and immutable cache header; missing JS must return 404,
 never HTML with status 200. Keep an old tab open across a release and follow an
 unvisited setup link. If a chunk still fails, the application offers manual reload
 and dashboard recovery, with no automatic reload loop.
+
+## One address for search engines
+
+The live server currently answers `https://www.anycircumstances.com/` with a
+full copy of the site, so Google sees two versions of every page. Every page's
+canonical tag already points to `https://anycircumstances.com`, but a permanent
+redirect is the clear signal. Give `www.anycircumstances.com` its own site block
+that redirects, as in `Caddyfile.routing.example`:
+
+```caddy
+www.anycircumstances.com {
+	redir https://anycircumstances.com{uri} permanent
+}
+```
+
+and remove `www.anycircumstances.com` from the main site block's address list.
+Check after reloading Caddy:
+
+```sh
+curl -sSI https://www.anycircumstances.com/pricing
+# expect: 308 with location: https://anycircumstances.com/pricing
+```
+
+## Pages that moved
+
+`scripts/redirects.mjs` lists old addresses of pages that were merged or
+renamed. The build writes a small page at each old address that sends visitors
+and search engines to the new one, so this works without a server change. A
+server redirect is still the cleanest signal; the example Caddyfile has one
+`redir` line per entry:
+
+```caddy
+redir /guides/what-happens-to-bitcoin-when-you-die /guides/what-happens-to-crypto-when-you-die permanent
+```
