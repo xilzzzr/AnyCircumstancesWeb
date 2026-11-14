@@ -124,6 +124,10 @@
       {
         "label": "how check-ins and grace periods work",
         "path": "/how-it-works"
+      },
+      {
+        "label": "dead man's switch services compared",
+        "path": "/guides/dead-mans-switch-services-compared"
       }
     ]
   },
@@ -199,6 +203,14 @@
       {
         "label": "emergency information vault",
         "path": "/emergency-information-vault"
+      },
+      {
+        "label": "is a digital vault worth it?",
+        "path": "/guides/is-a-digital-vault-worth-it"
+      },
+      {
+        "label": "what a digital vault costs",
+        "path": "/guides/digital-vault-cost"
       }
     ]
   },

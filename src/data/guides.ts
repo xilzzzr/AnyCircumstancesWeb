@@ -1778,6 +1778,352 @@ export const guides: Guide[] = [
     "category": "Family & Account Planning",
     "cardTitle": "Password Manager Emergency Access",
     "cardDescription": "What Bitwarden, LastPass, Keeper, Proton and 1Password offer, and what a password manager can't hand over."
+  },
+  {
+    "slug": "is-a-digital-vault-worth-it",
+    "title": "Is a Digital Vault Worth It? How to Choose a Secure One",
+    "seoTitle": "Is a Digital Vault Worth It? How to Choose a Secure One",
+    "description": "When a digital vault is worth paying for, when it isn't, what makes one secure, and the questions to ask before you choose one.",
+    "intro": "A digital vault is worth it if your important documents are scattered and someone would need them quickly if you were in hospital or died. It's not worth paying for if everything already lives in one Google or Apple account, or your lawyer holds the only papers that matter. The other half of the question is safety: a vault is only as good as its encryption, its sign-in, and what it does when you can't respond.",
+    "published": "2026-11-14",
+    "modified": "2026-11-14",
+    "sections": [
+      {
+        "heading": "When a digital vault is worth it",
+        "items": [
+          "Your documents are spread across email, a laptop, paper files and different banks",
+          "Someone would need them fast: a partner, an adult child or a business partner",
+          "Different people should get different things",
+          "You hold things that are hard to replace or explain, such as crypto recovery steps or business logins",
+          "You travel, live alone or work somewhere risky, and want something to happen if you can't respond"
+        ]
+      },
+      {
+        "heading": "When it isn't",
+        "items": [
+          "Almost everything is in your Google or Apple account, and their free legacy tools cover it",
+          "One person already has copies of everything and knows where the originals are",
+          "Your lawyer keeps your will and estate papers, and that's all your family would need",
+          "You'd stop updating it after a few months. Old insurance details or a closed bank account can send family the wrong way"
+        ],
+        "links": [
+          {
+            "label": "Google and Apple's free tools",
+            "path": "/guides/google-inactive-account-manager-apple-legacy-contact"
+          },
+          {
+            "label": "what a digital vault costs",
+            "path": "/guides/digital-vault-cost"
+          }
+        ]
+      },
+      {
+        "heading": "What makes a digital vault secure",
+        "cards": [
+          {
+            "heading": "Encryption before upload",
+            "text": "Files should be encrypted on your device before they reach the company, so a break-in on its servers doesn't expose them. Look for \"end-to-end\" or \"encrypted in your browser\" in how the company describes it."
+          },
+          {
+            "heading": "Who else holds a key",
+            "text": "A vault where only you hold the key (often called zero-knowledge) can't hand files to your family unless they have your password. A vault that can deliver files on its own has to keep a release key somewhere. Ask how that key is protected and when it can be used."
+          },
+          {
+            "heading": "Strong sign-in",
+            "text": "Two-step sign-in, such as a code from an app, protects you if your password leaks. Check whether the vault offers it, and turn it on for the email account the vault sends password resets to."
+          },
+          {
+            "heading": "Clear rules for who gets in",
+            "text": "You should be able to say exactly who sees what, and when. Watch for setups that give someone full access straight away when you only meant \"if something happens\"."
+          },
+          {
+            "heading": "A plan for when you can't respond",
+            "text": "If the point is for family to get in, the vault should explain exactly how: a check-in system, a death certificate process or a named contact, and how long each takes."
+          },
+          {
+            "heading": "A way to get your files back",
+            "text": "You should be able to download your own files at any time, so you're not stuck if the company changes its prices or closes."
+          }
+        ]
+      },
+      {
+        "heading": "What is the best digital vault?",
+        "paragraphs": [
+          "There isn't one best digital vault. The best one does the job you actually need and is one you'll keep up to date. Many people use two: a password manager for logins, and a vault for documents."
+        ],
+        "cards": [
+          {
+            "heading": "Passwords to pass on later",
+            "text": "A password manager with emergency access."
+          },
+          {
+            "heading": "Your Google or Apple data",
+            "text": "Google Inactive Account Manager or Apple Legacy Contact. Both are free."
+          },
+          {
+            "heading": "Copies of everyday files",
+            "text": "The cloud storage you already use."
+          },
+          {
+            "heading": "Wills and legal papers",
+            "text": "An estate lawyer."
+          },
+          {
+            "heading": "Paper originals",
+            "text": "A fireproof box at home or a safe deposit box."
+          },
+          {
+            "heading": "Chosen documents for chosen people",
+            "text": "A vault with check-ins, such as AnyCircumstances, if they should reach people when you stop responding."
+          }
+        ],
+        "links": [
+          {
+            "label": "password manager emergency access",
+            "path": "/guides/password-manager-emergency-access"
+          },
+          {
+            "label": "dead man's switch services compared",
+            "path": "/guides/dead-mans-switch-services-compared"
+          }
+        ]
+      },
+      {
+        "heading": "Questions to ask before you pay",
+        "items": [
+          "Can the company read my files, and when?",
+          "What happens if I forget my password or encryption passphrase?",
+          "How exactly does my family get access, and how long does it take?",
+          "Do the people I choose need to create an account?",
+          "Is two-step sign-in available?",
+          "Can I download my files whenever I want?",
+          "Is there a free plan or a trial?"
+        ]
+      },
+      {
+        "heading": "How AnyCircumstances answers those questions",
+        "paragraphs": [
+          "We'd rather you choose with the full picture, including the parts that aren't in our favor."
+        ],
+        "items": [
+          "Files are encrypted in your browser, and your vault passphrase never reaches us. So that your contacts can open files without your passphrase, each file is also protected by an emergency-release key our systems can use. That means we aren't zero-knowledge",
+          "If you forget your vault passphrase, we can't reset it, so you couldn't open your own files in the app. Your files stay stored, and delivery to your contacts still works",
+          "Your family gets access when you miss a check-in (you choose from daily to every 30 days) and a grace period of 6 to 72 hours runs out. Each person then gets an email with links to the files you assigned to them",
+          "Your contacts don't need an account",
+          "We don't offer two-step sign-in yet, so protect your email account with it, because password resets go there",
+          "You can download your own files in the app at any time with your passphrase",
+          "There's no free plan. Prices start at $4.99 a month"
+        ],
+        "links": [
+          {
+            "label": "security details",
+            "path": "/security"
+          },
+          {
+            "label": "plans and prices",
+            "path": "/pricing"
+          }
+        ]
+      }
+    ],
+    "related": [
+      {
+        "label": "How Much Does a Digital Vault Cost?",
+        "path": "/guides/digital-vault-cost"
+      },
+      {
+        "label": "What Is a Digital Vault?",
+        "path": "/guides/what-is-a-digital-vault"
+      },
+      {
+        "label": "Digital Vault vs Cloud Storage",
+        "path": "/guides/digital-vault-vs-cloud-storage"
+      },
+      {
+        "label": "Secure digital vault",
+        "path": "/digital-vault"
+      }
+    ],
+    "ctaVariant": "vault",
+    "category": "Digital Vaults & Emergency Information",
+    "cardTitle": "Is a Digital Vault Worth It?",
+    "cardDescription": "When it's worth paying for, what makes one secure, and the questions to ask before you choose."
+  },
+  {
+    "slug": "dead-mans-switch-services-compared",
+    "title": "Dead Man's Switch Services Compared",
+    "seoTitle": "Dead Man's Switch Services Compared: 8 Options",
+    "description": "Eight dead man's switch services compared, including Google's free tool: what each sends, how you check in, who can read your files and what it costs.",
+    "intro": "We make one of these services, AnyCircumstances, so read this knowing that. Everything here about the others comes from their own websites, checked on 14 November 2026. Where a site didn't say something, we left it out rather than guess. The short version: if you only want to send a few emails, a simple service or Google's free tool may be all you need. If you want to send documents to different people, look at how each one encrypts files and whether your recipients need an account.",
+    "published": "2026-11-14",
+    "modified": "2026-11-14",
+    "comparison": {
+      "columns": [
+        "Service",
+        "Built around",
+        "Cheapest option"
+      ],
+      "rows": [
+        [
+          "Dead Man's Switch",
+          "Emails you write ahead of time",
+          "$2 a month, billed yearly"
+        ],
+        [
+          "KinSwitch",
+          "Notes and documents, with text reminders in the US and Canada",
+          "$7.99 a month"
+        ],
+        [
+          "LastSend",
+          "Personal letters, with trusted contacts confirming first",
+          "Free for text only, $4.99 a month with attachments"
+        ],
+        [
+          "GoodTrust",
+          "Wider estate planning in the US",
+          "Estate plan $149, then $39 a year"
+        ],
+        [
+          "Alcazar",
+          "Encrypted files and recovery phrases, with Signal and Telegram reminders",
+          "$5.99 a month"
+        ],
+        [
+          "Just In Case",
+          "An iPhone app that can phone you",
+          "Free for 10 items, $99 once for Pro"
+        ],
+        [
+          "Google Inactive Account Manager",
+          "Your Google account only",
+          "Free"
+        ],
+        [
+          "AnyCircumstances",
+          "Encrypted documents, each sent to the people you choose",
+          "$4.99 a month"
+        ]
+      ]
+    },
+    "sections": [
+      {
+        "heading": "What we compared",
+        "items": [
+          "What it sends: emails, letters, documents or passwords",
+          "How you check in, and how it reminds you before it does anything",
+          "Whether the people you choose need an account",
+          "Who can read your files, in the company's own words",
+          "What it costs, in US dollars as shown on each site. Prices change, so check before you buy"
+        ]
+      },
+      {
+        "heading": "The services, one by one",
+        "cards": [
+          {
+            "heading": "Dead Man's Switch (deadmansswitch.net)",
+            "text": "Sends emails you write ahead of time, and yearly plans can add attachments up to 10 MB. You check in by clicking a link sent by email, its Android app, Telegram or a browser notification, on a schedule from one day to years. On the free plan, emails only go to your own address as a test. Premium is $2 a month billed yearly, or $60 once. It has been running since the late 2000s. It says its backups are encrypted, suggests encrypting anything sensitive yourself, and says not to use it if you need strong privacy guarantees."
+          },
+          {
+            "heading": "KinSwitch",
+            "text": "Sends each person a secure link to the notes and documents you assigned them, and they don't need an account. You check in with a one-click link in a reminder email or text (texts work for US and Canadian numbers) or from the dashboard. The shortest window is one day; new switches start at 7 days with a 3-day grace period, and a final notice goes out 3 hours before it fires. Files are encrypted at rest, and KinSwitch says it holds the keys so family is never locked out. From $7.99 a month or $79 a year. A card is required and billing starts on day 31. The Starter plan allows up to 2 people per switch."
+          },
+          {
+            "heading": "LastSend",
+            "text": "Made for personal letters rather than legal documents. Each person gets an email with a link to a memorial page. You check in by tapping \"I'm Still Here\" in the app. If you don't, it reminds you for about 7 days, then asks the two trusted contacts you named. Letters go out 7 days after one of them confirms you've died, or 60 days after they were first asked if nobody answers. It says plainly that it isn't end-to-end encrypted. Free for text-only letters to 5 people; Plus is $4.99 a month and adds attachments up to 100 MB."
+          },
+          {
+            "heading": "GoodTrust",
+            "text": "A US digital estate planning service. Its dead man's switch lets the contacts you assigned manage your accounts, documents, devices and will, and sends any future messages you wrote. It checks in by email on a schedule you choose and activates after three unanswered emails. Future messages arrive by email whether or not the recipient has an account. It stores personal data with AES-256 encryption and says it is SOC 2 Type II certified. The Estate plan is $149, then $39 a year. Its documents are only valid in the United States."
+          },
+          {
+            "heading": "Alcazar Dead Man's Switch",
+            "text": "Sends encrypted messages and files, such as documents, recovery phrases and passwords, to as many contacts as you like. You choose daily, weekly or monthly check-ins, with reminders by email, Signal and Telegram, and a grace period with stronger reminders over time. It says it doesn't read your files and that they're end-to-end encrypted until delivery. $5.99 a month, $59 a year or $590 once. It's a US company with servers in Germany, and you can use an anonymous account."
+          },
+          {
+            "heading": "Just In Case",
+            "text": "An iPhone app (Android is listed as coming soon) for passwords, letters and crypto keys, delivered to the heirs you name. Opening the app counts as a check-in, every 7, 14, 30, 60 or 90 days. Before it fires it tries an email, then a push notification, then a text, then a phone call. It says your data is encrypted on your device with a zero-knowledge design. The free plan holds 10 items for one heir. Lifetime Pro is $99 once, though its terms say the price in the app can vary by region."
+          },
+          {
+            "heading": "Google Inactive Account Manager",
+            "text": "Free. Shares the Google data you choose with up to 10 people after 3 to 18 months without any activity on your account. It only covers what's in your Google account."
+          },
+          {
+            "heading": "AnyCircumstances (ours)",
+            "text": "Encrypted documents, each sent only to the people you assign. You check in with your PIN on a schedule from daily to every 30 days. If you miss one, you get 1 to 5 reminder emails during a grace period of 6 to 72 hours. Recipients confirm their email once when you add them and don't need an account. Files are encrypted in your browser, but our systems hold an emergency-release key so contacts can open files without your passphrase, so we aren't zero-knowledge. From $4.99 a month, with no free plan."
+          }
+        ],
+        "links": [
+          {
+            "label": "Google and Apple's free tools in detail",
+            "path": "/guides/google-inactive-account-manager-apple-legacy-contact"
+          }
+        ]
+      },
+      {
+        "heading": "How to choose",
+        "items": [
+          "You only want to send a few emails or letters: a simpler, cheaper service is fine",
+          "You want to send documents to different people: check that each person only gets their own files, and whether they need an account to open them",
+          "Privacy matters most: read how each company describes its encryption. \"Encrypted at rest\" usually means the company holds the keys and could read your files. \"End-to-end\" or \"zero-knowledge\" means it says it can't",
+          "You might miss an email reminder: look for app, text, Signal, Telegram or phone call reminders",
+          "You don't want a monthly bill: Dead Man's Switch, Alcazar and Just In Case have one-off prices",
+          "Think about the company too. Several of these are small, so ask what happens to your messages if it shuts down"
+        ]
+      },
+      {
+        "heading": "Where AnyCircumstances is weaker",
+        "items": [
+          "Reminders and delivery are by email only. KinSwitch can text you, Alcazar uses Signal and Telegram, and Just In Case can phone you",
+          "We aren't zero-knowledge. Alcazar says files are end-to-end encrypted until delivery, and Just In Case says it uses a zero-knowledge design",
+          "The longest check-in interval is 30 days. Dead Man's Switch allows years, and Just In Case allows 90 days",
+          "There's no free plan and no one-off price",
+          "There's no two-step sign-in yet"
+        ]
+      },
+      {
+        "heading": "Where it's stronger",
+        "items": [
+          "Each person gets only the files you assigned to them",
+          "Recipients don't need an account",
+          "A grace period of up to 72 hours with up to 5 reminders, so a missed check-in doesn't send anything straight away",
+          "An emergency PIN that sends your files straight away if you need it to"
+        ],
+        "links": [
+          {
+            "label": "how check-ins and release work",
+            "path": "/how-it-works"
+          },
+          {
+            "label": "security details",
+            "path": "/security"
+          }
+        ],
+        "finalParagraph": "Spotted something out of date about any of these services? Tell us and we'll correct it."
+      }
+    ],
+    "related": [
+      {
+        "label": "How a Dead Man's Switch Email Works",
+        "path": "/guides/dead-mans-switch-email"
+      },
+      {
+        "label": "Google and Apple's Free Legacy Tools",
+        "path": "/guides/google-inactive-account-manager-apple-legacy-contact"
+      },
+      {
+        "label": "Password Manager Emergency Access vs a Dead Man's Switch",
+        "path": "/guides/password-manager-emergency-access"
+      },
+      {
+        "label": "Contact us",
+        "path": "/contact"
+      }
+    ],
+    "ctaVariant": "switch",
+    "category": "Dead Man's Switch & Check-Ins",
+    "cardTitle": "Dead Man's Switch Services Compared",
+    "cardDescription": "Eight services, including Google's free tool: what each sends, who can read your files and what it costs."
   }
 ];
 
