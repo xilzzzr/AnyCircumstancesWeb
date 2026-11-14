@@ -1,7 +1,14 @@
 # Merge these handlers into the existing HTTPS site block after preserving any
 # production-specific logging, headers, TLS, and upstream settings. The backend
 # matcher reflects the route prefixes exposed by backend/server.js.
-anycircumstances.com, www.anycircumstances.com {
+
+# Serve the site from one address only. Without this, www.anycircumstances.com
+# shows a full second copy of every page to Google.
+www.anycircumstances.com {
+	redir https://anycircumstances.com{uri} permanent
+}
+
+anycircumstances.com {
 	encode zstd gzip
 	root * /var/www/anycircumstances/dist
 
@@ -14,6 +21,9 @@ anycircumstances.com, www.anycircumstances.com {
 		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(self)"
 		Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: blob: https:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://*.amazonaws.com https://*.stripe.com; worker-src 'self' blob:"
 	}
+
+	# Pages that moved (keep in sync with scripts/redirects.mjs).
+	redir /guides/what-happens-to-bitcoin-when-you-die /guides/what-happens-to-crypto-when-you-die permanent
 
 	@backend path /auth /auth/* /files /files/* /apple /apple/* /stripe/webhook /health
 	handle @backend {
