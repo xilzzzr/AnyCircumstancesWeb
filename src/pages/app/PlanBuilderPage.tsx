@@ -129,7 +129,7 @@ export default function PlanBuilderPage() {
         <CardHeader>
           <CardTitle>Build your plan</CardTitle>
           <CardDescription>
-            Plans start at {displayPriceFrom}/month. Pick storage, check-in frequency and billing. There’s no free plan or trial — files can be stored once your plan is active.
+            Plans start at {displayPriceFrom}/month. Pick storage, check-in frequency and billing. There’s no free plan. You can store files once your plan is active.
           </CardDescription>
         </CardHeader>
 
@@ -252,7 +252,7 @@ export default function PlanBuilderPage() {
               </p>
             )}
             <p className="text-xs leading-relaxed text-muted-foreground">
-              Cancel from Account settings at any time. Cancelling ends your plan immediately and permanently deletes your stored files. Payments are non-refundable except where required by law — see{" "}
+              Cancel from Account settings at any time. Cancelling ends your plan immediately and permanently deletes your stored files. Payments are non-refundable except where required by law. See{" "}
               <Link to="/terms" className="text-primary underline underline-offset-4">Terms</Link>.
             </p>
           </div>

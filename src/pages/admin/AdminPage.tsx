@@ -187,7 +187,7 @@ export default function AdminPage() {
                 {(sub?.interval === "annual" || customer.billingInterval === "annual") && <p className="text-xs text-muted-foreground">Annual pricing</p>}
                 {!sub?.discounts?.length && <p className="text-xs text-muted-foreground">{sub && !sub.error ? "No Stripe coupon" : apple ? "Apple discounts unavailable" : customer.stripeSubscriptionId ? "Discounts unavailable until Stripe sync" : "No Stripe subscription"}</p>}</div></td>
               <td className="p-4"><p>Check-ins: {customer.checkInFrequency || "Not configured"}</p><p className="mt-1 text-xs text-muted-foreground">{customer.addons.length ? customer.addons.join(", ") : "No add-ons"}</p></td>
-              <td className="p-4"><p className={overLimit ? "text-amber-200" : ""}><Database size={14} className="mr-1 inline" />{gb(customer.usedBytes)} / {customer.storageLimitGb ?? "—"} GB</p>{overLimit && <p className="mt-1 text-xs text-amber-200">Over limit</p>}</td>
+              <td className="p-4"><p className={overLimit ? "text-amber-200" : ""}><Database size={14} className="mr-1 inline" />{gb(customer.usedBytes)} / {customer.storageLimitGb != null ? `${customer.storageLimitGb} GB` : "no plan limit"}</p>{overLimit && <p className="mt-1 text-xs text-amber-200">Over limit</p>}</td>
             </tr>;
           })}</tbody></table>
           {busy && <p role="status" className="p-8 text-center text-muted-foreground">Loading customers…</p>}{data && !data.customers.length && <p className="p-8 text-center text-muted-foreground">No customers found.</p>}

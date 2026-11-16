@@ -59,12 +59,13 @@ describe('pricing page', () => {
 
     // Unimplemented features are not purchasable.
     expect(screen.queryByRole('checkbox')).toBeNull();
-    expect(screen.getByText('Planned — not available yet')).toBeTruthy();
+    expect(screen.getByText('Planned, not available yet')).toBeTruthy();
     const termsLinks = screen.getAllByRole('link', { name: 'Terms' });
     expect(termsLinks.length).toBeGreaterThan(0);
     for (const link of termsLinks) expect(link.getAttribute('href')).toBe('/terms');
     expect(screen.getAllByText(/Cancelling ends your plan immediately and permanently deletes your stored files/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/no free plan or trial/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/no free plan/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/no free plan or trial/i)).toBeNull();
     expect(screen.queryByText(/Cancel anytime/i)).toBeNull();
 
     fireEvent.click(button);

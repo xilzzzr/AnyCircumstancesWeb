@@ -68,13 +68,13 @@ const CHECKIN_LABEL: Record<string, string> = {
 
 function formatDate(iso: string) {
   const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
+  if (Number.isNaN(d.getTime())) return "Unknown date";
   return d.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
 }
 
 function formatBytes(bytes: number) {
   const n = Number(bytes);
-  if (!Number.isFinite(n) || n < 0) return "—";
+  if (!Number.isFinite(n) || n < 0) return "Unknown size";
   const units = ["B", "KB", "MB", "GB", "TB"];
   let v = n;
   let i = 0;
@@ -88,7 +88,7 @@ function formatBytes(bytes: number) {
 
 function formatMoney(amountCents: number, currency: string) {
   const n = Number(amountCents);
-  if (!Number.isFinite(n)) return "—";
+  if (!Number.isFinite(n)) return "Unknown amount";
   const dollars = n / 100;
   const cur = String(currency || "usd").toUpperCase();
   try {
@@ -275,7 +275,7 @@ export function BillingPage() {
   const badge = useMemo(() => (billing ? statusBadge(billing.status) : null), [billing]);
   const invoices = useMemo(() => summary?.invoices || [], [summary]);
 
-  const checkInLabel = billing ? (CHECKIN_LABEL[billing.checkInFrequency] || billing.checkInFrequency) : "—";
+  const checkInLabel = billing ? (CHECKIN_LABEL[billing.checkInFrequency] || billing.checkInFrequency) : "Not set";
 
   const lastPaid = useMemo(() => {
     const paid = invoices.find((i) => i.status === "paid");
@@ -311,7 +311,7 @@ export function BillingPage() {
               <div className="text-sm">
                 <h2 className="font-medium text-foreground">No active plan</h2>
                 <p className="text-muted-foreground mt-1">
-                  Choose a plan to start storing files. Without an active plan you can’t upload, store or download files, or add emergency contacts. There’s no free plan or trial.
+                  Choose a plan to start storing files. Without an active plan you can’t upload, store or download files, or add emergency contacts. There’s no free plan.
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   <Button asChild size="sm" className="min-h-11">
@@ -355,7 +355,7 @@ export function BillingPage() {
           <CardHeader>
             <CardTitle className="flex items-center justify-between">
               Your Plan
-              {badge ? <Badge variant={badge.variant}>{badge.label}</Badge> : <Badge variant="secondary">—</Badge>}
+              {badge ? <Badge variant={badge.variant}>{badge.label}</Badge> : <Badge variant="secondary">Unknown</Badge>}
             </CardTitle>
             <CardDescription>What your plan includes</CardDescription>
           </CardHeader>
@@ -391,7 +391,7 @@ export function BillingPage() {
 
                   <div className="text-right">
                     <div className="text-sm text-muted-foreground">Last updated</div>
-                    <div className="text-sm">{billing.updatedAt ? formatDate(billing.updatedAt) : "—"}</div>
+                    <div className="text-sm">{billing.updatedAt ? formatDate(billing.updatedAt) : "Not available"}</div>
                   </div>
                 </div>
 
@@ -404,7 +404,7 @@ export function BillingPage() {
                         <div className="text-xs text-muted-foreground">The most your encrypted files can add up to</div>
                       </div>
                     </div>
-                    <div className="text-sm font-medium">{Number.isFinite(storageLimitGb) && storageLimitGb > 0 ? `${storageLimitGb} GB` : "—"}</div>
+                    <div className="text-sm font-medium">{Number.isFinite(storageLimitGb) && storageLimitGb > 0 ? `${storageLimitGb} GB` : "Not set"}</div>
                   </div>
 
                   <div className="flex items-start justify-between gap-3">
@@ -457,7 +457,7 @@ export function BillingPage() {
           <CardContent className="space-y-4">
             <div className="space-y-2">
               <div className="flex justify-between text-sm">
-                <span>{storageUsedBytes !== null ? `${formatBytes(storageUsedBytes)} used` : "—"}</span>
+                <span>{storageUsedBytes !== null ? `${formatBytes(storageUsedBytes)} used` : "Usage not available"}</span>
                 <span className="text-muted-foreground">
                   {storageLimitBytes > 0 ? `${formatBytes(storageLimitBytes)} limit` : hasNoPlan ? "No storage until you choose a plan" : "Storage limit unavailable"}
                 </span>
@@ -533,7 +533,7 @@ export function BillingPage() {
           </div>
           {isPaid && !isAppleBilled && (
             <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
-              Cancelling (from Account settings) ends your plan immediately and permanently deletes your stored files. Payments are non-refundable except where required by law — see{" "}
+              Cancelling (from Account settings) ends your plan immediately and permanently deletes your stored files. Payments are non-refundable except where required by law. See{" "}
               <Link to="/terms" className="text-primary underline underline-offset-4">Terms</Link>.
             </p>
           )}
@@ -549,9 +549,9 @@ export function BillingPage() {
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="rounded-lg border p-3">
               <div className="text-xs text-muted-foreground">Last payment</div>
-              <div className="text-sm font-medium">{lastPaid ? formatDate(lastPaid) : "—"}</div>
+              <div className="text-sm font-medium">{lastPaid ? formatDate(lastPaid) : "None yet"}</div>
             </div>
-            {nextChargeLabel && nextChargeLabel !== "—" && (
+            {nextChargeLabel && nextChargeLabel !== "Unknown date" && (
               <div className="rounded-lg border p-3">
                 <div className="text-xs text-muted-foreground">Next charge date</div>
                 <div className="text-sm font-medium">{nextChargeLabel}</div>

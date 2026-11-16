@@ -88,7 +88,7 @@ function getInitials(name?: string | null, email?: string | null) {
 
 function formatBytes(bytes: number) {
   const n = Number(bytes);
-  if (!Number.isFinite(n) || n < 0) return "—";
+  if (!Number.isFinite(n) || n < 0) return "Unknown";
   const units = ["B", "KB", "MB", "GB", "TB"];
   let v = n;
   let i = 0;
@@ -115,7 +115,7 @@ function SidebarContent({ onItemClick }: { onItemClick?: () => void }) {
             to={item.href}
             onClick={onItemClick}
             className={cn(
-              "app-nav-item flex items-center gap-3 px-3 py-2.5 rounded-full text-xs font-medium transition-all",
+              "app-nav-item flex items-center gap-3 px-3 py-2.5 rounded-md text-xs font-medium transition-all",
               isActive
                 ? "is-active"
                 : "text-muted-foreground hover:text-foreground"
@@ -245,7 +245,7 @@ export function AppLayout() {
           <button
             onClick={() => vaultLocked ? navigate('/app/check-in') : lockVault()}
             className={cn(
-                "vault-status w-full flex items-center gap-3 px-3 py-2.5 rounded-full text-xs font-medium transition-all",
+                "vault-status w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-xs font-medium transition-all",
               vaultLocked
                 ? "bg-warning/10 text-warning hover:bg-warning/20"
                 : "bg-success/10 text-success hover:bg-success/20"
@@ -281,7 +281,7 @@ export function AppLayout() {
               <div className="flex items-center justify-between text-xs mb-1">
                 <span className="text-muted-foreground">Storage</span>
                 <span className="font-medium">
-                  {storageUsedBytes === null ? "—" : formatBytes(storageUsedBytes)}
+                  {storageUsedBytes === null ? "Not available" : formatBytes(storageUsedBytes)}
                 </span>
               </div>
               <Progress value={storagePercent} className="h-1.5" />

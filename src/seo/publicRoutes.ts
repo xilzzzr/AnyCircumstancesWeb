@@ -27,7 +27,7 @@ const page = (path: string, title: string, description: string): PublicRouteSeo 
 });
 
 export const publicRoutes: PublicRouteSeo[] = [
-  page("/", "Secure Emergency Digital Vault & Dead Man’s Switch | AnyCircumstances", "Make sure your family can get to important documents when you can’t. Encrypted vault, scheduled check-ins, and secure email delivery to the people you choose."),
+  page("/", "Secure Emergency Digital Vault & Dead Man’s Switch | AnyCircumstances", "Store encrypted documents and choose who receives each one. If you stop checking in and your grace period ends, they are emailed secure links to their files."),
   page("/dead-mans-switch", content.switch.title, content.switch.description),
   page("/digital-vault", "Secure Digital Vault for Important Documents | AnyCircumstances", "A personal digital vault for encrypted documents, emergency information, recovery instructions, and controlled delivery to trusted recipients."),
   page("/emergency-information-vault", "Emergency Information Vault for Family | AnyCircumstances", "Organize important documents, contacts, account instructions, insurance information, recovery details, and emergency files for trusted recipients."),

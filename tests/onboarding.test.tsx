@@ -63,9 +63,9 @@ describe('new account routes', () => {
     await pin('123456');
     await waitFor(() => expect(router.state.location.pathname).toBe('/create-panic-pin'));
     await pin('654321');
-    await screen.findByRole('heading', { name: 'Make your vault ready.' });
+    await screen.findByRole('heading', { name: 'Finish setting up your account' });
     fireEvent.click(screen.getByRole('link', { name: /Go to dashboard/ }));
-    await screen.findByRole('heading', { name: /Everything important/ });
+    await screen.findByRole('heading', { name: 'Dashboard', level: 1 });
     expect(router.state.location.pathname).toBe('/app');
     expect(fetchMock.mock.calls.filter(([p]) => p === '/auth/me')).toHaveLength(2);
     unsubscribe();

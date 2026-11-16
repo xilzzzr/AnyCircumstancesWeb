@@ -13,7 +13,7 @@ export function ContactPage() {
     <div className="container mx-auto px-4 py-16 md:py-24">
       <div className="contact-panel mx-auto max-w-3xl">
         <p className="micro-label"><span className="status-dot" aria-hidden="true" /> SUPPORT</p>
-        <h1 className="mt-6 text-4xl md:text-6xl">How can we help?</h1>
+        <h1 className="mt-6 text-4xl md:text-6xl">Contact support</h1>
         <p className="mt-6 max-w-xl text-lg text-muted-foreground">
           Questions about your vault, account or subscription are welcome. We reply by email.
         </p>

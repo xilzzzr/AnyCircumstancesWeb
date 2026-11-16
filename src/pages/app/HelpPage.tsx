@@ -7,7 +7,7 @@ export function HelpPage() {
     <div className="p-6 lg:p-8">
       <div className="mx-auto max-w-3xl">
         <div className="micro-label"><span className="status-dot" /> SUPPORT</div>
-        <h1 className="mt-4 text-3xl lg:text-4xl">How can we help?</h1>
+        <h1 className="mt-4 text-3xl lg:text-4xl">Help and support</h1>
         <p className="mt-3 max-w-xl text-sm text-muted-foreground">
           Questions about your vault, account, uploads, or subscription are welcome. Our team will respond by email.
         </p>

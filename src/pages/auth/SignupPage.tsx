@@ -326,7 +326,7 @@ export function SignupPage() {
 
       <div className="hidden lg:flex flex-1 bg-gradient-hero items-center justify-center p-12">
         <div className="max-w-md text-center">
-          <div className="h-20 w-20 rounded-2xl bg-primary/20 flex items-center justify-center mx-auto mb-8 animate-pulse-glow">
+          <div className="h-20 w-20 rounded-2xl bg-primary/20 flex items-center justify-center mx-auto mb-8">
             <Shield className="h-10 w-10 text-primary" />
           </div>
           <h2 className="text-2xl font-bold text-vault-foreground mb-4">

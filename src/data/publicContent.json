@@ -328,10 +328,10 @@
   },
   "home": {
     "eyebrow": "ENCRYPTED VAULT + CHECK-INS",
-    "h1": "Make sure your family can get to what matters when you can’t.",
-    "intro": "Keep important documents, account instructions and letters in an encrypted vault, and choose who should receive each one. If you stop checking in, they’re emailed secure links to their files. Until then, they receive nothing.",
-    "heading": "Four steps, then it runs in the background",
-    "sectionIntro": "Set it up once. Your regular check-ins hold everything back, and a grace period with reminders gives you time if you miss one.",
+    "h1": "Encrypted documents, sent to the people you choose if you stop checking in.",
+    "intro": "Upload documents, account instructions or letters to an encrypted vault and choose who gets each file. You check in on a schedule. If you miss a check-in and your grace period runs out, those people are emailed secure links. Until then, they receive nothing.",
+    "heading": "How it works, in four steps",
+    "sectionIntro": "You set it up once. Each check-in resets the timer, and if you miss one you get reminder emails during a grace period before anything is sent.",
     "cards": [
       {
         "heading": "Secure digital vault",

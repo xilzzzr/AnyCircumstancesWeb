@@ -3,7 +3,6 @@ import { Button } from "@/components/ui/button";
 import content from "@/data/publicContent.json";
 import { ContextualCta } from "@/components/public/ContextualCta";
 import { ContentLinks, PublicContentSection } from "@/components/public/ArticleContent";
-import { motion } from "@/components/public/staticMotion";
 import {
   Vault,
   Lock,
@@ -24,13 +23,6 @@ import {
   ScrollText,
 } from "lucide-react";
 
-const fadeUp = {
-  initial: { opacity: 0, y: 18 },
-  whileInView: { opacity: 1, y: 0 },
-  viewport: { once: true },
-  transition: { duration: 0.5 },
-};
-
 export function DigitalVaultPage() {
   return (
     <div className="flex flex-col">
@@ -41,33 +33,24 @@ export function DigitalVaultPage() {
 
         <div className="container mx-auto px-4 relative">
           <div className="max-w-4xl mx-auto text-center">
-            <motion.div {...fadeUp}>
-              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 mb-6">
+            <div>
+              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-primary/10 border border-primary/20 mb-6">
                 <Vault className="h-4 w-4 text-primary" />
                 <span className="text-sm font-medium text-primary">
                   {content.vault.eyebrow}
                 </span>
               </div>
-            </motion.div>
+            </div>
 
-            <motion.h1
-              initial={{ opacity: 0, y: 18 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.55, delay: 0.05 }}
+            <h1
               className="text-4xl md:text-5xl lg:text-6xl font-bold text-vault-foreground mb-6 leading-tight"
-            >{content.vault.h1}</motion.h1>
+            >{content.vault.h1}</h1>
 
-            <motion.p
-              initial={{ opacity: 0, y: 18 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.55, delay: 0.12 }}
+            <p
               className="text-lg md:text-xl text-vault-foreground/70 mb-10 max-w-3xl mx-auto"
-            >{content.vault.intro}</motion.p>
+            >{content.vault.intro}</p>
 
-            <motion.div
-              initial={{ opacity: 0, y: 18 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.55, delay: 0.2 }}
+            <div
               className="flex flex-col sm:flex-row gap-4 justify-center"
             >
               <Button asChild size="lg" className="w-full sm:w-auto gap-2 shadow-glow"><Link to="/pricing">
@@ -81,12 +64,9 @@ export function DigitalVaultPage() {
                 ><Link to="/how-it-works">
                   See How Delivery Works
                 </Link></Button>
-            </motion.div>
+            </div>
 
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ duration: 0.55, delay: 0.35 }}
+            <div
               className="mt-12 grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-3xl mx-auto"
             >
               {[
@@ -107,7 +87,7 @@ export function DigitalVaultPage() {
                   <p className="mt-2 text-sm text-vault-foreground/60">{s.desc}</p>
                 </div>
               ))}
-            </motion.div>
+            </div>
           </div>
         </div>
       </section>
@@ -117,14 +97,14 @@ export function DigitalVaultPage() {
       <section className="py-20 bg-background">
         <div className="container mx-auto px-4">
           <div className="max-w-5xl mx-auto">
-            <motion.div {...fadeUp} className="text-center mb-12">
+            <div className="text-center mb-12">
               <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-4">
                 What people actually store
               </h2>
               <p className="text-lg text-muted-foreground max-w-3xl mx-auto">
-                The stuff that’s impossible to replace, annoying to recover, or stressful to explain on a deadline.
+                Common examples of files people keep in their vault.
               </p>
-            </motion.div>
+            </div>
 
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
               {[
@@ -135,12 +115,8 @@ export function DigitalVaultPage() {
                 { icon: Users, title: "Family access", desc: "Where key files are, who to contact, what matters most first." },
                 { icon: Shield, title: "Personal letters", desc: "Messages you want a specific person to receive." },
               ].map((c, idx) => (
-                <motion.div
+                <div
                   key={c.title}
-                  initial={{ opacity: 0, y: 18 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  viewport={{ once: true }}
-                  transition={{ duration: 0.5, delay: idx * 0.05 }}
                   className="p-6 rounded-2xl bg-card border border-border hover:border-primary/30 hover:shadow-lg transition-all"
                 >
                   <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center mb-4">
@@ -148,7 +124,7 @@ export function DigitalVaultPage() {
                   </div>
                   <h3 className="text-lg font-semibold text-foreground mb-2">{c.title}</h3>
                   <p className="text-muted-foreground">{c.desc}</p>
-                </motion.div>
+                </div>
               ))}
             </div>
 
@@ -165,14 +141,14 @@ export function DigitalVaultPage() {
       <section className="py-20 bg-muted/30">
         <div className="container mx-auto px-4">
           <div className="max-w-5xl mx-auto">
-            <motion.div {...fadeUp} className="text-center mb-12">
+            <div className="text-center mb-12">
               <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-4">
                 A vault with a release plan
               </h2>
               <p className="text-lg text-muted-foreground">
                 AnyCircumstances combines encrypted storage with configurable check-ins, reminders, a grace period, and trusted-recipient delivery. It is designed to make emergency access deliberate instead of giving someone permanent access in advance.
               </p>
-            </motion.div>
+            </div>
 
             <div className="grid md:grid-cols-3 gap-6">
               {[
@@ -180,12 +156,8 @@ export function DigitalVaultPage() {
                 { step: "02", icon: Clock, title: "Set check-ins", desc: "Check in daily or on custom scheduled days, weekly or monthly, with reminders and a grace period you choose." },
                 { step: "03", icon: Users, title: "Choose recipients", desc: "Contacts confirm their email once, and receive their files only if a release happens." },
               ].map((s, idx) => (
-                <motion.div
+                <div
                   key={s.step}
-                  initial={{ opacity: 0, y: 18 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  viewport={{ once: true }}
-                  transition={{ duration: 0.5, delay: idx * 0.08 }}
                   className="p-6 rounded-2xl bg-card border border-border"
                 >
                   <div className="flex items-center justify-between mb-4">
@@ -196,7 +168,7 @@ export function DigitalVaultPage() {
                   </div>
                   <h3 className="text-xl font-semibold text-foreground mb-2">{s.title}</h3>
                   <p className="text-muted-foreground">{s.desc}</p>
-                </motion.div>
+                </div>
               ))}
             </div>
 

@@ -40,7 +40,7 @@ export function LandingPage() {
       <section className="landing-hero relative overflow-hidden py-20 lg:py-28">
         <div className="absolute inset-0 bg-gradient-hero" />
         <div className="container relative mx-auto px-4">
-          <div className="landing-hero-copy hero-reveal mx-auto max-w-4xl text-center">
+          <div className="landing-hero-copy mx-auto max-w-4xl text-center">
             <p className="micro-label justify-center"><span className="status-dot" aria-hidden="true" /> {content.home.eyebrow}</p>
             <h1 className="mt-6 text-vault-foreground">{content.home.h1}</h1>
             <p className="mx-auto mt-6 max-w-2xl text-vault-foreground/80">{content.home.intro}</p>
@@ -54,7 +54,7 @@ export function LandingPage() {
             </div>
             <ul className="mt-10 flex flex-wrap justify-center gap-3" aria-label="Key protections">
               {reassurance.map((item) => (
-                <li key={item} className="flex items-center gap-2 rounded-full bg-vault-foreground/5 px-4 py-2 text-sm text-vault-foreground/80">
+                <li key={item} className="flex items-center gap-2 rounded-md bg-vault-foreground/5 px-4 py-2 text-sm text-vault-foreground/80">
                   <CheckCircle2 aria-hidden="true" className="h-4 w-4 text-primary" /> {item}
                 </li>
               ))}

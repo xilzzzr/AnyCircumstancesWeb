@@ -147,7 +147,7 @@ async function sendGraceReminders(pool, mail) {
         await mail.transporter.sendMail({
           from: mail.from,
           to: ownerEmail,
-          subject: "AnyCircumstances: Reminder — check-in required",
+          subject: "AnyCircumstances reminder: check-in required",
           ...rendered,
         });
         await pool.query(

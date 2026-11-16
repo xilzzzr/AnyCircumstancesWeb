@@ -26,15 +26,15 @@ export function OnboardingPage() {
         </Link>
         <div className="mb-8">
           <p className="text-xs uppercase tracking-widest text-primary/80">Your next steps</p>
-          <h1 className="mt-4 text-4xl font-medium tracking-tight text-foreground sm:text-5xl">Make your vault ready.</h1>
+          <h1 className="mt-4 text-4xl font-medium tracking-tight text-foreground sm:text-5xl">Finish setting up your account</h1>
           <p className="mt-5 max-w-xl text-base leading-relaxed text-muted-foreground">Your account is created. Follow these steps to decide what gets shared, with whom, and when.</p>
         </div>
         {pendingPlan && (
           <PlanSummary plan={pendingPlan} editHref={pricingHrefForPlan(pendingPlan)} title="The plan you chose" className="mb-8 p-5 sm:p-6">
             <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-              There’s no free plan or trial. Your plan starts when checkout is complete, and you can store files after that.
+              There’s no free plan. Your plan starts when checkout is complete, and you can store files after that. With a Pioneer invitation code, the first 30 days are free.
             </p>
-            <Button asChild className="mt-4 w-full min-h-11 rounded-full sm:w-auto">
+            <Button asChild className="mt-4 w-full min-h-11 sm:w-auto">
               <Link to={planHref}>Continue to checkout <ArrowRight aria-hidden="true" className="ml-2 h-4 w-4" /></Link>
             </Button>
           </PlanSummary>
@@ -58,7 +58,7 @@ export function OnboardingPage() {
           })}
         </ol>
         <div className="mt-8 border-t border-border pt-6">
-          <Button asChild variant={pendingPlan ? 'outline' : 'default'} className="w-full min-h-11 rounded-full sm:w-auto"><Link to="/app">Go to dashboard <ArrowRight aria-hidden="true" className="ml-2 h-4 w-4" /></Link></Button>
+          <Button asChild variant={pendingPlan ? 'outline' : 'default'} className="w-full min-h-11 sm:w-auto"><Link to="/app">Go to dashboard <ArrowRight aria-hidden="true" className="ml-2 h-4 w-4" /></Link></Button>
           <p className="mt-4 text-sm leading-relaxed text-muted-foreground">You can return to this guide or continue from the dashboard at any time. Opening a step does not activate protection.</p>
         </div>
       </div>

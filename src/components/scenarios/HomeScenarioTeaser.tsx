@@ -11,13 +11,13 @@ export function HomeScenarioTeaser() {
     <section className="scenario-teaser">
       <div className="container mx-auto px-4">
         <div className="scenario-section-head">
-          <div><span className="micro-label"><span className="status-dot" /> REAL-LIFE SCENARIOS</span><h2>Could this happen to you?</h2></div>
-          <div><p>Start with the situation—not the software. See what you might prepare, who would receive it, and when.</p><Link to="/scenarios">Explore every situation <ArrowRight /></Link></div>
+          <div><span className="micro-label"><span className="status-dot" /> EXAMPLES</span><h2>Examples of what people store</h2></div>
+          <div><p>Each example shows what someone might upload, who would receive it, and what would trigger delivery.</p><Link to="/scenarios">See all examples <ArrowRight /></Link></div>
         </div>
         <div className="scenario-teaser-grid">
           {featured.map((scenario) => <ScenarioCard key={scenario.id} scenario={scenario} compact expanded={expanded === scenario.id} onToggle={() => setExpanded(expanded === scenario.id ? null : scenario.id)} />)}
         </div>
-        <div className="scenario-teaser-cta"><p>You don’t have to share everything today. You just need a plan for when someone else needs it.</p><Link to="/scenarios">Find your situations <ArrowRight /></Link></div>
+        <div className="scenario-teaser-cta"><p>Nothing is sent to anyone unless you stop checking in or use your emergency PIN.</p><Link to="/scenarios#quiz">Take the five-question quiz <ArrowRight /></Link></div>
       </div>
     </section>
   );

@@ -13,7 +13,7 @@ const sectionId = (heading: string, index: number) => `${heading.toLowerCase().r
 
 export function GuidesIndexPage() {
   return <div className="container mx-auto max-w-6xl px-4 py-16 md:py-20">
-    <p className="micro-label">GUIDES</p><h1 className="mt-5 max-w-4xl text-4xl font-bold md:text-6xl">Prepare the information people may need.</h1>
+    <p className="micro-label">GUIDES</p><h1 className="mt-5 max-w-4xl text-4xl font-bold md:text-6xl">Emergency planning guides</h1>
     <p className="mt-6 max-w-3xl text-lg text-muted-foreground">Clear, practical planning guides for emergencies, digital accounts, important documents, and inheritance.</p>
     {categories.map(category => <section className="mt-14" key={category}><h2 className="text-2xl font-semibold md:text-3xl">{category}</h2><div className="mt-7 grid gap-5 md:grid-cols-2">{guides.filter(guide => guide.category === category).map(guide => <article key={guide.slug} className="rounded-2xl border bg-card p-7"><BookOpen aria-hidden="true" className="h-6 w-6 text-primary" /><h3 className="mt-4 text-2xl font-semibold"><Link className="hover:text-primary" to={`/guides/${guide.slug}`}>{guide.cardTitle ?? guide.title}</Link></h3><p className="mt-3 leading-7 text-muted-foreground">{guide.cardDescription ?? guide.description}</p><Link className="mt-5 inline-flex items-center gap-2 font-medium text-primary" to={`/guides/${guide.slug}`}>Read the guide <ArrowRight aria-hidden="true" className="h-4 w-4" /></Link></article>)}</div></section>)}
   </div>;
