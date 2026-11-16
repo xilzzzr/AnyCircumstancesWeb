@@ -1,7 +1,8 @@
-const { initializeEnvironment, validateBackendEnvironment } = require("./environment");
+const { backendEnvironmentWarnings, initializeEnvironment, validateBackendEnvironment } = require("./environment");
 
 initializeEnvironment();
 validateBackendEnvironment();
+for (const warning of backendEnvironmentWarnings()) console.error("[SECURITY_WARNING]", warning);
 
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
@@ -175,7 +176,11 @@ const publicShareGlobalLimiter = createFixedWindowLimiter({
   key: () => "global",
 });
 
-app.use(rejectCrossSiteMutation(allowedOrigins));
+// The two confirmation buttons post only the token from their own link and
+// use no cookies, so a cross-site request can do nothing the link can't.
+app.use(rejectCrossSiteMutation(allowedOrigins, {
+  exemptPaths: ["/auth/emergency-contacts/verify", "/auth/verify-email/browser"],
+}));
 // Narrowest limits first, so requests one client or one address sends over
 // its own limit never use up the shared hourly email allowance.
 app.use(
@@ -210,6 +215,9 @@ app.use(
 );
 app.use("/auth/emergency-contacts", (req, res, next) => {
   if (["GET", "HEAD", "OPTIONS"].includes(req.method)) return next();
+  // Contacts confirming by link aren't signed in; that route is limited per
+  // token by verificationAccountLimiter above.
+  if (req.path === "/verify") return next();
   return sensitiveUserLimiter(req, res, next);
 });
 app.use(

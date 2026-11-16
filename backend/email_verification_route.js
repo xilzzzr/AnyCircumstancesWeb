@@ -7,6 +7,45 @@ function verificationResultUrl(base, status) {
   url.searchParams.set('status', status);
   return url.href;
 }
+const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+
+// Opening the emailed link shows a Confirm button; only the button press
+// verifies. Email security scanners open links automatically, and must not be
+// able to verify an address on behalf of whoever registered it.
+function renderConfirmPage(token) {
+  const action = `/auth/verify-email/browser?token=${encodeURIComponent(token)}`;
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <title>Confirm your email address | AnyCircumstances</title>
+  <style>
+    *,*::before,*::after{box-sizing:border-box}
+    body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;background:#0b0b0f;color:#fff}
+    .wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+    .card{width:100%;max-width:520px;background:#12121a;border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:22px}
+    .title{font-size:20px;font-weight:700;margin:0 0 10px 0}
+    .muted{color:rgba(255,255,255,.72);font-size:14px;line-height:1.5}
+    .confirm{margin-top:12px;padding:12px 16px;border:0;border-radius:8px;background:#fff;color:#0b0b0f;font:inherit;font-weight:700;cursor:pointer}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <p class="title">Confirm your email address</p>
+      <p class="muted">Confirm that this email address belongs to you to finish setting up your AnyCircumstances account.</p>
+      <form method="post" action="${escapeHtml(action)}">
+        <button class="confirm" type="submit">Confirm email address</button>
+      </form>
+      <p class="muted">If you didn’t create an account, close this page. Nothing happens unless you confirm.</p>
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
 function createEmailVerificationHandler({ pool, consumeToken, publicWebBaseUrl, logError }) {
   return async (req, res) => {
     const browser = isVerificationBrowserRequest(req);
@@ -17,6 +56,9 @@ function createEmailVerificationHandler({ pool, consumeToken, publicWebBaseUrl, 
       : res.status(code).json(payload);
     const token = String(req.query?.token || '');
     if (!/^[A-Za-z0-9_-]{20,200}$/.test(token)) return finish('invalid', 400, { ok: false, error: 'invalid_token' });
+    if (browser && req.method === 'GET') {
+      return res.status(200).type('html').send(renderConfirmPage(token));
+    }
     let conn;
     try {
       conn = await pool.getConnection();
@@ -58,4 +100,4 @@ function verificationBrowserErrors(publicWebBaseUrl) {
     next();
   };
 }
-module.exports = { verificationBrowserErrors, createEmailVerificationHandler, isVerificationBrowserRequest, verificationResultUrl };
+module.exports = { verificationBrowserErrors, createEmailVerificationHandler, isVerificationBrowserRequest, renderConfirmPage, verificationResultUrl };

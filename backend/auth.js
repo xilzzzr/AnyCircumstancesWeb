@@ -19,6 +19,7 @@ const {
 } = require("./apple_subscriptions");
 const { attemptAccountLifecycleJob, queueAccountLifecycleJob } = require("./account_actions");
 const {
+  cancelPendingDispatchesForContact,
   deliverPendingEmergencyDispatches,
   insertEmergencyTriggerJob,
   processEmergencyTriggerJobs,
@@ -677,12 +678,12 @@ router.post(
   })
 );
 
-router.get(
-  ["/verify-email", "/verify-email/browser"],
-  asyncHandler(createEmailVerificationHandler({
-    pool, consumeToken: consumeEmailVerificationByTokenOnly, publicWebBaseUrl, logError
-  }))
-);
+const emailVerificationHandler = createEmailVerificationHandler({
+  pool, consumeToken: consumeEmailVerificationByTokenOnly, publicWebBaseUrl, logError
+});
+// In a browser, GET shows a Confirm button and the POST from it verifies.
+router.get(["/verify-email", "/verify-email/browser"], asyncHandler(emailVerificationHandler));
+router.post("/verify-email/browser", asyncHandler(emailVerificationHandler));
 
 router.post(
   "/verify-email-code",
@@ -2320,12 +2321,19 @@ function renderEmergencyContactVerifyHtml(opts) {
   const reason = String(opts?.reason || "");
   const ownerEmail = String(opts?.ownerEmail || "");
   const contactName = String(opts?.contactName || "");
+  // Set when the link has only been opened: show a button instead of
+  // confirming, so email security scanners that open links can't confirm.
+  const confirmAction = String(opts?.confirmAction || "");
 
   let finalTitle = "Confirmed";
   let finalText = "You’re verified as an emergency contact.";
   let finalSub = ownerEmail ? `For ${ownerEmail}` : "";
 
-  if (!ok) {
+  if (confirmAction) {
+    finalTitle = "Confirm you’re an emergency contact";
+    finalText = `${ownerEmail || "Someone"} added you as an emergency contact on AnyCircumstances. ` +
+      "If they ever stop checking in, you’ll receive the documents they chose to share with you.";
+  } else if (!ok) {
     finalTitle = "Could not confirm";
     finalSub = "";
     if (reason === "expired") finalText = "This confirmation link expired. Ask the account owner to resend the invite.";
@@ -2345,6 +2353,7 @@ function renderEmergencyContactVerifyHtml(opts) {
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>anycircumstances</title>
   <style>
+    *,*::before,*::after{box-sizing:border-box}
     body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;background:#0b0b0f;color:#fff}
     .wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
     .card{width:100%;max-width:520px;background:#12121a;border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:22px}
@@ -2356,6 +2365,7 @@ function renderEmergencyContactVerifyHtml(opts) {
     .check{width:22px;height:22px;border-radius:999px;background:rgba(34,197,94,.18);display:flex;align-items:center;justify-content:center}
     .check svg{width:14px;height:14px}
     .btn{display:inline-block;margin-top:16px;padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.08);color:#fff;text-decoration:none}
+    .confirm{display:inline-block;margin-top:16px;padding:12px 16px;border:0;border-radius:8px;background:#fff;color:#0b0b0f;font:inherit;font-weight:700;cursor:pointer}
     .muted{color:rgba(255,255,255,.6);font-size:13px;margin-top:12px}
   </style>
 </head>
@@ -2365,7 +2375,13 @@ function renderEmergencyContactVerifyHtml(opts) {
       <div class="brand"><span class="dot"></span><span>anycircumstances</span></div>
       <p class="title">${safeFinalTitle}</p>
       <p class="sub">${safeContact ? `For ${safeContact}` : safeFinalSub}</p>
-      <div>
+      ${confirmAction ? `<div>
+        <p class="muted">${safeFinalText}</p>
+        <form method="post" action="${escapeHtml(confirmAction)}">
+          <button class="confirm" type="submit">Confirm</button>
+        </form>
+        <p class="muted">If you don’t know this person, close this page. Nothing happens unless you confirm.</p>
+      </div>` : `<div>
         <div class="row">
           ${
             ok
@@ -2379,7 +2395,7 @@ function renderEmergencyContactVerifyHtml(opts) {
         </div>
         <p class="muted">${safeFinalText}</p>
         <a class="btn" href="${escapeHtml(publicWebBaseUrl)}">Go to site</a>
-      </div>
+      </div>`}
     </div>
   </div>
 </body>
@@ -2406,6 +2422,19 @@ async function consumeEmergencyContactVerificationByToken(conn, code) {
   await conn.query("UPDATE emergency_contacts SET verified_at = NOW() WHERE id = ? AND verified_at IS NULL", [contactId]);
 
   return { ok: true, contactId };
+}
+
+// Checks a confirmation link without using it up.
+async function peekEmergencyContactVerificationToken(code) {
+  const [rows] = await pool.query(
+    "SELECT contact_id, expires_at, used_at FROM emergency_contact_verification_tokens WHERE token_hash = ? LIMIT 1",
+    [sha256Hex(code)]
+  );
+  const row = rows?.[0];
+  if (!row) return { ok: false, reason: "invalid_code", contactId: null };
+  if (row.used_at) return { ok: false, reason: "already_used", contactId: row.contact_id };
+  if (new Date(row.expires_at).getTime() < nowUtc().getTime()) return { ok: false, reason: "expired", contactId: row.contact_id };
+  return { ok: true, contactId: row.contact_id };
 }
 
 async function sendEmergencyContactInviteEmail(toEmail, contactName, ownerEmail, verifyUrl) {
@@ -2655,6 +2684,9 @@ router.patch(
           "DELETE FROM file_key_envelopes WHERE recipient_type = 'contact' AND recipient_id = ?",
           [contactId]
         );
+        // Deliveries queued for the old address must not go out once the new
+        // address is confirmed, possibly long after the owner checked in.
+        await cancelPendingDispatchesForContact(conn, contactId, "contact_email_changed");
       } else {
         await conn.query(
           `UPDATE emergency_contacts SET name = ?, email = COALESCE(?, email), relationship = ?
@@ -2709,6 +2741,7 @@ router.delete(
       );
       await conn.query("DELETE FROM emergency_contact_file_assignments WHERE contact_id = ?", [contactId]);
       await conn.query("DELETE FROM emergency_contact_verification_tokens WHERE contact_id = ?", [contactId]);
+      await cancelPendingDispatchesForContact(conn, contactId, "contact_deleted");
       await conn.query("DELETE FROM emergency_contacts WHERE id = ? AND user_id = ? LIMIT 1", [contactId, String(userId)]);
 
       await conn.commit();
@@ -2846,7 +2879,50 @@ router.post(
   })
 );
 
+function sendContactVerifyHtml(res, status, opts) {
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  return res.status(status).set("Content-Type", "text/html; charset=utf-8").send(renderEmergencyContactVerifyHtml(opts));
+}
+
+// Opening the emailed link only shows a Confirm button. Email security
+// scanners open links automatically, so a GET must never confirm a contact.
 router.get(
+  "/emergency-contacts/verify",
+  asyncHandler(async (req, res) => {
+    const token = String(req.query?.token || "");
+    const wantsHtml = String(req.headers?.accept || "").includes("text/html");
+
+    if (!/^[A-Za-z0-9_-]{20,200}$/.test(token)) {
+      if (wantsHtml) return sendContactVerifyHtml(res, 400, { ok: false, reason: "invalid_code" });
+      return res.status(400).json({ ok: false, error: "invalid_code" });
+    }
+
+    const out = await peekEmergencyContactVerificationToken(token);
+    if (!wantsHtml) {
+      return out.ok
+        ? res.json({ ok: true, confirmation_required: true })
+        : res.status(400).json({ ok: false, error: out.reason });
+    }
+    const ctx = out.contactId ? await getEmergencyContactContext(out.contactId) : null;
+    if (!out.ok) {
+      return sendContactVerifyHtml(res, 400, {
+        ok: false,
+        reason: out.reason,
+        ownerEmail: ctx?.owner_email || "",
+        contactName: ctx?.contact_name || "",
+      });
+    }
+    return sendContactVerifyHtml(res, 200, {
+      ok: true,
+      ownerEmail: ctx?.owner_email || "",
+      contactName: ctx?.contact_name || "",
+      confirmAction: `/auth/emergency-contacts/verify?token=${encodeURIComponent(token)}`,
+    });
+  })
+);
+
+router.post(
   "/emergency-contacts/verify",
   asyncHandler(async (req, res) => {
     const token = String(req.query?.token || "");
@@ -2854,10 +2930,7 @@ router.get(
     const wantsHtml = accept.includes("text/html");
 
     if (!/^[A-Za-z0-9_-]{20,200}$/.test(token)) {
-      if (wantsHtml) {
-        const html = renderEmergencyContactVerifyHtml({ ok: false, reason: "invalid_code" });
-        return res.status(400).set("Content-Type", "text/html; charset=utf-8").send(html);
-      }
+      if (wantsHtml) return sendContactVerifyHtml(res, 400, { ok: false, reason: "invalid_code" });
       return res.status(400).json({ ok: false, error: "invalid_code" });
     }
 
@@ -2886,25 +2959,23 @@ router.get(
     if (!out.ok) {
       if (wantsHtml) {
         const ctx = await getEmergencyContactContext(out.contactId);
-        const html = renderEmergencyContactVerifyHtml({
+        return sendContactVerifyHtml(res, 400, {
           ok: false,
           reason: out.reason,
           ownerEmail: ctx?.owner_email || "",
           contactName: ctx?.contact_name || "",
         });
-        return res.status(400).set("Content-Type", "text/html; charset=utf-8").send(html);
       }
       return res.status(400).json({ ok: false, error: out.reason });
     }
 
     if (wantsHtml) {
       const ctx = await getEmergencyContactContext(out.contactId);
-      const html = renderEmergencyContactVerifyHtml({
+      return sendContactVerifyHtml(res, 200, {
         ok: true,
         ownerEmail: ctx?.owner_email || "",
         contactName: ctx?.contact_name || "",
       });
-      return res.status(200).set("Content-Type", "text/html; charset=utf-8").send(html);
     }
 
     return res.json({ ok: true });

@@ -21,17 +21,30 @@ async function fixture(t, row, { unavailable = false, queryError = false } = {})
     }
   };
   const app = express();
-  app.get(['/verify-email', '/verify-email/browser'], createEmailVerificationHandler({
+  const handler = createEmailVerificationHandler({
     pool: { async getConnection() { if (unavailable) throw Error('private connection failure'); return conn; } },
     consumeToken: consumeEmailVerificationByTokenOnly, publicWebBaseUrl: 'https://example.com', logError() {}
-  }));
+  });
+  app.get(['/verify-email', '/verify-email/browser'], handler);
+  app.post('/verify-email/browser', handler);
   const server = app.listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
-  return { calls, request: (path = '/verify-email/browser', accept = '*/*', token = 'a'.repeat(64)) => fetch(`http://127.0.0.1:${server.address().port}${path}?token=${token}`, { redirect: 'manual', headers: { accept } }) };
+  return { calls, request: (path = '/verify-email/browser', accept = '*/*', token = 'a'.repeat(64), method = 'POST') => fetch(`http://127.0.0.1:${server.address().port}${path}?token=${token}`, { method, redirect: 'manual', headers: { accept } }) };
 }
 const freshRow = () => ({ id: 1, user_id: 2, expires_at: new Date(Date.now() + 60000), used_at: null });
-test('browser consumes once, redirects without token, and repeat is already verified', async t => {
+test('opening the emailed link only shows a Confirm button and verifies nothing', async t => {
+  const { request, calls } = await fixture(t, freshRow());
+  for (const accept of ['*/*', 'text/html']) {
+    const response = await request('/verify-email/browser', accept, 'a'.repeat(64), 'GET');
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    const html = await response.text();
+    assert.match(html, /<form method="post" action="\/auth\/verify-email\/browser\?token=a{64}">/);
+  }
+  assert.deepEqual(calls, []);
+});
+test('pressing Confirm consumes once, redirects without token, and repeat is already verified', async t => {
   const { request, calls } = await fixture(t, freshRow());
   const response = await request();
   assert.equal(response.status, 303);
@@ -53,16 +66,20 @@ for (const [status, row, options] of [
 });
 test('malformed token never opens a transaction', async t => {
   const { request, calls } = await fixture(t, freshRow());
-  assert.equal((await request('/verify-email/browser', '*/*', 'bad')).headers.get('location'), 'https://example.com/email-verified?status=invalid');
+  for (const method of ['GET', 'POST']) {
+    assert.equal((await request('/verify-email/browser', '*/*', 'bad', method)).headers.get('location'), 'https://example.com/email-verified?status=invalid');
+  }
   assert.deepEqual(calls, []);
 });
-test('legacy browser links redirect; JSON clients retain status and payload', async t => {
+test('legacy browser links show the Confirm button; JSON clients retain status and payload', async t => {
   const { request } = await fixture(t, freshRow());
-  assert.deepEqual(await (await request('/verify-email', 'application/json')).json(), { ok: true });
-  const used = await request('/verify-email', '*/*');
+  assert.deepEqual(await (await request('/verify-email', 'application/json', 'a'.repeat(64), 'GET')).json(), { ok: true });
+  const used = await request('/verify-email', '*/*', 'a'.repeat(64), 'GET');
   assert.equal(used.status, 400);
   assert.deepEqual(await used.json(), { ok: false, error: 'already_used' });
-  assert.equal((await request('/verify-email', 'text/html')).status, 303);
+  const legacy = await request('/verify-email', 'text/html', 'a'.repeat(64), 'GET');
+  assert.equal(legacy.status, 200);
+  assert.match(await legacy.text(), /action="\/auth\/verify-email\/browser\?token=/);
 });
 test('upstream rate limits and failures redirect browsers but preserve API errors', async t => {
   const { verificationBrowserErrors } = require('./email_verification_route');
