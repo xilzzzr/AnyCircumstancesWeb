@@ -158,7 +158,8 @@ async function requireUser(req, res, next) {
     locked ||
     Number(payload.sv || 0) !== Number(user.session_version || 1)
   ) {
-    return res.status(401).json({ ok: false, error: locked ? "account_temporarily_locked" : "invalid_session" });
+    // A duress-locked account must look exactly like a deleted one.
+    return res.status(401).json({ ok: false, error: "invalid_session" });
   }
 
   req.userId = userId;
