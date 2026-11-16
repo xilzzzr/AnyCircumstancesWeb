@@ -8,6 +8,14 @@ not required on the server.
 authentication, dashboard, and sharing routes. It prevents those routes from
 receiving or attempting to hydrate the prerendered homepage markup.
 
+The build also writes a copy of that shell to `dist/<route>/index.html` for every
+client-rendered route listed in `src/seo/clientRoutes.ts` (for example
+`/reset-password`, `/email-verified`, `/forgot-password`, `/admin/login`). The
+final `try_files {path} {path}/index.html` handler serves these, so direct visits,
+refreshes and email links work even if a route is missing from the
+`@client_spa` matcher. Keeping the matcher complete is still recommended because
+it sets `Cache-Control: no-store` for those pages.
+
 The prerender route manifest is generated from `src/seo/publicRoutes.ts`. Guide
 routes are derived automatically from `src/data/guides.ts`. The same manifest
 generates `dist/sitemap.xml`, `public/sitemap.xml`, and
