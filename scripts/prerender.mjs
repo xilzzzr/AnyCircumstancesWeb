@@ -1,6 +1,8 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { buildSitemap } from "./sitemap.mjs";
+import { redirectPage, redirects } from "./redirects.mjs";
 
 const projectRoot = resolve(import.meta.dirname, "..");
 const distDir = resolve(projectRoot, "dist");
@@ -29,12 +31,12 @@ function injectHead(template, route) {
     `<meta property="og:description" content="${escapeHtml(route.description)}">`,
     `<meta property="og:type" content="${route.type ?? "website"}">`,
     `<meta property="og:url" content="${canonical}">`,
-    `<meta property="og:image" content="${siteUrl}/og-image.svg">`,
+    `<meta property="og:image" content="${siteUrl}/og-image.png">`,
     `<meta property="og:site_name" content="AnyCircumstances">`,
     `<meta name="twitter:card" content="summary_large_image">`,
     `<meta name="twitter:title" content="${escapeHtml(route.title)}">`,
     `<meta name="twitter:description" content="${escapeHtml(route.description)}">`,
-    `<meta name="twitter:image" content="${siteUrl}/og-image.svg">`,
+    `<meta name="twitter:image" content="${siteUrl}/og-image.png">`,
     `<script type="application/ld+json" data-route-schema="true">${schema}</script>`,
   ].join("\n    ");
   return html.replace("</head>", `    ${head}\n  </head>`);
@@ -75,12 +77,11 @@ function outputPath(pathname) {
 }
 
 function sitemap(routes) {
-  const urls = routes.map(({ path }) => `  <url><loc>${siteUrl}${path}</loc></url>`).join("\n");
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`;
+  return buildSitemap(routes, siteUrl);
 }
 
 async function main() {
-  const { render, renderNotFound, getPrerenderManifest } = await import(`${pathToFileURL(serverEntry).href}?v=${Date.now()}`);
+  const { render, renderNotFound, getPrerenderManifest, getClientOnlyRoutes } = await import(`${pathToFileURL(serverEntry).href}?v=${Date.now()}`);
   const routes = getPrerenderManifest();
   if (!Array.isArray(routes) || routes.length === 0) throw new Error("Prerender manifest is empty");
   if (new Set(routes.map(({ path }) => path)).size !== routes.length) throw new Error("Prerender manifest contains duplicate paths");
@@ -100,12 +101,35 @@ async function main() {
     .replace(/\s*<script type="application\/ld\+json" data-route-schema="true">[\s\S]*?<\/script>/, "");
   await writeFile(resolve(distDir, "spa.html"), spaHtml);
 
+  // Client-rendered pages get their own copy of the shell so a direct visit, a refresh or an
+  // email link (e.g. /reset-password, /email-verified) loads even if the server's SPA route
+  // list is missing that path. The server's normal "<path>/index.html" lookup finds these.
+  const prerenderedPaths = new Set(routes.map(({ path }) => path));
+  const clientRoutes = getClientOnlyRoutes();
+  for (const path of clientRoutes) {
+    if (!path.startsWith("/") || path === "/" || path.includes(":") || path.includes("*")) throw new Error(`Invalid client route: ${path}`);
+    if (prerenderedPaths.has(path)) throw new Error(`${path} is both prerendered and client-only`);
+    const target = outputPath(path);
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, spaHtml);
+  }
+
   for (const route of routes) {
     const html = injectBody(injectHead(template, route), await render(route.path));
     validateHtml(html, route);
     const target = outputPath(route.path);
     await mkdir(dirname(target), { recursive: true });
     await writeFile(target, html);
+  }
+
+  // Old addresses of pages that moved: a small page pointing at the new one.
+  const routePaths = new Set(routes.map(({ path }) => path));
+  for (const redirect of redirects) {
+    if (routePaths.has(redirect.from)) throw new Error(`Redirect ${redirect.from} would replace a real page`);
+    if (!routePaths.has(redirect.to)) throw new Error(`Redirect ${redirect.from} points to a missing page: ${redirect.to}`);
+    const target = outputPath(redirect.from);
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, redirectPage(redirect, siteUrl));
   }
 
   const notFoundRoute = { path: "/404", title: "Page Not Found | AnyCircumstances", description: "The requested page could not be found.", type: "website", schema: { "@context": "https://schema.org", "@type": "WebPage", name: "Page Not Found", url: `${siteUrl}/404` } };
@@ -117,7 +141,7 @@ async function main() {
   await writeFile(resolve(distDir, "sitemap.xml"), sitemapXml);
   await writeFile(resolve(projectRoot, "public/sitemap.xml"), sitemapXml);
   await writeFile(resolve(distDir, "prerender-manifest.json"), `${JSON.stringify(routes.map(({ path }) => path), null, 2)}\n`);
-  console.log(`Prerendered and validated ${routes.length} public routes.`);
+  console.log(`Prerendered and validated ${routes.length} public routes; wrote the app shell for ${clientRoutes.length} client routes.`);
 }
 
 main().catch((error) => {

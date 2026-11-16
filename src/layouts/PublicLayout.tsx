@@ -1,7 +1,7 @@
-import { Outlet, Link, NavLink } from 'react-router-dom';
+import { Outlet, Link, NavLink, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Shield, Menu, X } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { PublicPageCta } from '@/components/public/ContextualCta';
 
 const navLinks = [
@@ -14,6 +14,25 @@ const navLinks = [
 
 export function PublicLayout() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const { pathname } = useLocation();
+
+  // Close the menu whenever the page changes, including via the logo, footer links or the Back button.
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [pathname]);
+
+  // Escape closes the open menu and returns focus to its toggle button.
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setMobileMenuOpen(false);
+      menuButtonRef.current?.focus();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [mobileMenuOpen]);
 
   return (
     <div className="public-site min-h-screen flex flex-col bg-background">
@@ -36,7 +55,7 @@ export function PublicLayout() {
               <NavLink
                 key={link.href}
                 to={link.href}
-                className={({ isActive }) => `inline-flex min-h-11 items-center rounded-full px-3 text-sm font-medium transition-colors hover:bg-accent hover:text-foreground lg:px-4 ${isActive ? 'text-foreground' : 'text-muted-foreground'}`}
+                className={({ isActive }) => `inline-flex min-h-11 items-center rounded-md px-3 text-sm font-medium transition-colors hover:bg-accent hover:text-foreground lg:px-4 ${isActive ? 'text-foreground' : 'text-muted-foreground'}`}
               >
                 {link.label}
               </NavLink>
@@ -55,6 +74,7 @@ export function PublicLayout() {
 
           {/* Mobile Menu Button */}
           <button
+            ref={menuButtonRef}
             type="button"
             className="icon-button md:hidden flex items-center justify-center p-2 hover:bg-accent rounded-lg transition-colors"
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
@@ -68,7 +88,7 @@ export function PublicLayout() {
 
         {/* Mobile Menu */}
         {mobileMenuOpen && (
-          <div id="mobile-navigation" className="md:hidden border-t border-border bg-card animate-fade-in">
+          <div id="mobile-navigation" className="md:hidden border-t border-border bg-card">
             <nav aria-label="Main" className="container mx-auto px-4 py-4 flex flex-col gap-2">
               {navLinks.map((link) => (
                 <Link

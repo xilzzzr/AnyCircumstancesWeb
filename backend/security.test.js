@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { createFixedWindowLimiter, rejectCrossSiteMutation } = require("./security");
+const jwt = require("jsonwebtoken");
+const { authenticatedUserKey, createFixedWindowLimiter, rejectCrossSiteMutation } = require("./security");
 
 function responseRecorder() {
   return {
@@ -36,6 +37,25 @@ test("origin guard rejects cross-site state changes", () => {
     assert.fail("cross-site request should have been blocked");
   });
   assert.equal(res.statusCode, 403);
+});
+
+test("only the listed token-only routes skip the origin guard", () => {
+  const guard = rejectCrossSiteMutation(["https://anycircumstances.com"], { exemptPaths: ["/auth/emergency-contacts/verify"] });
+  const crossSite = { origin: "https://elsewhere.example", "sec-fetch-site": "cross-site" };
+  let continued = false;
+  guard({ method: "POST", path: "/auth/emergency-contacts/verify", headers: crossSite }, responseRecorder(), () => { continued = true; });
+  assert.equal(continued, true);
+  const blocked = responseRecorder();
+  guard({ method: "POST", path: "/auth/emergency-contacts", headers: crossSite }, blocked, () => assert.fail("should be blocked"));
+  assert.equal(blocked.statusCode, 403);
+});
+
+test("requests without a valid session are limited per IP, not in one shared bucket", () => {
+  process.env.JWT_ACCESS_SECRET = "test-secret-that-is-long-enough-123";
+  assert.equal(authenticatedUserKey({ ip: "203.0.113.5", cookies: {} }), "ip:203.0.113.5");
+  assert.equal(authenticatedUserKey({ ip: "203.0.113.6", cookies: { access_token: "expired-or-forged" } }), "ip:203.0.113.6");
+  const token = jwt.sign({}, process.env.JWT_ACCESS_SECRET, { algorithm: "HS256", subject: "42" });
+  assert.equal(authenticatedUserKey({ ip: "203.0.113.5", cookies: { access_token: token } }), "user:42");
 });
 
 test("origin guard permits same-origin and native-client mutations", () => {

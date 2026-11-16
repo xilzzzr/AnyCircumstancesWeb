@@ -8,6 +8,14 @@ not required on the server.
 authentication, dashboard, and sharing routes. It prevents those routes from
 receiving or attempting to hydrate the prerendered homepage markup.
 
+The build also writes a copy of that shell to `dist/<route>/index.html` for every
+client-rendered route listed in `src/seo/clientRoutes.ts` (for example
+`/reset-password`, `/email-verified`, `/forgot-password`, `/admin/login`). The
+final `try_files {path} {path}/index.html` handler serves these, so direct visits,
+refreshes and email links work even if a route is missing from the
+`@client_spa` matcher. Keeping the matcher complete is still recommended because
+it sets `Cache-Control: no-store` for those pages.
+
 The prerender route manifest is generated from `src/seo/publicRoutes.ts`. Guide
 routes are derived automatically from `src/data/guides.ts`. The same manifest
 generates `dist/sitemap.xml`, `public/sitemap.xml`, and
@@ -96,3 +104,37 @@ JavaScript content type and immutable cache header; missing JS must return 404,
 never HTML with status 200. Keep an old tab open across a release and follow an
 unvisited setup link. If a chunk still fails, the application offers manual reload
 and dashboard recovery, with no automatic reload loop.
+
+## One address for search engines
+
+The live server currently answers `https://www.anycircumstances.com/` with a
+full copy of the site, so Google sees two versions of every page. Every page's
+canonical tag already points to `https://anycircumstances.com`, but a permanent
+redirect is the clear signal. Give `www.anycircumstances.com` its own site block
+that redirects, as in `Caddyfile.routing.example`:
+
+```caddy
+www.anycircumstances.com {
+	redir https://anycircumstances.com{uri} permanent
+}
+```
+
+and remove `www.anycircumstances.com` from the main site block's address list.
+Check after reloading Caddy:
+
+```sh
+curl -sSI https://www.anycircumstances.com/pricing
+# expect: 308 with location: https://anycircumstances.com/pricing
+```
+
+## Pages that moved
+
+`scripts/redirects.mjs` lists old addresses of pages that were merged or
+renamed. The build writes a small page at each old address that sends visitors
+and search engines to the new one, so this works without a server change. A
+server redirect is still the cleanest signal; the example Caddyfile has one
+`redir` line per entry:
+
+```caddy
+redir /guides/what-happens-to-bitcoin-when-you-die /guides/what-happens-to-crypto-when-you-die permanent
+```

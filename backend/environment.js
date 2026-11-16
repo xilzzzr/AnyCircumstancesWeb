@@ -59,9 +59,24 @@ function validateBackendEnvironment(environment = process.env) {
   }
 }
 
+// Settings that are risky but shouldn't stop the API from starting: if it
+// refused to start, users couldn't check in while the separate dispatcher
+// kept releasing files for missed check-ins.
+function backendEnvironmentWarnings(environment = process.env) {
+  const warnings = [];
+  if (environment.NODE_ENV === "production" && String(environment.LEGACY_ESCROW_PRIVATE_KEY_PEM || "").trim()) {
+    warnings.push(
+      "LEGACY_ESCROW_PRIVATE_KEY_PEM is set in the API environment. It is only for the one-time KMS migration command; " +
+      "remove it from this environment and destroy remaining copies of the old escrow key."
+    );
+  }
+  return warnings;
+}
+
 module.exports = {
   ENVIRONMENT_PATHS,
   REQUIRED_BACKEND_ENV_VARS,
+  backendEnvironmentWarnings,
   initializeEnvironment,
   validateBackendEnvironment,
 };

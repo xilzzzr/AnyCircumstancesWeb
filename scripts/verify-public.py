@@ -90,7 +90,7 @@ def audit():
         require(len(h1) == 1 and h1[0].text().strip(), f'{path}: H1')
         require(len(main.text().strip()) > 100, f'{path}: empty content')
         ctas = [e.attrs['data-cta'] for e in main.find() if 'data-cta' in e.attrs]
-        checkout = any('Continue to checkout' in e.text() for e in main.find('button'))
+        checkout = any('Continue to checkout' in e.text() or 'Create an account to continue' in e.text() for e in main.find('button'))
         require(ctas or (path == '/pricing' and checkout), f'{path}: CTA')
         for tag in ['a', 'button']:
             for e in main.find(tag):
@@ -118,8 +118,11 @@ def audit():
                 if schema['@type'] == 'BreadcrumbList':
                     require([x['position'] for x in schema['itemListElement']] == [1, 2, 3], f'{path}: breadcrumb positions')
         if path == '/faq':
-            faqs = json.loads((ROOT / 'src/data/faqs.ts').read_text().split(' = ', 1)[1].rstrip(';\n'))
-            require(len(main.find('details')) == len(faqs) == 17, 'FAQ count')
+            faqs = json.loads(subprocess.check_output(
+                ['node', '--input-type=module', '-e',
+                 'import {build} from "esbuild"; const out=await build({entryPoints:["src/data/faqs.ts"],bundle:true,write:false,format:"esm"}); const {faqs}=await import("data:text/javascript;base64,"+Buffer.from(out.outputFiles[0].text).toString("base64")); console.log(JSON.stringify(faqs));'],
+                cwd=ROOT, text=True))
+            require(len(main.find('details')) == len(faqs), 'FAQ count')
             for faq in faqs:
                 require(faq['question'] in main.text() and faq['answer'] in main.text(), 'FAQ copy missing from HTML')
         require(not re.search(r'most secure|guaranteed delivery|unhackable', main.text(), re.I), f'{path}: prohibited claim')

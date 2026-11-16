@@ -2,6 +2,7 @@ const express = require("express");
 const jwt = require("jsonwebtoken");
 const { createFixedWindowLimiter } = require("./security");
 const { createReportingCache } = require("./admin_reporting");
+const { verifyTotp } = require("./totp");
 
 const COOKIE = "uac_admin";
 const COOKIE_PATH = "/auth/admin";
@@ -11,6 +12,18 @@ function isAdmin(userId) {
   // IDs are configured on the server. Email changes and client-supplied roles
   // cannot grant access; an empty allowlist denies everyone.
   return String(process.env.ADMIN_USER_IDS || "").split(",").map(s => s.trim()).filter(Boolean).includes(String(userId));
+}
+
+// Second factor for admin sign-in: ADMIN_TOTP_SECRETS="<userId>:<base32 secret>,...".
+// Create a secret with `node create_admin_totp.js <userId>`. An admin with a
+// secret must enter the current code from their authenticator app.
+function adminTotpSecret(userId) {
+  for (const entry of String(process.env.ADMIN_TOTP_SECRETS || "").split(",")) {
+    const separator = entry.indexOf(":");
+    if (separator < 1) continue;
+    if (entry.slice(0, separator).trim() === String(userId)) return entry.slice(separator + 1).trim();
+  }
+  return "";
 }
 
 function createAdminRouter({ pool, stripe, requireUserId, verifyCurrentPassword }) {
@@ -32,9 +45,24 @@ function createAdminRouter({ pool, stripe, requireUserId, verifyCurrentPassword 
     next();
   }));
 
+  // Last accepted authenticator time step per admin, so a code can't be reused.
+  const lastTotpStep = new Map();
+
   router.post("/login", createFixedWindowLimiter({ name: "admin_login", windowMs: 15 * 60_000, limit: 5, key: req => req.userId }), wrap(async (req, res) => {
     if (!await verifyCurrentPassword(req.userId, String(req.body?.password || ""))) {
       return res.status(401).json({ ok: false, error: "invalid_credentials" });
+    }
+    const totpSecret = adminTotpSecret(req.userId);
+    if (totpSecret) {
+      const code = String(req.body?.code || "");
+      if (!code) return res.status(401).json({ ok: false, error: "totp_required" });
+      const step = verifyTotp(totpSecret, code);
+      if (step === null || step <= (lastTotpStep.get(req.userId) ?? -1)) {
+        return res.status(401).json({ ok: false, error: "invalid_totp" });
+      }
+      lastTotpStep.set(req.userId, step);
+    } else if (process.env.NODE_ENV === "production") {
+      console.warn("[SECURITY_WARNING] Admin signed in without a second factor; set ADMIN_TOTP_SECRETS.");
     }
     const token = jwt.sign({ sv: req.sessionVersion }, process.env.JWT_ACCESS_SECRET, {
       algorithm: "HS256", subject: req.userId, audience: "uac-admin", issuer: "uac", expiresIn: SESSION_SECONDS,

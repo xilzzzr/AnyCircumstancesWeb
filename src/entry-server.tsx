@@ -4,6 +4,7 @@ import { StaticRouter } from "react-router";
 import { PassThrough } from "node:stream";
 import { AppWithinRouter } from "@/App";
 import { getPrerenderRouteSeo, prerenderRoutes } from "@/seo/prerenderRoutes";
+import { clientOnlyRoutes } from "@/seo/clientRoutes";
 
 function renderApp(pathname: string) {
   return new Promise<string>((resolve, reject) => {
@@ -41,4 +42,8 @@ export function renderNotFound() {
 
 export function getPrerenderManifest() {
   return prerenderRoutes;
+}
+
+export function getClientOnlyRoutes(): readonly string[] {
+  return clientOnlyRoutes;
 }

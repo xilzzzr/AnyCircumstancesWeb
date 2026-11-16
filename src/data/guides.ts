@@ -137,7 +137,7 @@ export const guides: Guide[] = [
     ],
     "category": "Digital Vaults & Emergency Information",
     "ctaVariant": "emergency",
-    "intro": "A digital emergency binder is an organized set of documents and instructions that helps trusted people respond when you cannot. Unlike a paper binder, it can be updated remotely and protected with encryption—but only if storage, access, and recovery are planned carefully."
+    "intro": "A digital emergency binder is an organized set of documents and instructions that helps trusted people respond when you cannot. Unlike a paper binder, it can be updated remotely and protected with encryption, but only if storage, access, and recovery are planned carefully."
   },
   {
     "slug": "important-documents-family-should-know",
@@ -222,6 +222,16 @@ export const guides: Guide[] = [
         "heading": "Use provider recovery and legacy tools",
         "paragraphs": [
           "Some services offer legacy contacts, inactive-account settings, recovery contacts, or estate procedures. Configure those features directly and document what your family should expect. Access rights are not created merely by knowing a password."
+        ],
+        "links": [
+          {
+            "label": "Google Inactive Account Manager and Apple Legacy Contact",
+            "path": "/guides/google-inactive-account-manager-apple-legacy-contact"
+          },
+          {
+            "label": "password manager emergency access",
+            "path": "/guides/password-manager-emergency-access"
+          }
         ]
       },
       {
@@ -264,7 +274,7 @@ export const guides: Guide[] = [
     "seoTitle": "What Happens to Bitcoin & Crypto When You Die? | AnyCircumstances",
     "description": "What happens to Bitcoin, Ethereum, wallets, exchange accounts, seed phrases, and other cryptocurrency when the owner dies or becomes unavailable?",
     "published": "2026-08-14",
-    "modified": "2026-09-08",
+    "modified": "2026-11-12",
     "sections": [
       {
         "heading": "Crypto does not automatically transfer",
@@ -276,12 +286,6 @@ export const guides: Guide[] = [
         "heading": "Custodial and self-custody accounts differ",
         "paragraphs": [
           "An exchange may have an estate-claims process and identity requirements. A self-custody wallet generally depends on keys, recovery phrases, devices, passphrases, or multisignature participants. Your plan should identify which model applies to each holding."
-        ],
-        "links": [
-          {
-            "label": "what happens to Bitcoin when you die",
-            "path": "/guides/what-happens-to-bitcoin-when-you-die"
-          }
         ]
       },
       {
@@ -294,12 +298,12 @@ export const guides: Guide[] = [
         "callout": {
           "title": "The practical problem",
           "text": "Your family can know that you owned Bitcoin and still have no idea where the wallet is, which device matters, which exchange was used, or what recovery process you intended."
-        },
-        "links": [
-          {
-            "label": "Read the Bitcoin-specific guide",
-            "path": "/guides/what-happens-to-bitcoin-when-you-die"
-          }
+        }
+      },
+      {
+        "heading": "What happens to a hardware wallet?",
+        "paragraphs": [
+          "Finding the device is only part of it. Whoever handles your estate also needs to know which wallet it is, how it was backed up, whether there's an extra passphrase on top of the recovery phrase, and where the backup is kept. A hardware wallet without its backup and PIN is just a small piece of plastic."
         ]
       },
       {
@@ -351,6 +355,26 @@ export const guides: Guide[] = [
         }
       },
       {
+        "heading": "Should you put your seed phrase in a will?",
+        "paragraphs": [
+          "Usually not. Depending on where you live, a will can be read by several people during the estate process and may become a public record. Anyone who sees a seed phrase can move the funds.",
+          "A safer split: the will says who should inherit the crypto, and separate, protected instructions explain how to reach it. Talk to an estate lawyer about the legal side."
+        ]
+      },
+      {
+        "heading": "What should your family know?",
+        "items": [
+          "That you own crypto at all",
+          "Which exchanges you use and which email address each account is under",
+          "Whether you also hold crypto yourself, in a wallet app or on a hardware wallet",
+          "Which devices matter, and where they are",
+          "Where the recovery instructions are kept",
+          "Which lawyer, accountant or trusted person to contact first",
+          "Whether there's a multisignature or other unusual setup",
+          "What not to do: never type a recovery phrase into a website, and ignore anyone who contacts them offering to recover the funds"
+        ]
+      },
+      {
         "heading": "Build instructions without creating a theft kit",
         "items": [
           "Inventory wallets and custodians without exposing keys",
@@ -372,6 +396,42 @@ export const guides: Guide[] = [
           "A hardware wallet fails and no tested backup exists",
           "One person receives both the secret and immediate authority too early",
           "Tax and legal obligations are ignored"
+        ]
+      },
+      {
+        "heading": "A simple plan you can set up this weekend",
+        "ordered": true,
+        "cards": [
+          {
+            "heading": "Make a list",
+            "text": "Write down every place you hold crypto: each exchange, each wallet app, each hardware wallet. List names and locations only, no keys or phrases."
+          },
+          {
+            "heading": "Note the exchange details",
+            "text": "For each exchange, note the account email. Your family will contact the exchange and follow its process for deceased customers, which usually asks for a death certificate and proof of legal authority."
+          },
+          {
+            "heading": "Decide how self-custody will be recovered",
+            "text": "Choose where the recovery phrase is kept, for example a sealed envelope in a safe, and whether one person or several people are needed to use it."
+          },
+          {
+            "heading": "Write a start-here letter",
+            "text": "Explain what exists, where the recovery material is, who to call first, and what not to do. Keep it short enough to read in a stressful week."
+          },
+          {
+            "heading": "Store the letter somewhere protected",
+            "text": "Keep it encrypted, and make sure it only reaches the right person at the right time, not today."
+          },
+          {
+            "heading": "Review it twice a year",
+            "text": "Update it when you open or close an account, move funds, or replace a device."
+          }
+        ]
+      },
+      {
+        "heading": "How AnyCircumstances fits into a crypto plan",
+        "paragraphs": [
+          "You can store the start-here letter and other instructions as encrypted files and assign them to the person who should receive them. If you stop checking in and your grace period ends, that person gets an email with secure links to those files. AnyCircumstances doesn't hold or move cryptocurrency, and it doesn't transfer ownership."
         ]
       },
       {
@@ -535,11 +595,11 @@ export const guides: Guide[] = [
   {
     "slug": "dead-mans-switch-email",
     "title": "How a Dead Man's Switch Email Works",
-    "seoTitle": "Dead Man's Switch Email: How Automatic Check-Ins Work | AnyCircumstances",
-    "description": "Learn how a dead man's switch email works, why check-ins and grace periods matter, and how trusted recipients can be contacted if you stop responding.",
+    "seoTitle": "How a Dead Man's Switch Email Works, Step by Step",
+    "description": "How a dead man's switch email works, with three example setups, what to put in the files, what your recipients receive, and mistakes to avoid.",
     "intro": "A dead man's switch email is a system designed to contact someone if you stop responding. A careful system does more than schedule one message for the future. It expects you to check in, reminds you when a check-in is due, gives you extra time if you miss one, and only starts recipient delivery after the full trigger conditions are met.",
     "published": "2026-09-08",
-    "modified": "2026-09-08",
+    "modified": "2026-11-12",
     "sections": [
       {
         "heading": "What is a dead man's switch email?",
@@ -594,6 +654,26 @@ export const guides: Guide[] = [
         ]
       },
       {
+        "heading": "Three example setups",
+        "paragraphs": [
+          "The right settings depend on your life, not on what sounds safest. These are starting points you can adjust."
+        ],
+        "cards": [
+          {
+            "heading": "You travel a lot",
+            "text": "Weekly check-ins and the longest grace period, 72 hours, so a long flight or a few days without signal doesn't start a release. Three reminder emails. Your partner receives your travel documents, insurance policy and the contacts they'd need abroad."
+          },
+          {
+            "heading": "You live alone",
+            "text": "A scheduled daily check-in, for example every morning at 9:00 in your time zone, with a 24-hour grace period. A sibling or friend nearby receives a note asking them to check on you, your medical information, and where the spare key is. This doesn't replace a medical alert service or calling emergency services."
+          },
+          {
+            "heading": "You hold crypto or run a business",
+            "text": "Monthly check-ins, a 72-hour grace period and five reminders, because a release is hard to undo. One person receives a start-here letter about your wallets and accounts; a business partner receives the client list and how to keep the business running."
+          }
+        ]
+      },
+      {
         "heading": "What can a dead man's switch email be used for?",
         "cards": [
           {
@@ -615,6 +695,35 @@ export const guides: Guide[] = [
           {
             "heading": "Private personal information",
             "text": "Prepare information you do not want to share today but would want somebody to receive under specific conditions."
+          }
+        ]
+      },
+      {
+        "heading": "What to put in the files",
+        "paragraphs": [
+          "Think about the first week after something happens to you. What would the person need to find, call or decide? Start with that."
+        ],
+        "items": [
+          "A short start-here note: what to do first and who to call",
+          "Where your important documents are, plus copies of the ones that matter most",
+          "Insurance policies, with the policy number and the phone number to call",
+          "Your lawyer, accountant, employer, landlord and doctor",
+          "How to get into your password manager or main email account, if the provider allows it",
+          "Instructions for children, pets or anyone who depends on you",
+          "What not to do yet, for example not closing an account until a certain bill is paid"
+        ],
+        "finalParagraph": "Give each person only what they need. In AnyCircumstances you assign files to each recipient separately, and you can add a note to a file explaining what it's for."
+      },
+      {
+        "heading": "What your recipients receive",
+        "paragraphs": [
+          "Recipients first confirm their email address when you add them. If a release starts, each one gets an email from AnyCircumstances with secure links to the files assigned to them. They don't need an account to open the files.",
+          "Unopened links expire after 30 days by default, and links can't be sent again. Tell your recipients now that this email might one day arrive, and ask them to check their spam folder if they're expecting it."
+        ],
+        "links": [
+          {
+            "label": "what recipients receive",
+            "path": "/recipients"
           }
         ]
       },
@@ -667,6 +776,18 @@ export const guides: Guide[] = [
         }
       },
       {
+        "heading": "Mistakes to avoid",
+        "items": [
+          "Choosing daily check-ins, then traveling somewhere without signal",
+          "A grace period shorter than the longest time you're normally offline",
+          "Leaving a recipient's old email address in place after they change it",
+          "Not telling recipients to expect the email, so it sits unread in spam",
+          "Giving every recipient every file",
+          "Forgetting to update the files after you change insurer, bank or wallet",
+          "Typing your emergency PIN to see what happens: it sends your files immediately"
+        ]
+      },
+      {
         "heading": "What should you decide before setting one up?",
         "items": [
           "How often you can realistically check in",
@@ -712,11 +833,11 @@ export const guides: Guide[] = [
   {
     "slug": "proof-of-life-protocol",
     "title": "What Is a Proof of Life Protocol?",
-    "seoTitle": "Proof of Life Protocol: How Digital Check-Ins Work | AnyCircumstances",
-    "description": "Learn what a proof-of-life protocol is, how recurring digital check-ins work, and how missed check-ins can trigger a grace period and conditional release.",
+    "seoTitle": "What Is a Proof of Life Protocol? How Check-Ins Work",
+    "description": "What a proof of life protocol is, how digital check-ins work, and example settings for travel, working abroad, running a business and single parents.",
     "intro": "A proof-of-life protocol is a process that requires a person to periodically confirm that they are still able to respond. In a digital system, that confirmation can be a recurring check-in. If the expected check-in does not happen, the system can begin a predefined escalation process.",
     "published": "2026-09-08",
-    "modified": "2026-09-08",
+    "modified": "2026-11-12",
     "sections": [
       {
         "heading": "What does \"proof of life\" mean in a digital system?",
@@ -789,6 +910,52 @@ export const guides: Guide[] = [
           "travel contingency planning",
           "instructions for dependents or pets"
         ]
+      },
+      {
+        "heading": "Choosing your settings",
+        "paragraphs": [
+          "In AnyCircumstances you check in with your PIN, monthly, weekly, or on a daily schedule you set (for example weekdays at 8:00). You also choose one to five reminder emails and a grace period between 6 and 72 hours. A few rules of thumb:"
+        ],
+        "items": [
+          "Set the grace period longer than the longest time you're regularly out of reach, like a long-haul flight or a weekend camping trip",
+          "Pick more reminders if your inbox is busy and emails get buried",
+          "Only choose daily check-ins if you'll really do it every day",
+          "If a release would be hard to undo, use a longer schedule and the full 72 hours"
+        ],
+        "comparison": {
+          "columns": ["Your situation", "Suggested settings"],
+          "rows": [
+            ["At home most of the time, phone always nearby", "Weekly check-ins, 24-hour grace period, 2 reminders"],
+            ["Frequent flights or trips without signal", "Weekly check-ins, 72-hour grace period, 3 reminders"],
+            ["You want people to know quickly if something is wrong", "Daily check-ins at a set time, 12-hour grace period, 2 reminders"],
+            ["Crypto, a business, or anything hard to undo", "Monthly check-ins, 72-hour grace period, 5 reminders"]
+          ]
+        }
+      },
+      {
+        "heading": "Examples from real situations",
+        "cards": [
+          {
+            "heading": "Working abroad for six months",
+            "text": "Weekly check-ins and a 72-hour grace period cover time-zone confusion and patchy internet. A parent at home receives copies of your passport and visa, your employer's contact, and your travel insurance details."
+          },
+          {
+            "heading": "Running a business on your own",
+            "text": "Weekly check-ins with a 48-hour grace period. Your accountant or a trusted colleague receives the client list, how to reach your main suppliers, and how to tell customers what's happening."
+          },
+          {
+            "heading": "Single parent",
+            "text": "Weekly check-ins with a 24-hour grace period. The person named as your children's guardian receives school and medical details, daily routines, and who to call for childcare in the first few days."
+          },
+          {
+            "heading": "Long hospital stay coming up",
+            "text": "Before you go in, check in and raise your grace period to 72 hours. Tell your recipients what to expect, and set it back when you're home."
+          }
+        ],
+        "callout": {
+          "title": "Don't test with your emergency PIN",
+          "text": "Your emergency PIN starts delivery to your recipients immediately. Use your normal PIN for every check-in."
+        }
       },
       {
         "heading": "How often should you check in?",
@@ -1061,107 +1228,902 @@ export const guides: Guide[] = [
     "cardDescription": "Compare everyday cloud drives with secure document vaults, controlled access, and emergency information storage."
   },
   {
-    "slug": "what-happens-to-bitcoin-when-you-die",
-    "title": "What Happens to Bitcoin When You Die?",
-    "seoTitle": "What Happens to Bitcoin When You Die?",
-    "description": "What happens to Bitcoin after death depends on self-custody, exchange custody, hardware wallets, recovery phrases, legal authority, and whether heirs can recover access.",
-    "intro": "Bitcoin does not automatically transfer to another person when you die. The coins remain controlled by the same wallet credentials until somebody with the required technical access moves them. Whether an heir can actually recover the Bitcoin depends on how it was stored and what recovery information was left behind.",
-    "published": "2026-09-08",
-    "modified": "2026-09-08",
+    "slug": "digital-vault-cost",
+    "title": "How Much Does a Digital Vault Cost?",
+    "seoTitle": "How Much Does a Digital Vault Cost? Prices and Free Options",
+    "description": "What a digital vault for important documents costs, what free options from Google and Apple cover, and when a paid vault is worth it.",
+    "intro": "A safe place for documents your family may need can cost nothing, a few dollars a month, or a lawyer's fee. The difference comes down to two things: whether your files are encrypted, and whether anything happens on its own if you can't respond. This guide covers the free options first, then what paid services charge, including our own prices.",
+    "published": "2026-11-12",
+    "modified": "2026-11-12",
     "sections": [
       {
-        "heading": "Bitcoin does not know its owner died",
-        "paragraphs": [
-          "The Bitcoin network does not contain a death registry or inheritance system. A wallet keeps working according to its keys. If the person controlling those keys dies, the network does not automatically identify an heir or move the coins."
+        "heading": "Free options you may already have",
+        "cards": [
+          {
+            "heading": "Google Inactive Account Manager",
+            "text": "If your Google account goes unused for a period you choose (3 to 18 months, in steps of 3), Google can notify up to 10 people and share the Google data you picked with them. It's free. It only covers what's in your Google account, and the shortest wait is three months."
+          },
+          {
+            "heading": "Apple Legacy Contact",
+            "text": "You can name people who can request your Apple account data after you die. They need the access key you gave them and a death certificate. It's free, but it doesn't help if you're alive and unreachable."
+          },
+          {
+            "heading": "Password manager emergency access",
+            "text": "Some password managers, such as Bitwarden, let a person you trust request access to your vault after a waiting period you set. It's made for passwords more than documents, and it's often part of a paid plan, so check what yours includes."
+          },
+          {
+            "heading": "A folder at home",
+            "text": "A labeled folder or a fireproof box costs very little. Someone has to know it exists and be able to reach it, and you can't update it or send it anywhere while you're away."
+          }
         ],
         "links": [
           {
-            "label": "cryptocurrency after death",
-            "path": "/guides/what-happens-to-crypto-when-you-die"
+            "label": "Google and Apple's free tools in detail",
+            "path": "/guides/google-inactive-account-manager-apple-legacy-contact"
+          },
+          {
+            "label": "password manager emergency access compared",
+            "path": "/guides/password-manager-emergency-access"
           }
         ]
       },
       {
-        "heading": "What happens to self-custodied Bitcoin?",
+        "heading": "Options that cost money",
+        "comparison": {
+          "columns": [
+            "Option",
+            "What you pay",
+            "The catch"
+          ],
+          "rows": [
+            [
+              "Safe deposit box, for original paper documents",
+              "A yearly fee set by the bank",
+              "After a death, family may need legal authority before the bank lets them open it"
+            ],
+            [
+              "Estate lawyer, for wills, trusts and powers of attorney",
+              "Legal fees, which vary a lot",
+              "Nothing is delivered automatically, and changes go through the lawyer"
+            ],
+            [
+              "Cloud storage, for keeping copies of files",
+              "Free up to a limit, then a monthly fee",
+              "Doesn't hand files to anyone if you stop responding"
+            ],
+            [
+              "Digital vault with check-ins, for encrypted files that reach chosen people",
+              "A monthly or yearly fee",
+              "An ongoing cost, and you have to keep checking in"
+            ]
+          ]
+        }
+      },
+      {
+        "heading": "What AnyCircumstances costs",
         "paragraphs": [
-          "With self-custody, access may depend on a seed phrase, private key, hardware wallet, multisignature setup, backup device, or another recovery method. If nobody can reconstruct the required access path, the Bitcoin can remain inaccessible indefinitely."
+          "The price depends on how much storage you need and how often you want to check in. Prices are in US dollars, and storage goes up in 5 GB steps between the amounts below.",
+          "Paying yearly costs 10 times the monthly price, so two months are free. There's no free plan. Eligible Pioneer invitation codes give 30 days free, then 20% off for as long as you stay subscribed."
+        ],
+        "comparison": {
+          "columns": [
+            "What you choose",
+            "Price"
+          ],
+          "rows": [
+            [
+              "5 GB of storage",
+              "$4.99 a month"
+            ],
+            [
+              "10 GB",
+              "$7.99 a month"
+            ],
+            [
+              "25 GB",
+              "$12.99 a month"
+            ],
+            [
+              "50 GB",
+              "$17.99 a month"
+            ],
+            [
+              "100 GB",
+              "$22.99 a month"
+            ],
+            [
+              "200 GB",
+              "$29.99 a month"
+            ],
+            [
+              "Monthly check-ins (every 30 days)",
+              "Included"
+            ],
+            [
+              "Weekly check-ins",
+              "+$1.99 a month"
+            ],
+            [
+              "Daily or scheduled check-ins",
+              "+$2.99 a month"
+            ]
+          ]
+        },
+        "finalParagraph": "For example, 5 GB with weekly check-ins is $6.98 a month, or $69.80 a year.",
+        "links": [
+          {
+            "label": "all plans and prices",
+            "path": "/pricing"
+          }
         ]
       },
       {
-        "heading": "What happens to Bitcoin held on an exchange?",
+        "heading": "How much storage do you need?",
         "paragraphs": [
-          "If Bitcoin is held through an exchange or custodian, the technical access problem is different. The provider may have a process for deceased customers or estates. That process can require identity documents, legal authority, account information, or other records before access is transferred."
+          "Probably less than you think. A scanned page saved as a PDF is usually a few hundred kilobytes, so 5 GB holds thousands of pages. You'd only need more for photos, video messages or very large scans."
         ]
       },
       {
-        "heading": "What happens to a hardware wallet?",
-        "paragraphs": [
-          "Finding the hardware wallet is only part of the problem. The person handling the estate may also need to understand which wallet it is, how it was backed up, whether another PIN or passphrase exists, and where the recovery information was stored."
-        ]
-      },
-      {
-        "heading": "Should you put your Bitcoin seed phrase in a will?",
-        "paragraphs": [
-          "A will may become accessible to people involved in the estate process and, depending on jurisdiction and procedure, may not remain private forever. Putting a raw seed phrase directly into an ordinary document can create serious security risk. Consider separating legal instructions from sensitive technical recovery information and discuss estate-specific decisions with an appropriate professional."
-        ]
-      },
-      {
-        "heading": "What information should your family know?",
+        "heading": "When a free option is enough",
         "items": [
-          "that Bitcoin exists",
-          "whether it is self-custodied or held through an exchange",
-          "which devices or hardware wallets matter",
-          "where authoritative recovery instructions are located",
-          "which professional or trusted person should be contacted",
-          "whether multisignature or another advanced setup is involved",
-          "what not to do before understanding the recovery process"
+          "Most of what matters is already in your Google or Apple account",
+          "One person should get everything, and a wait of several months is fine",
+          "Your lawyer already holds your will and the documents that go with it",
+          "You only need to pass on passwords, and your password manager has emergency access"
         ]
       },
       {
-        "heading": "Bitcoin and Ethereum are similar in one important way",
-        "paragraphs": [
-          "Neither network automatically transfers assets because the owner died. Ethereum can add extra complexity because one wallet may control ETH, tokens, stablecoins, NFTs, or DeFi positions. In both cases, heirs need a plan that connects legal authority with technical recovery."
-        ]
-      },
-      {
-        "heading": "How AnyCircumstances can fit into a Bitcoin recovery plan",
-        "paragraphs": [
-          "AnyCircumstances can be used to prepare encrypted files explaining wallet locations, devices, exchange accounts, recovery procedures, and trusted contacts. The system can conditionally deliver those files if the owner's check-in and grace-period rules expire. It does not transfer ownership of Bitcoin and does not act as a cryptocurrency custodian."
+        "heading": "When paying for a vault makes sense",
+        "items": [
+          "Your information is spread across banks, devices and different services",
+          "Different people should get different documents",
+          "You want a shorter wait than Google's minimum of three months",
+          "Your family doesn't all use the same platform, such as Apple or Google",
+          "You want an emergency option you can trigger yourself while you're alive"
         ],
         "links": [
           {
-            "label": "secure digital vault",
-            "path": "/digital-vault"
+            "label": "digital vault vs cloud storage",
+            "path": "/guides/digital-vault-vs-cloud-storage"
           },
           {
-            "label": "dead man's switch",
-            "path": "/dead-mans-switch"
+            "label": "what a digital vault is",
+            "path": "/guides/what-is-a-digital-vault"
           }
         ]
       }
     ],
     "related": [
       {
-        "path": "/guides/what-happens-to-crypto-when-you-die",
-        "label": "What Happens to Cryptocurrency When You Die?"
+        "label": "See plans and prices",
+        "path": "/pricing"
       },
       {
-        "path": "/dead-mans-switch",
-        "label": "dead man's switch"
+        "label": "What Is a Digital Vault?",
+        "path": "/guides/what-is-a-digital-vault"
       },
       {
-        "path": "/digital-vault",
-        "label": "secure digital vault"
+        "label": "Digital Vault vs Cloud Storage",
+        "path": "/guides/digital-vault-vs-cloud-storage"
       },
       {
-        "path": "/security",
-        "label": "Review security details"
+        "label": "How a Dead Man's Switch Email Works",
+        "path": "/guides/dead-mans-switch-email"
       }
     ],
-    "ctaVariant": "crypto",
-    "category": "Crypto & Digital Assets",
-    "cardTitle": "What Happens to Bitcoin When You Die?",
-    "cardDescription": "How self-custody, exchanges, hardware wallets, recovery information, and estate planning affect Bitcoin access after death."
+    "ctaVariant": "vault",
+    "ctaAfterSection": 2,
+    "category": "Digital Vaults & Emergency Information",
+    "cardTitle": "How Much Does a Digital Vault Cost?",
+    "cardDescription": "Free options from Google and Apple, what paid services charge, and when paying is worth it."
+  },
+  {
+    "slug": "google-inactive-account-manager-apple-legacy-contact",
+    "title": "Google Inactive Account Manager and Apple Legacy Contact: What They Cover",
+    "seoTitle": "Google Inactive Account Manager and Apple Legacy Contact",
+    "description": "What Google's Inactive Account Manager and Apple's Legacy Contact pass on to family, what they leave out, how to set them up, and when you need more.",
+    "intro": "Both are free, and if most of your life is in a Google or Apple account, you should turn on the one you use. Google's Inactive Account Manager shares your Google data with up to 10 people after your account has gone unused for 3 to 18 months. Apple's Legacy Contact lets the people you name get your iCloud data after you die, once Apple has checked a death certificate. Neither one covers anything kept outside that company's account.",
+    "published": "2026-11-12",
+    "modified": "2026-11-12",
+    "comparison": {
+      "columns": [
+        "Question",
+        "Google Inactive Account Manager",
+        "Apple Legacy Contact"
+      ],
+      "rows": [
+        [
+          "What starts it",
+          "Your account goes unused for the time you chose",
+          "Your contact applies to Apple after you die"
+        ],
+        [
+          "Shortest wait",
+          "3 months without activity",
+          "No fixed wait, but Apple reviews each request"
+        ],
+        [
+          "Who can receive",
+          "Up to 10 people",
+          "More than one person, and they don't need an Apple device or account"
+        ],
+        [
+          "What they get",
+          "A download of the Google data you picked for each of them",
+          "Most of your iCloud data, including photos, messages, notes and files"
+        ],
+        [
+          "Helps if you're alive but can't respond",
+          "Only after months without activity",
+          "No"
+        ],
+        [
+          "Covers files kept elsewhere",
+          "No",
+          "No"
+        ],
+        [
+          "Cost",
+          "Free",
+          "Free"
+        ]
+      ]
+    },
+    "sections": [
+      {
+        "heading": "How Google Inactive Account Manager works",
+        "paragraphs": [
+          "Google now calls this your digital legacy plan. You set it up at myaccount.google.com/inactive.",
+          "First you choose how long Google should wait: 3, 6, 9, 12, 15 or 18 months without any activity on your account. Before the time runs out, Google tries to reach you by text and email, so keep your phone number and recovery email current.",
+          "Then you add up to 10 people. When the time is up, each one gets an email with a link to download the data you picked for them. You can give different people different things, for example your Drive files to one person and your Gmail to another. They have a limited time to download it.",
+          "You can also:"
+        ],
+        "items": [
+          "Turn on an automatic reply in Gmail, written by you, for anyone who emails you after that",
+          "Have Google delete your account afterwards",
+          "Pause the plan without deleting it"
+        ]
+      },
+      {
+        "heading": "What Google's tool leaves out",
+        "items": [
+          "Anything not in your Google account, such as files on your computer, paper documents or another email provider",
+          "A real plan. Contacts get a download and the short message you wrote, not step-by-step instructions",
+          "Speed. Even the shortest setting is three months, which is a long time if bills are due or someone needs your insurance details",
+          "Some data. Google says some information can't be shared, so read the list of products when you choose what to share"
+        ],
+        "finalParagraph": "Separately, Google may delete a personal Google account that hasn't been used for two years, after sending warnings. Work and school accounts don't fall under that rule, and there are exceptions, such as accounts with an active subscription."
+      },
+      {
+        "heading": "How Apple Legacy Contact works",
+        "paragraphs": [
+          "On an iPhone, open Settings, tap your name, then Sign-In & Security, then Legacy Contact. You need iOS 15.2, iPadOS 15.2 or macOS Monterey 12.1 or later, and two-factor authentication turned on.",
+          "You can add more than one person. They need to be over 13 (the age differs by country), and they don't need an Apple device or an Apple Account. Apple creates an access key for each of them. Make sure they know where it is, because a lost key can't be replaced.",
+          "After you die, your contact sends Apple the access key and your death certificate. Apple checks the request before approving it. From the approval, they have three years to download your data, and then the account is permanently deleted. Activation Lock is removed from your devices, so they can be erased and used again.",
+          "They can get your iCloud photos, messages, notes, mail, contacts, calendars, reminders, call history, iCloud Drive files, Health data, voice memos, Safari bookmarks and iCloud backups."
+        ]
+      },
+      {
+        "heading": "What Apple's tool leaves out",
+        "items": [
+          "Passwords and passkeys saved in iCloud Keychain",
+          "Movies, music and books you bought, plus subscriptions and in-app purchases",
+          "Your payment details",
+          "Anything stored outside your Apple account",
+          "Any situation other than death. If you're in hospital or missing, your contact can't use it"
+        ]
+      },
+      {
+        "heading": "If you didn't set either up",
+        "paragraphs": [
+          "Your family can ask Google to close your account, and in some cases to send money left in it or a copy of your data. A data request needs a court order issued in the United States, and Google says it can't give out passwords or other login details. Each request is reviewed, and if the account is closed first, Google can't hand over its contents later.",
+          "Apple asks for a court order that names the person as your rightful inheritor, in the US, Israel and some other countries. Some data is end-to-end encrypted, and Apple can't decrypt it even then.",
+          "Both are much slower than a plan you set up yourself, and neither is guaranteed."
+        ]
+      },
+      {
+        "heading": "When you need more than Google or Apple",
+        "paragraphs": [
+          "These tools do one job: they hand over one company's account after a long silence or a death. They don't help with:"
+        ],
+        "items": [
+          "Documents spread across your computer, paper files, banks and other services",
+          "Sending each person only the documents they need, from all of those places",
+          "Being alive but unreachable, for example after an accident",
+          "Getting information to someone within days instead of months"
+        ],
+        "finalParagraph": "That gap is what AnyCircumstances covers. You upload files, which are encrypted in your browser, choose which person gets which file, and check in on a schedule you pick, from daily to every 30 days. If you miss a check-in and a grace period of 6 to 72 hours runs out, each person gets an email with links to their files, and they don't need an account. There's no death certificate step. That makes it faster, but it also means files go out if you simply stop checking in, so choose a schedule you can keep.",
+        "links": [
+          {
+            "label": "how check-ins and release work",
+            "path": "/how-it-works"
+          }
+        ]
+      },
+      {
+        "heading": "A setup that covers most people",
+        "ordered": true,
+        "cards": [
+          {
+            "heading": "Turn on the free tools",
+            "text": "Set up Google's plan, Apple's Legacy Contact, or both, for the accounts you actually use."
+          },
+          {
+            "heading": "Tell the people you chose",
+            "text": "Let them know you did it, and where Apple's access key is kept."
+          },
+          {
+            "heading": "Gather everything else",
+            "text": "Put documents that live elsewhere in one place, with a short note saying what to do first."
+          },
+          {
+            "heading": "Decide who gets what",
+            "text": "Work out which person needs which documents, and how they'll get them if you can't respond."
+          },
+          {
+            "heading": "Check it once a year",
+            "text": "And whenever you change phone, email address or bank."
+          }
+        ]
+      }
+    ],
+    "related": [
+      {
+        "label": "Password Manager Emergency Access vs a Dead Man's Switch",
+        "path": "/guides/password-manager-emergency-access"
+      },
+      {
+        "label": "How to Leave Passwords and Account Access to Family",
+        "path": "/guides/how-to-leave-passwords-to-family"
+      },
+      {
+        "label": "How Much Does a Digital Vault Cost?",
+        "path": "/guides/digital-vault-cost"
+      },
+      {
+        "label": "Documents family should know",
+        "path": "/guides/important-documents-family-should-know"
+      }
+    ],
+    "ctaVariant": "general",
+    "category": "Family & Account Planning",
+    "cardTitle": "Google and Apple's Free Legacy Tools",
+    "cardDescription": "What Inactive Account Manager and Legacy Contact pass on to family, what they leave out, and how to set them up."
+  },
+  {
+    "slug": "password-manager-emergency-access",
+    "title": "Password Manager Emergency Access vs a Dead Man's Switch",
+    "seoTitle": "Password Manager Emergency Access vs a Dead Man's Switch",
+    "description": "How emergency access works in Bitwarden, LastPass, Keeper and Proton, what 1Password and Dashlane offer instead, and what your family still won't have.",
+    "intro": "If you use a password manager, check whether it has emergency access before you set up anything else. In Bitwarden, LastPass, Keeper and Proton, a person you trust can ask for access to your passwords and gets it if you don't say no within a waiting period you set. 1Password and Dashlane don't offer this today. Either way, a password manager only hands over logins. It doesn't send anyone your documents or tell them what to do first, and it only works if they know to ask.",
+    "published": "2026-11-12",
+    "modified": "2026-11-12",
+    "sections": [
+      {
+        "heading": "How emergency access works",
+        "ordered": true,
+        "cards": [
+          {
+            "heading": "You invite someone",
+            "text": "In most password managers, they need their own account with the same company."
+          },
+          {
+            "heading": "They accept",
+            "text": "Until they ask for access, they can't see anything in your vault."
+          },
+          {
+            "heading": "They ask for access",
+            "text": "If something happens to you, they send a request from their own account."
+          },
+          {
+            "heading": "You can say no",
+            "text": "You get an email. If you don't reject the request before the waiting period ends, they're let in."
+          },
+          {
+            "heading": "They get in",
+            "text": "Depending on the service, they can read your passwords or take over the account."
+          }
+        ],
+        "finalParagraph": "The waiting period protects you. If someone asks while you're fine, you reject it. Choose a period longer than the time you'd normally go without reading email, so a week offline doesn't let someone in early."
+      },
+      {
+        "heading": "What the main password managers offer",
+        "paragraphs": [
+          "Checked against each company's own help pages in November 2026. These features change, so look at the settings in your own account."
+        ],
+        "cards": [
+          {
+            "heading": "Bitwarden",
+            "text": "Emergency access on Premium and on paid Families, Teams and Enterprise plans. Your contact needs a Bitwarden account, and a free one is enough. The shortest wait is one day. You choose whether they can only view your vault, including attachments, or take over the account."
+          },
+          {
+            "heading": "LastPass",
+            "text": "Emergency access on Premium and Families. Your contact needs a LastPass account. You set the wait, and it can be immediate. They can view your vault items and download attachments, but can't change anything."
+          },
+          {
+            "heading": "Keeper",
+            "text": "Emergency access for up to five people. Contacts need a Keeper account. The wait can be anything from immediate to three months."
+          },
+          {
+            "heading": "Proton Pass",
+            "text": "Emergency access on paid Proton plans, for up to five people. It covers your whole Proton account: email, passwords and files. You and your contact both need a Proton Mail address. Waits range from 1 to 30 days."
+          },
+          {
+            "heading": "1Password",
+            "text": "No emergency access. 1Password suggests giving a copy of your Emergency Kit, which holds your Secret Key, to someone you trust, such as your spouse. They'd also need your account password. In a Families account, an organizer can start account recovery, but 1Password emails the person being recovered to finish it."
+          },
+          {
+            "heading": "Dashlane",
+            "text": "No emergency access any more. The old emergency contact feature was part of a desktop app Dashlane no longer offers. It now points to a password-protected export file instead."
+          },
+          {
+            "heading": "Apple Passwords",
+            "text": "No emergency access. Apple's Legacy Contact leaves out passwords and passkeys. While you're alive, you can share passwords with family members."
+          },
+          {
+            "heading": "Google Password Manager",
+            "text": "No emergency access. Google says it can't give passwords or other login details to family after a death."
+          }
+        ]
+      },
+      {
+        "heading": "What emergency access doesn't cover",
+        "items": [
+          "Documents. Your will, insurance policies and property papers usually aren't in a password manager, and attachments in one are easy to miss",
+          "Instructions. A long list of logins doesn't say which bill to pay first or which accounts to keep open",
+          "People who use a different app. Most services need the contact to have an account with the same company",
+          "Two-factor codes. If your codes come to your phone, a password alone may not get anyone in",
+          "Choosing who gets what. In each service above, a contact gets your whole vault, not selected parts",
+          "Someone who doesn't know to ask. Nothing happens until your contact makes a request"
+        ]
+      },
+      {
+        "heading": "Emergency access vs a dead man's switch",
+        "paragraphs": [
+          "A dead man's switch works the other way round. Instead of your contact asking, the system waits for you to check in, and sends chosen files if you stop. Here's how a password manager compares with AnyCircumstances."
+        ],
+        "comparison": {
+          "columns": [
+            "Question",
+            "Password manager emergency access",
+            "AnyCircumstances"
+          ],
+          "rows": [
+            [
+              "Who starts it",
+              "Your contact, by asking for access",
+              "You, by missing a check-in, or by entering your emergency PIN"
+            ],
+            [
+              "What's handed over",
+              "Your password vault",
+              "Only the files you assigned to each person"
+            ],
+            [
+              "Does the contact need an account?",
+              "Usually, with the same company",
+              "No"
+            ],
+            [
+              "How you stop it",
+              "Reject the request during the wait",
+              "Check in before the grace period ends"
+            ],
+            [
+              "How fast it can happen",
+              "Immediately, or after the wait you set",
+              "After a missed check-in and a grace period of 6 to 72 hours"
+            ],
+            [
+              "What the contact has to do",
+              "Know about it and make a request",
+              "Confirm their email once when you add them, then open the email if files are released"
+            ],
+            [
+              "Cost",
+              "Part of a paid plan in most services",
+              "From $4.99 a month"
+            ]
+          ]
+        }
+      },
+      {
+        "heading": "Using both",
+        "paragraphs": [
+          "For most people the answer is both. Keep passwords in your password manager and turn on emergency access if it has it. Put everything else in a place that releases on its own: documents, a short note saying what to do first, and a line saying which password manager you use and who your emergency contact in it is.",
+          "Think hard before putting your master password, or a 1Password Emergency Kit, into any file. Whoever receives it gets every account at once. If you do it, give it to one person, and pick a check-in schedule and grace period you're sure you can keep, so it can't go out while you're fine."
+        ],
+        "links": [
+          {
+            "label": "what recipients receive",
+            "path": "/recipients"
+          },
+          {
+            "label": "security details",
+            "path": "/security"
+          }
+        ]
+      },
+      {
+        "heading": "Mistakes to avoid",
+        "items": [
+          "A waiting period shorter than your longest stretch without email",
+          "Inviting someone who never accepts the invite. Check that it shows as accepted",
+          "Picking a contact who won't set up an account with the same service",
+          "Keeping two-factor backup codes only on your phone",
+          "Using an email draft or a notes app as a password backup",
+          "Never telling your contact that emergency access exists"
+        ]
+      }
+    ],
+    "related": [
+      {
+        "label": "Google and Apple's Free Legacy Tools",
+        "path": "/guides/google-inactive-account-manager-apple-legacy-contact"
+      },
+      {
+        "label": "How to Leave Passwords and Account Access to Family",
+        "path": "/guides/how-to-leave-passwords-to-family"
+      },
+      {
+        "label": "How a Dead Man's Switch Email Works",
+        "path": "/guides/dead-mans-switch-email"
+      },
+      {
+        "label": "Review security details",
+        "path": "/security"
+      }
+    ],
+    "ctaVariant": "switch",
+    "category": "Family & Account Planning",
+    "cardTitle": "Password Manager Emergency Access",
+    "cardDescription": "What Bitwarden, LastPass, Keeper, Proton and 1Password offer, and what a password manager can't hand over."
+  },
+  {
+    "slug": "is-a-digital-vault-worth-it",
+    "title": "Is a Digital Vault Worth It? How to Choose a Secure One",
+    "seoTitle": "Is a Digital Vault Worth It? How to Choose a Secure One",
+    "description": "When a digital vault is worth paying for, when it isn't, what makes one secure, and the questions to ask before you choose one.",
+    "intro": "A digital vault is worth it if your important documents are scattered and someone would need them quickly if you were in hospital or died. It's not worth paying for if everything already lives in one Google or Apple account, or your lawyer holds the only papers that matter. The other half of the question is safety: a vault is only as good as its encryption, its sign-in, and what it does when you can't respond.",
+    "published": "2026-11-14",
+    "modified": "2026-11-14",
+    "sections": [
+      {
+        "heading": "When a digital vault is worth it",
+        "items": [
+          "Your documents are spread across email, a laptop, paper files and different banks",
+          "Someone would need them fast: a partner, an adult child or a business partner",
+          "Different people should get different things",
+          "You hold things that are hard to replace or explain, such as crypto recovery steps or business logins",
+          "You travel, live alone or work somewhere risky, and want something to happen if you can't respond"
+        ]
+      },
+      {
+        "heading": "When it isn't",
+        "items": [
+          "Almost everything is in your Google or Apple account, and their free legacy tools cover it",
+          "One person already has copies of everything and knows where the originals are",
+          "Your lawyer keeps your will and estate papers, and that's all your family would need",
+          "You'd stop updating it after a few months. Old insurance details or a closed bank account can send family the wrong way"
+        ],
+        "links": [
+          {
+            "label": "Google and Apple's free tools",
+            "path": "/guides/google-inactive-account-manager-apple-legacy-contact"
+          },
+          {
+            "label": "what a digital vault costs",
+            "path": "/guides/digital-vault-cost"
+          }
+        ]
+      },
+      {
+        "heading": "What makes a digital vault secure",
+        "cards": [
+          {
+            "heading": "Encryption before upload",
+            "text": "Files should be encrypted on your device before they reach the company, so a break-in on its servers doesn't expose them. Look for \"end-to-end\" or \"encrypted in your browser\" in how the company describes it."
+          },
+          {
+            "heading": "Who else holds a key",
+            "text": "A vault where only you hold the key (often called zero-knowledge) can't hand files to your family unless they have your password. A vault that can deliver files on its own has to keep a release key somewhere. Ask how that key is protected and when it can be used."
+          },
+          {
+            "heading": "Strong sign-in",
+            "text": "Two-step sign-in, such as a code from an app, protects you if your password leaks. Check whether the vault offers it, and turn it on for the email account the vault sends password resets to."
+          },
+          {
+            "heading": "Clear rules for who gets in",
+            "text": "You should be able to say exactly who sees what, and when. Watch for setups that give someone full access straight away when you only meant \"if something happens\"."
+          },
+          {
+            "heading": "A plan for when you can't respond",
+            "text": "If the point is for family to get in, the vault should explain exactly how: a check-in system, a death certificate process or a named contact, and how long each takes."
+          },
+          {
+            "heading": "A way to get your files back",
+            "text": "You should be able to download your own files at any time, so you're not stuck if the company changes its prices or closes."
+          }
+        ]
+      },
+      {
+        "heading": "What is the best digital vault?",
+        "paragraphs": [
+          "There isn't one best digital vault. The best one does the job you actually need and is one you'll keep up to date. Many people use two: a password manager for logins, and a vault for documents."
+        ],
+        "cards": [
+          {
+            "heading": "Passwords to pass on later",
+            "text": "A password manager with emergency access."
+          },
+          {
+            "heading": "Your Google or Apple data",
+            "text": "Google Inactive Account Manager or Apple Legacy Contact. Both are free."
+          },
+          {
+            "heading": "Copies of everyday files",
+            "text": "The cloud storage you already use."
+          },
+          {
+            "heading": "Wills and legal papers",
+            "text": "An estate lawyer."
+          },
+          {
+            "heading": "Paper originals",
+            "text": "A fireproof box at home or a safe deposit box."
+          },
+          {
+            "heading": "Chosen documents for chosen people",
+            "text": "A vault with check-ins, such as AnyCircumstances, if they should reach people when you stop responding."
+          }
+        ],
+        "links": [
+          {
+            "label": "password manager emergency access",
+            "path": "/guides/password-manager-emergency-access"
+          },
+          {
+            "label": "dead man's switch services compared",
+            "path": "/guides/dead-mans-switch-services-compared"
+          }
+        ]
+      },
+      {
+        "heading": "Questions to ask before you pay",
+        "items": [
+          "Can the company read my files, and when?",
+          "What happens if I forget my password or encryption passphrase?",
+          "How exactly does my family get access, and how long does it take?",
+          "Do the people I choose need to create an account?",
+          "Is two-step sign-in available?",
+          "Can I download my files whenever I want?",
+          "Is there a free plan or a trial?"
+        ]
+      },
+      {
+        "heading": "How AnyCircumstances answers those questions",
+        "paragraphs": [
+          "We'd rather you choose with the full picture, including the parts that aren't in our favor."
+        ],
+        "items": [
+          "Files are encrypted in your browser, and your vault passphrase never reaches us. So that your contacts can open files without your passphrase, each file is also protected by an emergency-release key our systems can use. That means we aren't zero-knowledge",
+          "If you forget your vault passphrase, we can't reset it, so you couldn't open your own files in the app. Your files stay stored, and delivery to your contacts still works",
+          "Your family gets access when you miss a check-in (you choose from daily to every 30 days) and a grace period of 6 to 72 hours runs out. Each person then gets an email with links to the files you assigned to them",
+          "Your contacts don't need an account",
+          "We don't offer two-step sign-in yet, so protect your email account with it, because password resets go there",
+          "You can download your own files in the app at any time with your passphrase",
+          "There's no free plan. Prices start at $4.99 a month"
+        ],
+        "links": [
+          {
+            "label": "security details",
+            "path": "/security"
+          },
+          {
+            "label": "plans and prices",
+            "path": "/pricing"
+          }
+        ]
+      }
+    ],
+    "related": [
+      {
+        "label": "How Much Does a Digital Vault Cost?",
+        "path": "/guides/digital-vault-cost"
+      },
+      {
+        "label": "What Is a Digital Vault?",
+        "path": "/guides/what-is-a-digital-vault"
+      },
+      {
+        "label": "Digital Vault vs Cloud Storage",
+        "path": "/guides/digital-vault-vs-cloud-storage"
+      },
+      {
+        "label": "Secure digital vault",
+        "path": "/digital-vault"
+      }
+    ],
+    "ctaVariant": "vault",
+    "category": "Digital Vaults & Emergency Information",
+    "cardTitle": "Is a Digital Vault Worth It?",
+    "cardDescription": "When it's worth paying for, what makes one secure, and the questions to ask before you choose."
+  },
+  {
+    "slug": "dead-mans-switch-services-compared",
+    "title": "Dead Man's Switch Services Compared",
+    "seoTitle": "Dead Man's Switch Services Compared: 8 Options",
+    "description": "Eight dead man's switch services compared, including Google's free tool: what each sends, how you check in, who can read your files and what it costs.",
+    "intro": "We make one of these services, AnyCircumstances, so read this knowing that. Everything here about the others comes from their own websites, checked on 14 November 2026. Where a site didn't say something, we left it out rather than guess. The short version: if you only want to send a few emails, a simple service or Google's free tool may be all you need. If you want to send documents to different people, look at how each one encrypts files and whether your recipients need an account.",
+    "published": "2026-11-14",
+    "modified": "2026-11-14",
+    "comparison": {
+      "columns": [
+        "Service",
+        "Built around",
+        "Cheapest option"
+      ],
+      "rows": [
+        [
+          "Dead Man's Switch",
+          "Emails you write ahead of time",
+          "$2 a month, billed yearly"
+        ],
+        [
+          "KinSwitch",
+          "Notes and documents, with text reminders in the US and Canada",
+          "$7.99 a month"
+        ],
+        [
+          "LastSend",
+          "Personal letters, with trusted contacts confirming first",
+          "Free for text only, $4.99 a month with attachments"
+        ],
+        [
+          "GoodTrust",
+          "Wider estate planning in the US",
+          "Estate plan $149, then $39 a year"
+        ],
+        [
+          "Alcazar",
+          "Encrypted files and recovery phrases, with Signal and Telegram reminders",
+          "$5.99 a month"
+        ],
+        [
+          "Just In Case",
+          "An iPhone app that can phone you",
+          "Free for 10 items, $99 once for Pro"
+        ],
+        [
+          "Google Inactive Account Manager",
+          "Your Google account only",
+          "Free"
+        ],
+        [
+          "AnyCircumstances",
+          "Encrypted documents, each sent to the people you choose",
+          "$4.99 a month"
+        ]
+      ]
+    },
+    "sections": [
+      {
+        "heading": "What we compared",
+        "items": [
+          "What it sends: emails, letters, documents or passwords",
+          "How you check in, and how it reminds you before it does anything",
+          "Whether the people you choose need an account",
+          "Who can read your files, in the company's own words",
+          "What it costs, in US dollars as shown on each site. Prices change, so check before you buy"
+        ]
+      },
+      {
+        "heading": "The services, one by one",
+        "cards": [
+          {
+            "heading": "Dead Man's Switch (deadmansswitch.net)",
+            "text": "Sends emails you write ahead of time, and yearly plans can add attachments up to 10 MB. You check in by clicking a link sent by email, its Android app, Telegram or a browser notification, on a schedule from one day to years. On the free plan, emails only go to your own address as a test. Premium is $2 a month billed yearly, or $60 once. It has been running since the late 2000s. It says its backups are encrypted, suggests encrypting anything sensitive yourself, and says not to use it if you need strong privacy guarantees."
+          },
+          {
+            "heading": "KinSwitch",
+            "text": "Sends each person a secure link to the notes and documents you assigned them, and they don't need an account. You check in with a one-click link in a reminder email or text (texts work for US and Canadian numbers) or from the dashboard. The shortest window is one day; new switches start at 7 days with a 3-day grace period, and a final notice goes out 3 hours before it fires. Files are encrypted at rest, and KinSwitch says it holds the keys so family is never locked out. From $7.99 a month or $79 a year. A card is required and billing starts on day 31. The Starter plan allows up to 2 people per switch."
+          },
+          {
+            "heading": "LastSend",
+            "text": "Made for personal letters rather than legal documents. Each person gets an email with a link to a memorial page. You check in by tapping \"I'm Still Here\" in the app. If you don't, it reminds you for about 7 days, then asks the two trusted contacts you named. Letters go out 7 days after one of them confirms you've died, or 60 days after they were first asked if nobody answers. It says plainly that it isn't end-to-end encrypted. Free for text-only letters to 5 people; Plus is $4.99 a month and adds attachments up to 100 MB."
+          },
+          {
+            "heading": "GoodTrust",
+            "text": "A US digital estate planning service. Its dead man's switch lets the contacts you assigned manage your accounts, documents, devices and will, and sends any future messages you wrote. It checks in by email on a schedule you choose and activates after three unanswered emails. Future messages arrive by email whether or not the recipient has an account. It stores personal data with AES-256 encryption and says it is SOC 2 Type II certified. The Estate plan is $149, then $39 a year. Its documents are only valid in the United States."
+          },
+          {
+            "heading": "Alcazar Dead Man's Switch",
+            "text": "Sends encrypted messages and files, such as documents, recovery phrases and passwords, to as many contacts as you like. You choose daily, weekly or monthly check-ins, with reminders by email, Signal and Telegram, and a grace period with stronger reminders over time. It says it doesn't read your files and that they're end-to-end encrypted until delivery. $5.99 a month, $59 a year or $590 once. It's a US company with servers in Germany, and you can use an anonymous account."
+          },
+          {
+            "heading": "Just In Case",
+            "text": "An iPhone app (Android is listed as coming soon) for passwords, letters and crypto keys, delivered to the heirs you name. Opening the app counts as a check-in, every 7, 14, 30, 60 or 90 days. Before it fires it tries an email, then a push notification, then a text, then a phone call. It says your data is encrypted on your device with a zero-knowledge design. The free plan holds 10 items for one heir. Lifetime Pro is $99 once, though its terms say the price in the app can vary by region."
+          },
+          {
+            "heading": "Google Inactive Account Manager",
+            "text": "Free. Shares the Google data you choose with up to 10 people after 3 to 18 months without any activity on your account. It only covers what's in your Google account."
+          },
+          {
+            "heading": "AnyCircumstances (ours)",
+            "text": "Encrypted documents, each sent only to the people you assign. You check in with your PIN on a schedule from daily to every 30 days. If you miss one, you get 1 to 5 reminder emails during a grace period of 6 to 72 hours. Recipients confirm their email once when you add them and don't need an account. Files are encrypted in your browser, but our systems hold an emergency-release key so contacts can open files without your passphrase, so we aren't zero-knowledge. From $4.99 a month, with no free plan."
+          }
+        ],
+        "links": [
+          {
+            "label": "Google and Apple's free tools in detail",
+            "path": "/guides/google-inactive-account-manager-apple-legacy-contact"
+          }
+        ]
+      },
+      {
+        "heading": "How to choose",
+        "items": [
+          "You only want to send a few emails or letters: a simpler, cheaper service is fine",
+          "You want to send documents to different people: check that each person only gets their own files, and whether they need an account to open them",
+          "Privacy matters most: read how each company describes its encryption. \"Encrypted at rest\" usually means the company holds the keys and could read your files. \"End-to-end\" or \"zero-knowledge\" means it says it can't",
+          "You might miss an email reminder: look for app, text, Signal, Telegram or phone call reminders",
+          "You don't want a monthly bill: Dead Man's Switch, Alcazar and Just In Case have one-off prices",
+          "Think about the company too. Several of these are small, so ask what happens to your messages if it shuts down"
+        ]
+      },
+      {
+        "heading": "Where AnyCircumstances is weaker",
+        "items": [
+          "Reminders and delivery are by email only. KinSwitch can text you, Alcazar uses Signal and Telegram, and Just In Case can phone you",
+          "We aren't zero-knowledge. Alcazar says files are end-to-end encrypted until delivery, and Just In Case says it uses a zero-knowledge design",
+          "The longest check-in interval is 30 days. Dead Man's Switch allows years, and Just In Case allows 90 days",
+          "There's no free plan and no one-off price",
+          "There's no two-step sign-in yet"
+        ]
+      },
+      {
+        "heading": "Where it's stronger",
+        "items": [
+          "Each person gets only the files you assigned to them",
+          "Recipients don't need an account",
+          "A grace period of up to 72 hours with up to 5 reminders, so a missed check-in doesn't send anything straight away",
+          "An emergency PIN that sends your files straight away if you need it to"
+        ],
+        "links": [
+          {
+            "label": "how check-ins and release work",
+            "path": "/how-it-works"
+          },
+          {
+            "label": "security details",
+            "path": "/security"
+          }
+        ],
+        "finalParagraph": "Spotted something out of date about any of these services? Tell us and we'll correct it."
+      }
+    ],
+    "related": [
+      {
+        "label": "How a Dead Man's Switch Email Works",
+        "path": "/guides/dead-mans-switch-email"
+      },
+      {
+        "label": "Google and Apple's Free Legacy Tools",
+        "path": "/guides/google-inactive-account-manager-apple-legacy-contact"
+      },
+      {
+        "label": "Password Manager Emergency Access vs a Dead Man's Switch",
+        "path": "/guides/password-manager-emergency-access"
+      },
+      {
+        "label": "Contact us",
+        "path": "/contact"
+      }
+    ],
+    "ctaVariant": "switch",
+    "category": "Dead Man's Switch & Check-Ins",
+    "cardTitle": "Dead Man's Switch Services Compared",
+    "cardDescription": "Eight services, including Google's free tool: what each sends, who can read your files and what it costs."
   }
 ];
 

@@ -341,7 +341,7 @@ const handleDelete = async (fileKey: string) => {
                   {file.document_template && <span className="text-xs text-muted-foreground">Created in your vault · </span>}
                   {file.has_recipient_note && <span className="text-xs text-muted-foreground">Recipient note attached</span>}
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <span>{file.size_bytes === null ? "—" : formatBytes(file.size_bytes)}</span>
+                    <span>{file.size_bytes === null ? "Unknown size" : formatBytes(file.size_bytes)}</span>
                     <span>•</span>
                     <span>{formatDate(file.created_at)}</span>
                   </div>

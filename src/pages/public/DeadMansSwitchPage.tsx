@@ -3,7 +3,6 @@ import { Button } from "@/components/ui/button";
 import content from "@/data/publicContent.json";
 import { ContextualCta } from "@/components/public/ContextualCta";
 import { ContentLinks, PublicContentSection } from "@/components/public/ArticleContent";
-import { motion } from "@/components/public/staticMotion";
 import {
   Skull,
   Clock,
@@ -25,13 +24,6 @@ import {
   Workflow,
 } from "lucide-react";
 
-const fadeUp = {
-  initial: { opacity: 0, y: 18 },
-  whileInView: { opacity: 1, y: 0 },
-  viewport: { once: true },
-  transition: { duration: 0.5 },
-};
-
 export function DeadMansSwitchPage() {
   return (
     <div className="flex flex-col">
@@ -42,33 +34,24 @@ export function DeadMansSwitchPage() {
 
         <div className="container mx-auto px-4 relative">
           <div className="max-w-4xl mx-auto text-center">
-            <motion.div {...fadeUp}>
-              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 mb-6">
+            <div>
+              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-primary/10 border border-primary/20 mb-6">
                 <Skull className="h-4 w-4 text-primary" />
                 <span className="text-sm font-medium text-primary">
                   {content.switch.eyebrow}
                 </span>
               </div>
-            </motion.div>
+            </div>
 
-            <motion.h1
-              initial={{ opacity: 0, y: 18 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.55, delay: 0.05 }}
+            <h1
               className="text-4xl md:text-5xl lg:text-6xl font-bold text-vault-foreground mb-6 leading-tight"
-            >{content.switch.h1}</motion.h1>
+            >{content.switch.h1}</h1>
 
-            <motion.p
-              initial={{ opacity: 0, y: 18 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.55, delay: 0.12 }}
+            <p
               className="text-lg md:text-xl text-vault-foreground/70 mb-10 max-w-3xl mx-auto"
-            >{content.switch.intro}</motion.p>
+            >{content.switch.intro}</p>
 
-            <motion.div
-              initial={{ opacity: 0, y: 18 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.55, delay: 0.2 }}
+            <div
               className="flex flex-col sm:flex-row gap-4 justify-center"
             >
               <Button asChild size="lg" className="w-full sm:w-auto gap-2 shadow-glow"><Link to="/pricing">
@@ -82,12 +65,9 @@ export function DeadMansSwitchPage() {
                 ><Link to="/how-it-works">
                   See the Check-In Flow
                 </Link></Button>
-            </motion.div>
+            </div>
 
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ duration: 0.55, delay: 0.35 }}
+            <div
               className="mt-12 flex flex-wrap justify-center gap-4"
             >
               {[
@@ -103,7 +83,7 @@ export function DeadMansSwitchPage() {
                   {b.label}
                 </div>
               ))}
-            </motion.div>
+            </div>
           </div>
         </div>
       </section>
@@ -111,7 +91,7 @@ export function DeadMansSwitchPage() {
       <section className="py-20 bg-background">
         <div className="container mx-auto px-4 max-w-5xl">
           <h2 className="text-3xl md:text-4xl font-bold">What is a dead man’s switch?</h2>
-          <p className="mt-5 text-lg text-muted-foreground max-w-4xl">A digital dead man’s switch is an automated system that asks you to check in on a schedule. If you miss the required check-ins and do not respond during the recovery period, the system follows instructions you prepared in advance—such as notifying trusted contacts and releasing selected encrypted files.</p>
+          <p className="mt-5 text-lg text-muted-foreground max-w-4xl">A digital dead man’s switch is an automated system that asks you to check in on a schedule. If you miss the required check-ins and do not respond during the recovery period, the system follows instructions you prepared in advance, such as notifying trusted contacts and releasing selected encrypted files.</p>
         </div></section>
       <PublicContentSection section={content.switch.sections[0]} />
       {content.switch.sections.slice(2).map(section => <PublicContentSection key={section.heading} section={section} />)}
@@ -133,14 +113,14 @@ export function DeadMansSwitchPage() {
       <section className="py-20 bg-background">
         <div className="container mx-auto px-4">
           <div className="max-w-5xl mx-auto">
-            <motion.div {...fadeUp} className="text-center mb-12">
+            <div className="text-center mb-12">
               <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-4">
                 Why people set this up
               </h2>
               <p className="text-lg text-muted-foreground max-w-3xl mx-auto">
-                Because “I’ll tell them later” is not a real disaster plan.
+                Common reasons people set up check-ins and delivery.
               </p>
-            </motion.div>
+            </div>
 
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
               {[
@@ -152,17 +132,17 @@ export function DeadMansSwitchPage() {
                 {
                   icon: Users,
                   title: "Family continuity",
-                  desc: "Make sure your people can access what matters without chaos.",
+                  desc: "Give family the documents and instructions they would otherwise have to search for.",
                 },
                 {
                   icon: AlertTriangle,
                   title: "Unexpected events",
-                  desc: "Accidents happen. This handles the “what if” part automatically.",
+                  desc: "If you are in hospital or out of contact and miss your check-ins, delivery happens without anyone having to find your files.",
                 },
                 {
                   icon: HeartHandshake,
                   title: "Trusted delivery",
-                  desc: "Choose exactly who gets access and under what conditions.",
+                  desc: "You choose which file goes to which person. Contacts must confirm their email address first.",
                 },
                 {
                   icon: Lock,
@@ -175,12 +155,8 @@ export function DeadMansSwitchPage() {
                   desc: "When a release happens, secure links are emailed to confirmed contacts shortly afterwards.",
                 },
               ].map((c, idx) => (
-                <motion.div
+                <div
                   key={c.title}
-                  initial={{ opacity: 0, y: 18 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  viewport={{ once: true }}
-                  transition={{ duration: 0.5, delay: idx * 0.05 }}
                   className="p-6 rounded-2xl bg-card border border-border hover:border-primary/30 hover:shadow-lg transition-all"
                 >
                   <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center mb-4">
@@ -190,7 +166,7 @@ export function DeadMansSwitchPage() {
                     {c.title}
                   </h3>
                   <p className="text-muted-foreground">{c.desc}</p>{c.title === "Cryptocurrency recovery context" && <ContentLinks links={content.switch.sections[1].links ?? []} />}
-                </motion.div>
+                </div>
               ))}
             </div>
 
@@ -207,14 +183,14 @@ export function DeadMansSwitchPage() {
       <section className="py-20 bg-muted/30">
         <div className="container mx-auto px-4">
           <div className="max-w-5xl mx-auto">
-            <motion.div {...fadeUp} className="text-center mb-12">
+            <div className="text-center mb-12">
               <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-4">
                 How the trigger works
               </h2>
               <p className="text-lg text-muted-foreground">
                 Missing a scheduled check-in DOES NOT immediately release files.
               </p>
-            </motion.div>
+            </div>
 
             <div className="grid md:grid-cols-3 gap-6">
               {[
@@ -237,12 +213,8 @@ export function DeadMansSwitchPage() {
                   desc: "Miss a check-in and you get 1–5 reminder emails during a 6–72 hour grace period. If it runs out, contacts are emailed secure links.",
                 },
               ].map((s, idx) => (
-                <motion.div
+                <div
                   key={s.step}
-                  initial={{ opacity: 0, y: 18 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  viewport={{ once: true }}
-                  transition={{ duration: 0.5, delay: idx * 0.08 }}
                   className="p-6 rounded-2xl bg-card border border-border"
                 >
                   <div className="flex items-center justify-between mb-4">
@@ -255,12 +227,11 @@ export function DeadMansSwitchPage() {
                     {s.title}
                   </h3>
                   <p className="text-muted-foreground">{s.desc}</p>
-                </motion.div>
+                </div>
               ))}
             </div>
 
-            <motion.div
-              {...fadeUp}
+            <div
               className="mt-10 p-6 rounded-2xl bg-card border border-border flex flex-col md:flex-row items-start md:items-center justify-between gap-4"
             >
               <div className="flex items-start gap-3">
@@ -268,9 +239,9 @@ export function DeadMansSwitchPage() {
                   <Sparkles className="h-5 w-5 text-primary" />
                 </div>
                 <div>
-                  <div className="text-foreground font-semibold">Small but important note</div>
+                  <div className="text-foreground font-semibold">Pick a schedule you can keep</div>
                   <div className="text-muted-foreground">
-                    Choose a schedule you can keep. The best system is the one you actually use.
+                    If you check in less often than your schedule requires, your files will be sent. Choose daily, weekly or monthly based on how often you can reliably sign in.
                   </div>
                 </div>
               </div>
@@ -278,7 +249,7 @@ export function DeadMansSwitchPage() {
                   Build your plan
                   <ArrowRight className="h-4 w-4" />
                 </Link></Button>
-            </motion.div>
+            </div>
           </div>
         </div>
       </section>
@@ -286,14 +257,13 @@ export function DeadMansSwitchPage() {
       <section className="py-20 bg-background">
         <div className="container mx-auto px-4">
           <div className="max-w-5xl mx-auto">
-            <motion.div
-              {...fadeUp}
+            <div
               className="p-8 md:p-10 rounded-3xl border border-border bg-card relative overflow-hidden"
             >
               <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,hsl(var(--primary)/0.12),transparent_55%)]" />
               <div className="relative grid md:grid-cols-2 gap-8 items-center">
                 <div>
-                  <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/10 border border-primary/20 mb-4">
+                  <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-primary/10 border border-primary/20 mb-4">
                     <Shield className="h-4 w-4 text-primary" />
                     <span className="text-sm font-semibold text-primary">Built for privacy</span>
                   </div>
@@ -383,7 +353,7 @@ export function DeadMansSwitchPage() {
                   </div>
                 </div>
               </div>
-            </motion.div>
+            </div>
           </div>
         </div>
       </section>

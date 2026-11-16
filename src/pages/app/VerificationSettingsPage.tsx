@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Slider } from "@/components/ui/slider";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import { Calendar, Clock, Bell, Shield, Loader2, Save, AlertTriangle, KeyRound } from "lucide-react";
+import { Calendar, Clock, Bell, Shield, Loader2, Save, AlertTriangle, KeyRound, ArrowLeft } from "lucide-react";
 
 type Frequency = "daily" | "weekly" | "monthly";
 
@@ -341,7 +341,7 @@ export function VerificationSettingsPage() {
   return (
     <div className="mx-auto p-6 lg:p-8 space-y-6 max-w-3xl">
       <div>
-        <Link to="/onboarding" className="mb-4 inline-block text-sm text-primary hover:underline">← Back to setup guide</Link>
+        <Link to="/onboarding" className="mb-4 inline-flex items-center gap-1 text-sm text-primary hover:underline"><ArrowLeft aria-hidden="true" className="h-4 w-4" /> Back to setup guide</Link>
         <h1 className="text-2xl font-bold text-foreground">Verification Settings</h1>
         <p className="text-muted-foreground">Configure your check-in schedule, grace period, and reminders</p>
       </div>

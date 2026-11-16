@@ -4,7 +4,8 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 
 // Execute the actual route body without booting MySQL, SMTP or Stripe.
-const source = fs.readFileSync(require.resolve('./auth.js'), 'utf8');
+// Normalize line endings so the route slicing below also works on Windows checkouts.
+const source = fs.readFileSync(require.resolve('./auth.js'), 'utf8').replace(/\r\n/g, '\n');
 const start = source.indexOf('router.post(\n  "/verify-email-code"');
 const route = source.slice(start, source.indexOf('\nrouter.post(', start + 1));
 for (const verified of [false, true]) {
@@ -16,7 +17,7 @@ for (const verified of [false, true]) {
       const conn = { async beginTransaction() {}, async rollback() {}, async commit() {}, release() {} };
       vm.runInNewContext(route, {
         router: { post(path, fn) { handler = fn; } }, asyncHandler: fn => fn,
-        normalizeEmail: value => value, validateEmail: () => true, isSixDigitCode: () => true,
+        normalizeEmail: value => value, validateEmail: () => true, isSixDigitCode: () => true, isDuressLocked: () => false,
         getUserByEmail: async () => ({ id: 1, email: 'test@example.test', status: 'active', email_verified_at: verified }),
         pool: { getConnection: async () => conn },
         consumeEmailVerificationForUser: async () => { checked = true; return { ok: validCode, reason: 'invalid_code' }; },

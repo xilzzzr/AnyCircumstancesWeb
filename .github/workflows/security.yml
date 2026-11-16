@@ -12,6 +12,18 @@ jobs:
   security-test:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: release-test-password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
     steps:
       - uses: actions/checkout@v7
 
@@ -49,6 +61,12 @@ jobs:
       - name: Frontend tests
         run: npm test
 
+      - name: Encryption and share flow regression tests
+        run: npm run test:crypto
+
+      - name: Frontend type checks
+        run: npm run typecheck
+
       - name: Frontend lint (legacy report)
         continue-on-error: true
         run: npm run lint
@@ -57,7 +75,9 @@ jobs:
         run: npm run build
 
       - name: Verify production assets
-        run: node scripts/verify-build-assets.mjs
+        run: |
+          node scripts/verify-build-assets.mjs
+          python3 scripts/verify-public.py
 
       - name: Install backend dependencies
         working-directory: backend
@@ -70,3 +90,11 @@ jobs:
       - name: Backend tests
         working-directory: backend
         run: npm test
+
+      - name: MySQL release integration tests
+        working-directory: backend
+        env:
+          MYSQL_TEST_HOST: 127.0.0.1
+          MYSQL_TEST_USER: root
+          MYSQL_TEST_PASSWORD: release-test-password
+        run: npm run test:mysql

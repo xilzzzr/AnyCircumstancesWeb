@@ -20,9 +20,18 @@ const vault = await bundle('src/lib/vaultCrypto.ts');
 const { default: SharePage } = await bundle('src/pages/SharePage.tsx', [{
   name: 'headless-react-hooks',
   setup(build) {
+    // This harness exercises share logic and crypto; the DOM/Button component
+    // is covered by Vitest. Keep its Radix hooks out of the hook-only renderer.
+    build.onResolve({ filter: /^@\/lib\/vaultExports$/ }, () => ({ path: 'downloads', namespace: 'test' }));
+    build.onResolve({ filter: /^@\/components\/ui\/button$/ }, () => ({ path: 'button', namespace: 'test' }));
     build.onResolve({ filter: /^(react|react\/jsx-runtime|react-router-dom)$/ }, ({ path }) => ({ path, namespace: 'test' }));
     build.onLoad({ filter: /.*/, namespace: 'test' }, ({ path }) => ({
-      contents: path === 'react' ? `
+      contents: path === 'downloads' ? `
+        export const downloadBlob = (blob, name) => globalThis.shareHarness.downloadBlob(blob, name);
+        export const documentPdf = () => { throw new Error('unexpected document PDF'); };
+        export const textPdf = () => { throw new Error('unexpected text PDF'); };
+        export const downloadPackage = () => { throw new Error('unexpected package download'); };
+      ` : path === 'button' ? 'export const Button = "button";' : path === 'react' ? `
         export const useState = (...args) => globalThis.shareHarness.useState(...args);
         export const useEffect = (...args) => globalThis.shareHarness.useEffect(...args);
         export const useRef = (...args) => globalThis.shareHarness.useRef(...args);
@@ -90,13 +99,19 @@ test('emergency share waits for the button, redeems the fragment once, clears it
       });
     }
 
-    if (url === '/files/share-presign-download') {
+    if (url === '/files/share-package') {
       assert.deepEqual(body, {});
+      return Response.json({ ok: true, files: [{ id: 'users/1/opaque-key', name: original.name, content_type: original.type, size_bytes: original.size }] });
+    }
+
+    if (url === '/files/share-presign-download') {
+      assert.deepEqual(body, { file_id: 'users/1/opaque-key' });
       return Response.json({ ok: true, url: 'https://storage.test/ciphertext' });
     }
 
     assert.equal(url, '/files/share-get-contact-envelope');
-    assert.deepEqual(Object.keys(body), ['public_key']);
+    assert.deepEqual(Object.keys(body), ['file_id', 'public_key']);
+    assert.equal(body.file_id, 'users/1/opaque-key');
     assert.ok(!publicKeys.includes(body.public_key));
     publicKeys.push(body.public_key);
 
@@ -168,6 +183,7 @@ test('emergency share waits for the button, redeems the fragment once, clears it
     let first = true;
 
     globalThis.shareHarness = {
+      downloadBlob(blob, name) { downloadedBlob = blob; assert.equal(name, original.name); },
       useState(initial) {
         const i = cursor++;
         if (first) states[i] = typeof initial === 'function' ? initial() : initial;
@@ -209,34 +225,36 @@ test('emergency share waits for the button, redeems the fragment once, clears it
     assert.equal(lookups, lookupsBefore + 1);
     assert.equal(window.location.hash, '');
 
-    const downloadLink = (current) => nodes(current).find((node) => node.type === 'a' && node.props.download);
+    const unlock = buttonNamed(tree, 'Download + decrypt');
+    assert.ok(unlock, JSON.stringify(tree));
+    await unlock.props.onClick();
+    tree = render();
 
-    if (scenario) {
-      const code = scenario === 'missing_file_escrow' ? scenario : `${scenario}_failed`;
-      const shown = text(tree);
-      assert.ok(!JSON.stringify(tree).includes(code), 'raw error code must not be shown');
-      assert.ok(
-        shown.includes(scenario === 'download' ? "The download didn't finish" : "The file couldn't be prepared"),
-        shown
-      );
-      assert.ok(!downloadLink(tree));
-
-      // Retrying after redemption reuses the share session and never redeems the link again.
+    if (scenario === 'missing_file_escrow' || scenario === 'unwrap') {
+      assert.ok(text(tree).includes('Could not securely open the files'));
+      assert.ok(!JSON.stringify(tree).includes(scenario));
       failure = '';
-      const retry = buttonNamed(tree, 'Try again');
-      assert.ok(retry, JSON.stringify(tree));
-      await retry.props.onClick();
+      await buttonNamed(tree, 'Download + decrypt').props.onClick();
       tree = render();
       assert.equal(lookups, lookupsBefore + 1);
     }
 
-    const link = downloadLink(tree);
-    assert.ok(link, JSON.stringify(tree));
-    assert.equal(link.props.download, original.name);
+    const download = buttonNamed(tree, 'Download file');
+    assert.ok(download, JSON.stringify(tree));
+    downloadedBlob = null;
+    await download.props.onClick();
+    tree = render();
+    if (scenario === 'download' || scenario === 'decrypt') {
+      assert.equal(downloadedBlob, null);
+      assert.ok(text(tree).includes('Could not securely open the files'));
+      failure = '';
+      await buttonNamed(tree, 'Download file').props.onClick();
+      assert.equal(lookups, lookupsBefore + 1);
+    }
     assert.equal(await downloadedBlob.text(), await original.text());
     assert.ok(JSON.stringify(tree).includes(original.name));
   }
 
-  // 7 opens plus 4 retries after the failure scenarios, each with a fresh temporary key.
-  assert.equal(publicKeys.length, 11);
+  // 7 opens plus 2 failed key unwrap retries, each with a fresh temporary key.
+  assert.equal(publicKeys.length, 9);
 });

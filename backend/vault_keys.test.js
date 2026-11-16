@@ -9,7 +9,9 @@ const bundle = { version: 1, kdf: 'PBKDF2-SHA256', iterations: 200000, private_k
 
 test('key backup accepts only the versioned encrypted format with bounded parameters', () => {
   assert.deepEqual(validateBundle(bundle), bundle);
-  for (const patch of [{ iterations: 1 }, { version: 2 }, { private_key_format: 'raw' }, { iv: '' }, { salt: 'YQ==' }, { encrypted_private_key: 'plaintext' }, { public_key: 'a'.repeat(50000) }]) {
+  // New vault keys use 600,000 iterations; earlier ones keep 200,000.
+  assert.equal(validateBundle({ ...bundle, iterations: 600000 }).iterations, 600000);
+  for (const patch of [{ iterations: 1 }, { iterations: 300000 }, { iterations: '600000' }, { version: 2 }, { private_key_format: 'raw' }, { iv: '' }, { salt: 'YQ==' }, { encrypted_private_key: 'plaintext' }, { public_key: 'a'.repeat(50000) }]) {
     assert.throws(() => validateBundle({ ...bundle, ...patch }));
   }
   assert.equal('passphrase' in validateBundle({ ...bundle, passphrase: 'never-store-this' }), false);

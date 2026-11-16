@@ -99,7 +99,9 @@ export default function SharePage() {
     setOpenError(null);
     setStatus("Opening the secure link…");
     try {
-      await shareRequest("share-lookup", { token });
+      // A package lookup may fail after the one-use token was redeemed.
+      // Retry through the HttpOnly share session instead of spending it again.
+      await shareRequest("share-lookup", { token: linkOpened ? "" : token });
       // Remove one-time token immediately after redemption even if package lookup fails.
       window.history.replaceState(null, "", "/share" + window.location.search);
       setLinkOpened(true);
@@ -294,7 +296,7 @@ export default function SharePage() {
             for you.
           </p>
         </header>
-        {!!token && !linkOpened && (!openError || openError.canRetry) && (
+        {((!!token && !linkOpened) || openError?.canRetry) && (!openError || openError.canRetry) && (
           <div className="space-y-3 rounded-xl border p-5">
             <p className="text-sm text-muted-foreground">The link works once. After you open it, you have 20 minutes in this browser. The email was sent on behalf of the account owner.</p>
             <Button disabled={busy} onClick={openSharedFile}>{busy ? "Opening…" : openError ? "Try again" : "Open shared file"}</Button>

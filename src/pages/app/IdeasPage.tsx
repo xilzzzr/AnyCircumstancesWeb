@@ -27,7 +27,7 @@ export function IdeasPage() {
       <div className="mx-auto max-w-5xl space-y-8">
         <div>
           <div className="micro-label"><Lightbulb className="h-3 w-3" /> VAULT IDEAS</div>
-          <h1 className="mt-4 text-3xl lg:text-4xl">What should you prepare?</h1>
+          <h1 className="mt-4 text-3xl lg:text-4xl">Ideas for what to store</h1>
           <p className="mt-3 max-w-2xl text-sm text-muted-foreground">Choose a few answers for a private, on-device shortlist. Nothing is saved or sent.</p>
         </div>
 
@@ -47,7 +47,7 @@ export function IdeasPage() {
 
         <section aria-live="polite">
           <div className="mb-4 flex items-end justify-between gap-4">
-            <div><h2 className="text-xl">{complete ? "Your suggestions" : "Popular starting points"}</h2><p className="mt-1 text-xs text-muted-foreground">Upload instructions or copies of documents—never your only original.</p></div>
+            <div><h2 className="text-xl">{complete ? "Your suggestions" : "Popular starting points"}</h2><p className="mt-1 text-xs text-muted-foreground">Upload instructions or copies of documents, never your only original.</p></div>
           </div>
           <div className="grid gap-4 md:grid-cols-2">
             {suggestions.map((scenario) => scenario && (
