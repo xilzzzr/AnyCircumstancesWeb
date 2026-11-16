@@ -28,7 +28,7 @@ function liveSubscription({ status = "active", metadata = cheapPlan } = {}) {
 // Runs the real Stripe webhook handler for one event. billing_profiles may hold
 // the plan the account last opened a checkout for; the subscription's metadata
 // holds the plan that was actually paid for.
-async function runWebhook({ type, object, live = liveSubscription() }) {
+async function runWebhook({ type, object, live = liveSubscription(), retrieveError = null }) {
   const start = source.indexOf("async function stripeWebhookHandler(");
   const end = source.indexOf("\n}\n", start) + 2;
   assert.ok(start > 0 && end > start, "webhook handler not found in auth.js");
@@ -45,7 +45,7 @@ async function runWebhook({ type, object, live = liveSubscription() }) {
   };
   const stripe = {
     webhooks: { constructEvent: () => ({ id: "evt_1", type, data: { object } }) },
-    subscriptions: { retrieve: async () => live },
+    subscriptions: { retrieve: async () => { if (retrieveError) throw retrieveError; return live; } },
   };
   const refreshAggregateBillingStatus = async () => { refreshed += 1; };
   const context = {
@@ -116,6 +116,41 @@ test("a subscription update records the subscription's own plan and its item per
   const [userId, subId, status, periodEnd, ...plan] = entitlement.params;
   assert.deepEqual([userId, subId, status, ...plan], ["7", "sub_cheap", "active", 5, "monthly", "monthly"]);
   assert.equal(new Date(periodEnd).getTime(), PERIOD_END_SECONDS * 1000);
+});
+
+test("a live active subscription without verified plan metadata cannot inherit an unpaid plan", async () => {
+  const { entitlement } = await runWebhook({
+    type: "customer.subscription.updated", object: { id: "sub_cheap" },
+    live: liveSubscription({ metadata: { user_id: "7" } }),
+  });
+  assert.equal(entitlement.params[2], "inactive");
+  assert.deepEqual(entitlement.params.slice(4), [null, null, null]);
+});
+
+test("an active subscription without a period end cannot grant indefinite access through either event", async () => {
+  const live = { ...liveSubscription(), items: { data: [{ price: { unit_amount: 499 } }] } };
+  const checkout = await completeCheckout(live);
+  assert.equal(checkout.entitlement, undefined);
+  const update = await runWebhook({ type: "customer.subscription.updated", object: { id: live.id }, live });
+  assert.equal(update.entitlement.params[2], "inactive");
+});
+
+test("a missing Stripe resource never authorizes an old active event", async () => {
+  const { res, entitlement } = await runWebhook({
+    type: "customer.subscription.updated", object: liveSubscription(),
+    retrieveError: { code: "resource_missing" },
+  });
+  assert.equal(res.statusCode, 500);
+  assert.equal(entitlement, undefined);
+});
+
+test("a terminal cancellation can still revoke access if the resource is unavailable", async () => {
+  const { res, entitlement } = await runWebhook({
+    type: "customer.subscription.deleted", object: liveSubscription({ status: "canceled" }),
+    retrieveError: { code: "resource_missing" },
+  });
+  assert.equal(res.statusCode, 200);
+  assert.equal(entitlement.params[2], "inactive");
 });
 
 test("a late 'active' event cannot switch a cancelled subscription back on", async () => {

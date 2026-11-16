@@ -17,10 +17,10 @@ async function bundleWithIterations(passphrase: string, iterations: number): Pro
 }
 
 describe("vault key bundles", () => {
-  test("new vault keys use 600,000 iterations and unlock only with the right passphrase", async () => {
+  test("new vault keys stay compatible with the native app and unlock only with the right passphrase", async () => {
     const bundle = await createVaultKeyBundle("correct horse battery");
     expect(bundle.iterations).toBe(VAULT_KDF_ITERATIONS);
-    expect(VAULT_KDF_ITERATIONS).toBe(600000);
+    expect(VAULT_KDF_ITERATIONS).toBe(200000);
     await expect(unlockVaultKeyBundle(bundle, "correct horse battery")).resolves.toMatchObject({ pubSpkiB64: bundle.public_key });
     await expect(unlockVaultKeyBundle(bundle, "wrong passphrase")).rejects.toThrow("bad_passphrase");
   }, 30000);
@@ -28,6 +28,11 @@ describe("vault key bundles", () => {
   test("vault keys created earlier with 200,000 iterations still unlock", async () => {
     const bundle = await bundleWithIterations("older passphrase", 200000);
     await expect(unlockVaultKeyBundle(bundle, "older passphrase")).resolves.toMatchObject({ pubSpkiB64: bundle.public_key });
+  }, 30000);
+
+  test("stronger bundles are readable before the coordinated native rollout", async () => {
+    const bundle = await bundleWithIterations("stronger passphrase", 600000);
+    await expect(unlockVaultKeyBundle(bundle, "stronger passphrase")).resolves.toMatchObject({ pubSpkiB64: bundle.public_key });
   }, 30000);
 
   test("other iteration counts are refused", async () => {

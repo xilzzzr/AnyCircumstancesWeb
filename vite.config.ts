@@ -25,18 +25,20 @@ export default defineConfig(() => ({
   },
   plugins: [react()],
   build: {
-    rollupOptions: {
+    // Keep the same browser support as the previous Vite 6 build.
+    target: ["es2020", "edge88", "firefox78", "chrome87", "safari14"],
+    rolldownOptions: {
       output: {
-        // Rollup otherwise emits many sub-kilobyte shared icon chunks when the
+        // The bundler otherwise emits many sub-kilobyte shared icon chunks when the
         // same icon appears in multiple lazy routes. Merge only very small
         // chunks while preserving the meaningful route boundaries above them.
-        experimentalMinChunkSize: 2000,
+        codeSplitting: { minSize: 2000 },
       },
     },
   },
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      "@": path.resolve(import.meta.dirname, "./src"),
     },
   },
 }));

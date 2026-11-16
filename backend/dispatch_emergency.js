@@ -3,7 +3,7 @@ const { initializeEnvironment } = require("./environment");
 initializeEnvironment();
 
 const fs = require("fs");
-const mysql = require("mysql2/promise");
+const { createUtcPool } = require("./database");
 const nodemailer = require("nodemailer");
 const Stripe = require("stripe");
 const { emailSender, renderAnyCircumstancesEmail } = require("./emails");
@@ -71,7 +71,7 @@ function buildDbPool() {
   } else if (host.includes("rds.amazonaws.com")) {
     cfg.ssl = { ca: fs.readFileSync("/etc/ssl/certs/rds-global-bundle.pem") };
   }
-  return mysql.createPool(cfg);
+  return createUtcPool(cfg);
 }
 
 async function sendGraceReminders(pool, mail) {

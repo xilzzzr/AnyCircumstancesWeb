@@ -1,6 +1,6 @@
 const { normalizeSchedule, readSchedule, nextScheduledCheckin, nextDueAfterSave } = require("./checkin_schedule");
 const express = require("express");
-const mysql = require("mysql2/promise");
+const { createUtcPool } = require("./database");
 const fs = require("fs");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
@@ -86,7 +86,7 @@ if (sslCaPath) {
   dbPoolConfig.ssl = { ca: fs.readFileSync("/etc/ssl/certs/rds-global-bundle.pem") };
 }
 
-const pool = mysql.createPool(dbPoolConfig);
+const pool = createUtcPool(dbPoolConfig);
 
 const accessTtlSeconds = ACCESS_TOKEN_TTL_SECONDS ? Number(ACCESS_TOKEN_TTL_SECONDS) : 900;
 const refreshTtlDays = REFRESH_TOKEN_TTL_DAYS ? Number(REFRESH_TOKEN_TTL_DAYS) : 30;
@@ -683,7 +683,7 @@ const emailVerificationHandler = createEmailVerificationHandler({
 });
 // In a browser, GET shows a Confirm button and the POST from it verifies.
 router.get(["/verify-email", "/verify-email/browser"], asyncHandler(emailVerificationHandler));
-router.post("/verify-email/browser", asyncHandler(emailVerificationHandler));
+router.post(["/verify-email", "/verify-email/browser"], asyncHandler(emailVerificationHandler));
 
 router.post(
   "/verify-email-code",
@@ -3306,7 +3306,7 @@ async function stripeWebhookHandler(req, res) {
       // Only grant access once Stripe says the subscription is active or
       // trialing. A checkout can complete with the first payment still pending
       // (bank debits); customer.subscription.updated grants access when it clears.
-      const paid = stripeAccess(sub?.status).entitlementStatus === "active";
+      const paid = stripeAccess(sub?.status).entitlementStatus === "active" && subscriptionPeriodEnd(sub) !== null;
 
       if (userId && subscriptionId && plan && paid) {
         await pool.query(

@@ -45,7 +45,9 @@ function createStripeSubscriptionSync({ pool, stripe, refreshAggregateBillingSta
     try {
       subscription = await stripe.subscriptions.retrieve(id);
     } catch (error) {
-      if (String(error?.code || "") !== "resource_missing" || !fallback) throw error;
+      // A missing resource never authorizes an old "active" event. Only a
+      // terminal cancellation payload is safe to apply without a live read.
+      if (String(error?.code || "") !== "resource_missing" || fallback?.status !== "canceled") throw error;
       subscription = fallback;
     }
 
@@ -62,6 +64,13 @@ function createStripeSubscriptionSync({ pool, stripe, refreshAggregateBillingSta
     const access = stripeAccess(subscription?.status);
     const periodEnd = subscriptionPeriodEnd(subscription);
     const plan = planFromSubscription(subscription);
+    if (access.entitlementStatus === "active" && (!plan || !periodEnd)) {
+      // Never fall back to the last checkout's plan, or grant access forever
+      // because the paid subscription's plan or expiration is missing.
+      console.error("[STRIPE_SUBSCRIPTION_INCOMPLETE]", { subscriptionId: id, userId });
+      access.entitlementStatus = "inactive";
+      access.profileStatus = "past_due";
+    }
 
     await pool.query("UPDATE billing_profiles SET status = ?, current_period_end = ? WHERE user_id = ?", [
       access.profileStatus,

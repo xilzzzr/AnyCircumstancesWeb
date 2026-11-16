@@ -26,7 +26,7 @@ async function fixture(t, row, { unavailable = false, queryError = false } = {})
     consumeToken: consumeEmailVerificationByTokenOnly, publicWebBaseUrl: 'https://example.com', logError() {}
   });
   app.get(['/verify-email', '/verify-email/browser'], handler);
-  app.post('/verify-email/browser', handler);
+  app.post(['/verify-email', '/verify-email/browser'], handler);
   const server = app.listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
@@ -71,15 +71,18 @@ test('malformed token never opens a transaction', async t => {
   }
   assert.deepEqual(calls, []);
 });
-test('legacy browser links show the Confirm button; JSON clients retain status and payload', async t => {
-  const { request } = await fixture(t, freshRow());
-  assert.deepEqual(await (await request('/verify-email', 'application/json', 'a'.repeat(64), 'GET')).json(), { ok: true });
-  const used = await request('/verify-email', '*/*', 'a'.repeat(64), 'GET');
-  assert.equal(used.status, 400);
-  assert.deepEqual(await used.json(), { ok: false, error: 'already_used' });
+test('legacy links never verify on GET or HEAD, regardless of content negotiation', async t => {
+  const { request, calls } = await fixture(t, freshRow());
+  for (const accept of ['application/json', '*/*']) {
+    assert.deepEqual(await (await request('/verify-email', accept, 'a'.repeat(64), 'GET')).json(), { ok: true, confirmation_required: true });
+    assert.equal((await request('/verify-email', accept, 'a'.repeat(64), 'HEAD')).status, 200);
+  }
   const legacy = await request('/verify-email', 'text/html', 'a'.repeat(64), 'GET');
   assert.equal(legacy.status, 200);
   assert.match(await legacy.text(), /action="\/auth\/verify-email\/browser\?token=/);
+  assert.deepEqual(calls, []);
+  assert.deepEqual(await (await request('/verify-email', 'application/json')).json(), { ok: true });
+  assert.equal(calls.filter(x => x.startsWith('UPDATE users')).length, 1);
 });
 test('upstream rate limits and failures redirect browsers but preserve API errors', async t => {
   const { verificationBrowserErrors } = require('./email_verification_route');

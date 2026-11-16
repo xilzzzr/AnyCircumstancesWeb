@@ -190,16 +190,23 @@ async function createShareLinks(pool, contactId, userId, fileIds) {
   const tokenHashes = [];
   const deliveryGroupId = crypto.randomUUID();
 
-  for (const fileId of fileIds) {
-    if (!validIds.has(String(fileId))) continue;
-    const token = crypto.randomBytes(32).toString("hex");
-    const tokenHash = sha256Hex(token);
-    await pool.query(
-      "INSERT INTO contact_file_share_tokens (contact_id, file_id, token_hash, expires_at, delivery_group_id) VALUES (?, ?, ?, ?, ?)",
-      [String(contactId), String(fileId), tokenHash, shareExpiresAt(), deliveryGroupId]
-    );
-    tokenHashes.push(tokenHash);
-    links.push(publicAppBase() + "/share#token=" + encodeURIComponent(token));
+  try {
+    for (const fileId of fileIds) {
+      if (!validIds.has(String(fileId))) continue;
+      const token = crypto.randomBytes(32).toString("hex");
+      const tokenHash = sha256Hex(token);
+      await pool.query(
+        "INSERT INTO contact_file_share_tokens (contact_id, file_id, token_hash, expires_at, delivery_group_id) VALUES (?, ?, ?, ?, ?)",
+        [String(contactId), String(fileId), tokenHash, shareExpiresAt(), deliveryGroupId]
+      );
+      tokenHashes.push(tokenHash);
+      links.push(publicAppBase() + "/share#token=" + encodeURIComponent(token));
+    }
+  } catch (error) {
+    // A later INSERT can fail after earlier tokens were already persisted.
+    // The caller has no result yet, so clean these up here before retrying.
+    await revokeUnsentShareLinks(pool, contactId, tokenHashes).catch(() => null);
+    throw error;
   }
   return { links, tokenHashes };
 }
@@ -227,12 +234,12 @@ async function markDispatchDelivered(pool, dispatchId) {
 // failed with its retries used up, so it is never picked up again.
 const CANCELLED_PREFIX = "cancelled:";
 
-async function cancelDispatch(pool, dispatchId, reason) {
+async function cancelDispatch(pool, dispatchId, reason, attempt) {
   await pool.query(
     `UPDATE verification_emergency_contact_dispatches
      SET status='failed', attempts=?, last_error=?
-     WHERE id = ? AND status='processing'`,
-    [MAX_ATTEMPTS, `${CANCELLED_PREFIX}${reason}`.slice(0, 255), dispatchId]
+     WHERE id = ? AND status='processing' AND attempts = ?`,
+    [MAX_ATTEMPTS, `${CANCELLED_PREFIX}${reason}`.slice(0, 255), dispatchId, attempt]
   );
 }
 
@@ -260,6 +267,17 @@ async function scheduledReleaseCancelled(pool, dispatch) {
   );
   const lastCheckin = rows?.[0]?.last_checkin_at;
   return Boolean(lastCheckin && new Date(lastCheckin).getTime() > new Date(dispatch.due_at).getTime());
+}
+
+async function dispatchStillCurrent(pool, dispatch, attempt) {
+  const [rows] = await pool.query(
+    `SELECT d.id FROM verification_emergency_contact_dispatches d
+     JOIN emergency_contacts c ON c.id = d.contact_id AND c.user_id = d.user_id
+     WHERE d.id = ? AND d.status = 'processing' AND d.attempts = ?
+       AND c.verified_at IS NOT NULL AND BINARY c.email = BINARY ?`,
+    [dispatch.id, attempt, String(dispatch.email)]
+  );
+  return Boolean(rows?.length);
 }
 
 async function maybeMarkDispatchComplete(pool, userId, dueAt) {
@@ -414,20 +432,28 @@ async function deliverPendingEmergencyDispatches(pool, { userId = null, dueAt = 
 
     // Re-check right before sending: the owner may have checked in since this
     // scheduled release was queued, or a retry may come hours later.
-    if (await scheduledReleaseCancelled(pool, dispatch)) {
-      await cancelDispatch(pool, dispatch.id, "checked_in");
-      console.warn("[EMERGENCY_DELIVERY_CANCELLED]", { ...logContext, reason: "checked_in" });
-      continue;
-    }
-
     let created = { links: [], tokenHashes: [] };
     let sent = false;
     try {
+      if (await scheduledReleaseCancelled(pool, dispatch)) {
+        await cancelDispatch(pool, dispatch.id, "checked_in", attempt);
+        console.warn("[EMERGENCY_DELIVERY_CANCELLED]", { ...logContext, reason: "checked_in" });
+        continue;
+      }
       created = await createShareLinks(pool, dispatch.contact_id, dispatch.user_id, fileIds);
       if (!created.links.length) {
         // Every file was deleted or unassigned since the release was queued.
-        await cancelDispatch(pool, dispatch.id, "no_assigned_files");
+        await cancelDispatch(pool, dispatch.id, "no_assigned_files", attempt);
         console.warn("[EMERGENCY_DELIVERY_CANCELLED]", { ...logContext, reason: "no_assigned_files" });
+        continue;
+      }
+
+      // Link creation performs multiple database round trips. Re-check the
+      // release and recipient after those awaits, before handing mail to SMTP.
+      if (await scheduledReleaseCancelled(pool, dispatch) || !await dispatchStillCurrent(pool, dispatch, attempt)) {
+        await revokeUnsentShareLinks(pool, dispatch.contact_id, created.tokenHashes);
+        await cancelDispatch(pool, dispatch.id, "release_changed", attempt);
+        console.warn("[EMERGENCY_DELIVERY_CANCELLED]", { ...logContext, reason: "release_changed" });
         continue;
       }
 
@@ -449,8 +475,8 @@ async function deliverPendingEmergencyDispatches(pool, { userId = null, dueAt = 
       sent = true;
 
       await markDispatchDelivered(pool, dispatch.id);
-      delivered += 1;
       await maybeMarkDispatchComplete(pool, dispatch.user_id, dispatch.due_at);
+      delivered += 1;
     } catch (error) {
       if (sent) {
         // The email went out, so its links must keep working: never revoke

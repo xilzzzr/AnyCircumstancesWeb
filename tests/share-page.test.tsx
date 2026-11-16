@@ -26,6 +26,23 @@ const lookupOk = { body: { ok: true, file: { id: 'users/1/opaque-key', content_t
 beforeEach(() => { window.history.replaceState(null, '', '/'); });
 
 describe('emergency share landing', () => {
+  test('package loading can be retried through the session after redemption', async () => {
+    const calls: { url: string; body: unknown }[] = [];
+    let packageAttempts = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      calls.push({ url: String(url), body: JSON.parse(String(init?.body)) });
+      if (String(url) === '/files/share-lookup') return Response.json({ ok: true });
+      if (++packageAttempts === 1) return Response.json({ ok: false, error: 'server_error' }, { status: 500 });
+      return Response.json({ ok: true, files: [{ id: 'users/1/letter', name: 'Letter', content_type: 'application/pdf', size_bytes: 64 }] });
+    });
+    renderShare();
+    fireEvent.click(screen.getByRole('button', { name: 'Open shared file' }));
+    await screen.findByRole('heading', { name: "The file couldn't be prepared" });
+    expect(window.location.hash).toBe('');
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    await screen.findByRole('button', { name: 'Download + decrypt' });
+    expect(calls.filter(c => c.url === '/files/share-lookup').map(c => c.body)).toEqual([{ token }, { token: '' }]);
+  });
   test('nothing is redeemed until the recipient presses Open shared file', async () => {
     const fetchMock = mockServer({ '/files/share-lookup': { status: 410, body: { ok: false, error: 'token_already_redeemed' } } });
     renderShare();

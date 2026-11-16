@@ -56,8 +56,10 @@ function createEmailVerificationHandler({ pool, consumeToken, publicWebBaseUrl, 
       : res.status(code).json(payload);
     const token = String(req.query?.token || '');
     if (!/^[A-Za-z0-9_-]{20,200}$/.test(token)) return finish('invalid', 400, { ok: false, error: 'invalid_token' });
-    if (browser && req.method === 'GET') {
-      return res.status(200).type('html').send(renderConfirmPage(token));
+    if (req.method === 'GET' || req.method === 'HEAD') {
+      return browser
+        ? res.status(200).type('html').send(renderConfirmPage(token))
+        : res.json({ ok: true, confirmation_required: true });
     }
     let conn;
     try {

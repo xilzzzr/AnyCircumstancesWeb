@@ -5,6 +5,13 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    # JSX accessibility and hooks plugins still require ESLint 9. Upgrade the
+    # whole lint stack together once they support ESLint 10.
+    ignore:
+      - dependency-name: "@eslint/js"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
     groups:
       frontend-security-updates:
         # Keep breaking major upgrades in separate PRs for compatibility review.

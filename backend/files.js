@@ -282,7 +282,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const fileId = String(req.body?.file_id || "");
     const alg = String(req.body?.alg || "").trim();
-    const encKeyB64 = String(req.body?.enc_key_b64 || "").trim();
+    let encKeyB64 = String(req.body?.enc_key_b64 || "").trim();
     const keyRef = String(req.body?.key_ref || "").trim();
 
     if (!fileId) return res.status(400).json({ ok: false, error: "missing_file_id" });
@@ -292,6 +292,10 @@ router.post(
 
     if (alg !== "rsa-oaep-sha256") return res.status(400).json({ ok: false, error: "invalid_alg" });
     if (!isBoundedBase64(encKeyB64)) return res.status(400).json({ ok: false, error: "invalid_enc_key" });
+    // Compare ciphertext bytes, not their spelling: base64url, omitted padding
+    // and non-zero pad bits can all represent the same RSA ciphertext.
+    encKeyB64 = Buffer.from(encKeyB64, "base64").toString("base64");
+    if (!encKeyB64) return res.status(400).json({ ok: false, error: "invalid_enc_key" });
     if (!keyRef || keyRef.length > 255) return res.status(400).json({ ok: false, error: "invalid_key_ref" });
 
     const currentKeyRef = escrowKeyId();
@@ -309,7 +313,10 @@ router.post(
     // (for example from a database dump) to have it unwrapped through their
     // own file and share link.
     const [reused] = await pool.query(
-      "SELECT file_id FROM file_key_escrows WHERE enc_key_b64 = ? AND file_id <> ? LIMIT 1",
+      `SELECT file_id FROM file_key_escrows
+       WHERE FROM_BASE64(RPAD(REPLACE(REPLACE(enc_key_b64, '-', '+'), '_', '/'),
+         CEIL(LENGTH(enc_key_b64) / 4) * 4, '=')) = FROM_BASE64(?)
+         AND file_id <> ? LIMIT 1`,
       [encKeyB64, fileId]
     );
     if (reused?.length) {

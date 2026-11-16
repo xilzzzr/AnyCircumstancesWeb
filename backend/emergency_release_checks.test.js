@@ -28,9 +28,10 @@ function dispatchRow(overrides = {}) {
 }
 
 // A pool that answers the delivery loop's queries and records what it did.
-function makePool({ dispatch, lastCheckinAt = null, assigned = ["users/1/a", "users/1/b"], failDeliveredUpdate = false }) {
+function makePool({ dispatch, lastCheckinAt = null, assigned = ["users/1/a", "users/1/b"], failDeliveredUpdate = false, failGroupUpdate = false, failSecondToken = false, checkInDuringLinkCreation = false, contactChanged = false }) {
   const log = { tokens: 0, revoked: 0, cancelled: [], failed: [], delivered: 0 };
   const query = async (sql, params = []) => {
+    if (sql.includes("SELECT d.id FROM verification_emergency_contact_dispatches")) return [contactChanged ? [] : [{ id: dispatch.id }]];
     if (sql.includes("FROM verification_emergency_contact_dispatches d")) return [[dispatch]];
     if (sql.includes("SET status='processing'")) return [{ affectedRows: 1 }];
     if (sql.includes("SELECT last_checkin_at FROM verification_settings")) return [[{ last_checkin_at: lastCheckinAt }]];
@@ -38,14 +39,22 @@ function makePool({ dispatch, lastCheckinAt = null, assigned = ["users/1/a", "us
       const requested = params.slice(2);
       return [requested.filter((id) => assigned.includes(id)).map((id) => ({ id }))];
     }
-    if (sql.startsWith("INSERT INTO contact_file_share_tokens")) { log.tokens += 1; return [{}]; }
+    if (sql.startsWith("INSERT INTO contact_file_share_tokens")) {
+      if (failSecondToken && log.tokens === 1) throw new Error("db_insert_failed");
+      log.tokens += 1;
+      if (checkInDuringLinkCreation) lastCheckinAt = new Date(due.getTime() + 60000);
+      return [{}];
+    }
     if (sql.includes("SET status='delivered'")) {
       if (failDeliveredUpdate) { failDeliveredUpdate = false; throw new Error("db_down"); }
       log.delivered += 1;
       return [{ affectedRows: 1 }];
     }
     if (sql.includes("SUM(status = 'delivered')")) return [[{ delivered_count: 1, total_count: 1 }]];
-    if (sql.startsWith("INSERT IGNORE INTO verification_emergency_dispatches")) return [{}];
+    if (sql.startsWith("INSERT IGNORE INTO verification_emergency_dispatches")) {
+      if (failGroupUpdate) throw new Error("db_group_update_failed");
+      return [{}];
+    }
     if (sql.startsWith("DELETE FROM contact_file_share_tokens")) { log.revoked += 1; return [{}]; }
     if (sql.includes("SET status='failed', attempts=?")) { log.cancelled.push(params[1]); return [{}]; }
     if (sql.includes("SET status='failed', last_error=?")) { log.failed.push(params[0]); return [{}]; }
@@ -111,4 +120,36 @@ test("changing a contact cancels deliveries queued for them", async () => {
   assert.equal(calls.length, 1);
   assert.match(calls[0].sql, /WHERE contact_id = \? AND status IN \('pending','failed','processing'\)/);
   assert.deepEqual(calls[0].params.slice(1), ["cancelled:contact_email_changed", "7"]);
+});
+
+test("a check-in while links are being created cancels the send and revokes those links", async () => {
+  const pool = makePool({ dispatch: dispatchRow(), checkInDuringLinkCreation: true });
+  await deliverPendingEmergencyDispatches(pool, {});
+  assert.equal(sentMail.length, 0);
+  assert.equal(pool.log.revoked, 1);
+  assert.deepEqual(pool.log.cancelled, ["cancelled:release_changed"]);
+});
+
+test("a recipient changed after the delivery was claimed does not receive mail", async () => {
+  const pool = makePool({ dispatch: dispatchRow({ reason: "panic_checkin" }), contactChanged: true });
+  await deliverPendingEmergencyDispatches(pool, {});
+  assert.equal(sentMail.length, 0);
+  assert.equal(pool.log.revoked, 1);
+});
+
+test("partial link creation cleans up tokens before retrying", async () => {
+  const pool = makePool({ dispatch: dispatchRow(), failSecondToken: true });
+  const out = await deliverPendingEmergencyDispatches(pool, {});
+  assert.equal(sentMail.length, 0);
+  assert.equal(pool.log.tokens, 1);
+  assert.equal(pool.log.revoked, 1);
+  assert.equal(out.failed, 1);
+});
+
+test("failure recording group completion counts delivered mail once and keeps links", async () => {
+  const pool = makePool({ dispatch: dispatchRow(), failGroupUpdate: true });
+  const out = await deliverPendingEmergencyDispatches(pool, {});
+  assert.equal(sentMail.length, 1);
+  assert.equal(out.delivered, 1);
+  assert.equal(pool.log.revoked, 0);
 });

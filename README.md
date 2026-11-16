@@ -5,12 +5,14 @@ scheduled check-ins and email delivery to chosen recipients.
 
 ## Local development
 
-Requires Node.js and npm.
+Requires Node.js 22.13+ in the 22 line, or Node.js 24+, and npm.
 
 ```sh
 npm ci
 npm run dev        # website on http://localhost:8080
 npm test           # frontend unit tests
+npm run typecheck  # frontend and build configuration types
+npm run test:crypto # encryption and recipient-share regressions
 npm run build      # production build with prerendered public pages
 ```
 
@@ -27,6 +29,8 @@ The backend lives in `backend/` and has its own `package.json` (`npm ci --prefix
 
 The site is not deployed from GitHub. See `deploy/PRERENDER_AND_CADDY.md` for the build,
 prerender and Caddy routing steps.
+The combined open-PR review and deployment requirements are documented in
+`docs/RELEASE_REVIEW_2026-11-16.md`.
 
 ## Apple App Store subscriptions
 

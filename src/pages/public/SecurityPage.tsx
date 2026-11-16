@@ -113,7 +113,7 @@ const SecurityPage = () => (
           <li>
             <strong className="text-foreground">Your vault key is protected by your vault passphrase.</strong> The passphrase is
             separate from your account password and is turned into an encryption key in your browser (PBKDF2 with
-            SHA-256: 600,000 iterations for new vaults, 200,000 for vaults created earlier). We store your vault key only in
+            SHA-256: 200,000 iterations, compatible with our web and iOS apps). We store your vault key only in
             that encrypted form, which lets you unlock your vault on a new device.
           </li>
           <li>

@@ -12,7 +12,7 @@ const {
 } = require("./environment");
 
 test("production warns, without refusing to start, when the old escrow key is still in the API environment", () => {
-  const warnings = backendEnvironmentWarnings({ NODE_ENV: "production", LEGACY_ESCROW_PRIVATE_KEY_PEM: "-----BEGIN PRIVATE KEY-----" });
+  const warnings = backendEnvironmentWarnings({ NODE_ENV: "production", LEGACY_ESCROW_PRIVATE_KEY_PEM: "test-only-legacy-key-placeholder" });
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /LEGACY_ESCROW_PRIVATE_KEY_PEM/);
   assert.doesNotMatch(warnings[0], /BEGIN PRIVATE KEY/);

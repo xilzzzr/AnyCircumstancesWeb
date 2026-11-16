@@ -17,11 +17,11 @@ export function randomBytes(n: number) {
   return b;
 }
 
-// New vault keys use 600,000 PBKDF2-SHA256 iterations (current OWASP guidance).
-// Keys created earlier keep 200,000: a bundle is never re-wrapped, because the
-// server refuses to replace a stored vault key.
-export const VAULT_KDF_ITERATIONS = 600000;
-const SUPPORTED_ITERATIONS = new Set([200000, VAULT_KDF_ITERATIONS]);
+// The current native app can only open 200,000-iteration bundles. Keep creating
+// interoperable bundles until its stronger-KDF reader has shipped. Accept both
+// formats here and on the server so that rollout can happen without key loss.
+export const VAULT_KDF_ITERATIONS = 200000;
+const SUPPORTED_ITERATIONS = new Set([200000, 600000]);
 
 async function pbkdf2Key(passphrase: string, salt: Uint8Array, usages: KeyUsage[], iterations: number) {
   const enc = new TextEncoder();

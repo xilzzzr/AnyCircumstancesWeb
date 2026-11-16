@@ -22,7 +22,7 @@ async function saveEscrow(encKeyB64) {
   vm.runInNewContext(
     `${slice("function isBoundedBase64(", "\n}\n")}\n}\n${slice('router.post(\n  "/save-file-escrow"', "\n\nrouter.")}`,
     {
-      String, console: { warn: () => {}, log: () => {}, error: () => {} },
+      String, Buffer, console: { warn: () => {}, log: () => {}, error: () => {} },
       router: { post: (path, ...fns) => { handler = fns[fns.length - 1]; } },
       requireUser: pass, requirePaid: pass, requireVaultAuthorization: pass,
       asyncHandler: (fn) => fn,
@@ -30,7 +30,7 @@ async function saveEscrow(encKeyB64) {
       getPool: () => ({
         query: async (sql, params) => {
           if (sql.startsWith("SELECT id FROM files")) return [[{ id: params[0] }]];
-          if (sql.includes("FROM file_key_escrows WHERE enc_key_b64 = ?")) {
+          if (sql.includes("FROM file_key_escrows")) {
             return [params[0] === victimCiphertext ? [{ file_id: "users/1/victim-file" }] : []];
           }
           writes.push(sql);
@@ -49,6 +49,16 @@ test("an escrowed key copied from another file is refused", async () => {
   assert.equal(res.statusCode, 409);
   assert.equal(res.body.error, "escrow_rejected");
   assert.deepEqual(writes, []);
+});
+
+test("alternate encodings of an existing escrow cannot bypass the reuse check", async () => {
+  const nonzeroPadBits = victimCiphertext.slice(0, -3) + "x==";
+  for (const encoded of [victimCiphertext.replace(/=+$/, ""), nonzeroPadBits]) {
+    assert.deepEqual(Buffer.from(encoded, "base64"), Buffer.from(victimCiphertext, "base64"));
+    const { res, writes } = await saveEscrow(encoded);
+    assert.equal(res.statusCode, 409);
+    assert.deepEqual(writes, []);
+  }
 });
 
 test("a fresh escrowed key is saved", async () => {
