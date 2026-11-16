@@ -1,7 +1,14 @@
 # Merge these handlers into the existing HTTPS site block after preserving any
 # production-specific logging, headers, TLS, and upstream settings. The backend
 # matcher reflects the route prefixes exposed by backend/server.js.
-anycircumstances.com, www.anycircumstances.com {
+
+# Serve the site from one address only. Without this, www.anycircumstances.com
+# shows a full second copy of every page to Google.
+www.anycircumstances.com {
+	redir https://anycircumstances.com{uri} permanent
+}
+
+anycircumstances.com {
 	encode zstd gzip
 	root * /var/www/anycircumstances/dist
 

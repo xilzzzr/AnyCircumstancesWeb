@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { buildSitemap } from "./sitemap.mjs";
 
 const projectRoot = resolve(import.meta.dirname, "..");
 const distDir = resolve(projectRoot, "dist");
@@ -75,8 +76,7 @@ function outputPath(pathname) {
 }
 
 function sitemap(routes) {
-  const urls = routes.map(({ path }) => `  <url><loc>${siteUrl}${path}</loc></url>`).join("\n");
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`;
+  return buildSitemap(routes, siteUrl);
 }
 
 async function main() {

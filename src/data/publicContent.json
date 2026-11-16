@@ -1,7 +1,7 @@
 {
   "switch": {
-    "title": "Online Dead Man's Switch for Documents | AnyCircumstances",
-    "description": "Release documents to chosen recipients if you stop checking in. Encrypted uploads, email reminders, a grace period, and private file access.",
+    "title": "Dead Man's Switch Email for Your Documents | AnyCircumstances",
+    "description": "If you stop checking in, the people you choose get an email with secure links to your encrypted documents. Reminders and a grace period come first.",
     "eyebrow": "DIGITAL DEAD MAN'S SWITCH",
     "h1": "An Online Dead Man's Switch for Your Documents",
     "intro": "AnyCircumstances is an online dead man's switch that releases your documents to the people you choose if you stop checking in and your grace period expires. Upload encrypted files, assign them to trusted recipients, and set a check-in schedule. Recipients receive secure access links by email when your release conditions are met.",

@@ -535,7 +535,7 @@ export const guides: Guide[] = [
   {
     "slug": "dead-mans-switch-email",
     "title": "How a Dead Man's Switch Email Works",
-    "seoTitle": "Dead Man's Switch Email: How Automatic Check-Ins Work | AnyCircumstances",
+    "seoTitle": "How a Dead Man's Switch Email Works, Step by Step",
     "description": "Learn how a dead man's switch email works, why check-ins and grace periods matter, and how trusted recipients can be contacted if you stop responding.",
     "intro": "A dead man's switch email is a system designed to contact someone if you stop responding. A careful system does more than schedule one message for the future. It expects you to check in, reminds you when a check-in is due, gives you extra time if you miss one, and only starts recipient delivery after the full trigger conditions are met.",
     "published": "2026-09-08",
@@ -712,7 +712,7 @@ export const guides: Guide[] = [
   {
     "slug": "proof-of-life-protocol",
     "title": "What Is a Proof of Life Protocol?",
-    "seoTitle": "Proof of Life Protocol: How Digital Check-Ins Work | AnyCircumstances",
+    "seoTitle": "What Is a Proof of Life Protocol? How Check-Ins Work",
     "description": "Learn what a proof-of-life protocol is, how recurring digital check-ins work, and how missed check-ins can trigger a grace period and conditional release.",
     "intro": "A proof-of-life protocol is a process that requires a person to periodically confirm that they are still able to respond. In a digital system, that confirmation can be a recurring check-in. If the expected check-in does not happen, the system can begin a predefined escalation process.",
     "published": "2026-09-08",
