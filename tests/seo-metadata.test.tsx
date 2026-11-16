@@ -2,6 +2,10 @@ import { describe, expect, test } from "vitest";
 import { prerenderRoutes } from "@/seo/prerenderRoutes";
 // @ts-expect-error -- plain ESM build script without type declarations
 import { buildSitemap } from "../scripts/sitemap.mjs";
+// @ts-expect-error -- plain ESM build script without type declarations
+import { redirectPage, redirects } from "../scripts/redirects.mjs";
+import { guides } from "@/data/guides";
+import content from "@/data/publicContent.json";
 
 const SITE = "https://anycircumstances.com";
 const schemaTypes = (path: string) => {
@@ -38,6 +42,27 @@ describe("search metadata", () => {
     expect(page?.title).toMatch(/^Dead Man's Switch Email/);
     expect(guide?.title).toMatch(/^How a Dead Man's Switch Email Works/);
     expect(page?.title).not.toBe(guide?.title);
+  });
+
+  test("moved pages point at a real page, and nothing links to the old address", () => {
+    const paths = new Set(prerenderRoutes.map((r) => r.path));
+    const allLinks = JSON.stringify([guides, content]);
+    for (const redirect of redirects as Array<{ from: string; to: string; title: string }>) {
+      expect(paths.has(redirect.to), redirect.to).toBe(true);
+      expect(paths.has(redirect.from), redirect.from).toBe(false);
+      expect(allLinks).not.toContain(`"${redirect.from}"`);
+      const html: string = redirectPage(redirect, SITE);
+      expect(html).toContain(`<link rel="canonical" href="${SITE}${redirect.to}">`);
+      expect(html).toContain(`<meta http-equiv="refresh" content="0; url=${redirect.to}">`);
+    }
+  });
+
+  test("the digital vault cost guide lists the real prices", () => {
+    const guide = guides.find((g) => g.slug === "digital-vault-cost");
+    const text = JSON.stringify(guide);
+    for (const price of ["$4.99", "$7.99", "$12.99", "$17.99", "$22.99", "$29.99", "+$1.99", "+$2.99", "$6.98", "$69.80"]) {
+      expect(text).toContain(price);
+    }
   });
 
   test("the sitemap lists every page and gives guides their real last-updated date", () => {
