@@ -827,6 +827,12 @@ router.post(
     try {
       await conn.beginTransaction();
       if (userId) {
+        // A signed-out shared device must stop receiving the previous user's
+        // reminders, and must be able to register for a different account.
+        const deviceToken = String(req.body?.deviceToken || "").toLowerCase();
+        if (/^[0-9a-f]{64,255}$/.test(deviceToken)) {
+          await conn.query("DELETE FROM user_device_tokens WHERE user_id = ? AND token = ?", [userId, deviceToken]);
+        }
         await conn.query(
           "UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = ? AND revoked_at IS NULL",
           [userId]

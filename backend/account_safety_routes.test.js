@@ -72,6 +72,27 @@ test("an expired refresh token still rolls back", async () => {
   assert.equal(log.includes("commit"), false);
 });
 
+test("native logout removes only the current user's specified device token", async () => {
+  for (const token of ["a".repeat(64), "invalid", undefined]) {
+    const queries = [];
+    const conn = connection([]);
+    conn.query = async (sql, params) => { queries.push([sql, params]); return [{}]; };
+    const handler = loadRoute(slice('router.post(\n  "/logout"', "\nrouter.post("), {
+      getAccessPayload: () => ({ sub: "7" }),
+      pool: { getConnection: async () => conn },
+    });
+    const res = response();
+    await handler({ cookies: {}, body: { deviceToken: token } }, res);
+    assert.equal(res.body.ok, true);
+    const deletions = queries.filter(([sql]) => sql.startsWith("DELETE FROM user_device_tokens"));
+    assert.equal(deletions.length, token?.length === 64 ? 1 : 0);
+    if (deletions.length) {
+      assert.match(deletions[0][0], /WHERE user_id = \? AND token = \?/);
+      assert.deepEqual(Array.from(deletions[0][1]), ["7", token]);
+    }
+  }
+});
+
 const lockedUser = {
   id: "7", email: "owner@example.com", password_hash: "hash", email_verified_at: new Date(),
   status: "active", session_version: 2, duress_locked_until: new Date(Date.now() + 3600_000),
