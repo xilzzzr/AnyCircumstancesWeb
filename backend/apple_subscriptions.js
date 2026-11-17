@@ -1,6 +1,7 @@
 const fs = require("fs");
 const crypto = require("crypto");
 const { SignedDataVerifier, Environment } = require("@apple/app-store-server-library");
+const { sandboxAllowed, assertSandboxTransactionAllowed } = require("./apple_sandbox_policy");
 
 const ACTIVE_NOTIFICATION_TYPES = new Set([
   "SUBSCRIBED",
@@ -12,10 +13,6 @@ const ACTIVE_NOTIFICATION_TYPES = new Set([
   "RENEWAL_EXTENDED",
 ]);
 const INACTIVE_NOTIFICATION_TYPES = new Set(["EXPIRED", "REFUND", "REVOKE"]);
-
-function sandboxAllowed() {
-  return process.env.NODE_ENV !== "production" && String(process.env.ALLOW_APPLE_SANDBOX || "").toLowerCase() === "true";
-}
 
 function configuredProductIds() {
   return new Set(
@@ -80,16 +77,16 @@ async function verifyNotification(signedPayload) {
 }
 
 async function verifyTransaction(signedTransactionInfo, environmentHint) {
-  const wantsSandbox = String(environmentHint || "").toLowerCase() === "sandbox";
-  const environments = wantsSandbox && sandboxAllowed()
-    ? [Environment.SANDBOX]
-    : sandboxAllowed()
+  const environments = sandboxAllowed()
       ? [Environment.PRODUCTION, Environment.SANDBOX]
       : [Environment.PRODUCTION];
   let lastError;
   for (const environment of environments) {
     try {
-      return await buildVerifier(environment).verifyAndDecodeTransaction(signedTransactionInfo);
+      const decoded = await buildVerifier(environment).verifyAndDecodeTransaction(signedTransactionInfo);
+      const transaction = { ...decoded, environment };
+      assertSandboxTransactionAllowed(transaction);
+      return transaction;
     } catch (error) {
       lastError = error;
     }
@@ -134,6 +131,7 @@ async function findUserForTransaction(pool, transaction) {
 }
 
 async function upsertAppleEntitlement(pool, userId, transaction, notificationType, environment) {
+  assertSandboxTransactionAllowed(transaction);
   assertSupportedProduct(transaction);
   const originalId = String(transaction.originalTransactionId || "");
   if (!originalId) throw new Error("missing_original_transaction_id");
